@@ -1,0 +1,16 @@
+{
+  "name": "dawg",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "qtbase",
+    "ffmpeg",
+    {
+      "name": "opencv4",
+      "default-features": false,
+      "features": [
+        "ffmpeg"
+      ]
+    }
+  ]
+}
+
