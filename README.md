@@ -1,5 +1,7 @@
 # dawg
 
+![dawg logo](assets/logo.png)
+
 Native desktop foundation for a motion-tracked audio tool.
 
 ## First milestone
@@ -53,6 +55,26 @@ cmake --preset windows-msvc
 cmake --build --preset windows-msvc-debug
 ```
 
+## Easiest way to start
+
+If you are new to native C++ setup on Windows, use the launcher in the repo root:
+
+- double-click `Open DAWG.cmd`
+
+What it does:
+
+- checks for Git, CMake, and Visual Studio C++ tools
+- clones `vcpkg` into `.tools/vcpkg` on first run
+- installs/builds the required libraries through the manifest
+- builds the app
+- opens `dawg.exe`
+
+Notes:
+
+- the first run can take a long time because `Qt`, `OpenCV`, and `FFmpeg` may need to build
+- after the first build, launching is much faster
+- if something required is missing, the script stops with a plain-English error
+
 ## Current behavior
 
 - `Open Video` loads a clip through `cv::VideoCapture`
@@ -74,4 +96,3 @@ cmake --build --preset windows-msvc-debug
 2. Add a track inspector with confidence state, retrack, and delete actions.
 3. Attach an audio asset to each tracked target and map screen position to panning/spatial placement.
 4. Add a timeline with keyframes so a user can start or stop tracking from explicit points in the clip.
-

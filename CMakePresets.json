@@ -11,6 +11,10 @@
       "displayName": "Windows MSVC + vcpkg",
       "generator": "Visual Studio 17 2022",
       "binaryDir": "${sourceDir}/build/windows-msvc",
+      "architecture": {
+        "value": "x64",
+        "strategy": "set"
+      },
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
@@ -31,4 +35,3 @@
     }
   ]
 }
-
