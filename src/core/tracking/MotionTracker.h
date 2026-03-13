@@ -14,6 +14,10 @@ public:
     void reset();
     bool hasTrack(const QUuid& trackId) const;
     bool updateTrackSample(const QUuid& trackId, int frameIndex, const QPointF& imagePoint);
+    bool setTrackStartFrame(const QUuid& trackId, int startFrame);
+    bool setTrackEndFrame(const QUuid& trackId, int endFrame);
+    int setAllTrackStartFrames(int startFrame);
+    int setAllTrackEndFrames(int endFrame);
     bool removeTrack(const QUuid& trackId);
 
     [[nodiscard]] const std::vector<TrackPoint>& tracks() const;

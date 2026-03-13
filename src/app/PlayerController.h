@@ -14,6 +14,7 @@
 #include "core/tracking/MotionTracker.h"
 #include "core/video/DecodedFrame.h"
 #include "core/video/VideoDecoder.h"
+#include "ui/TimelineView.h"
 
 class PlayerController final : public QObject
 {
@@ -25,7 +26,8 @@ public:
     bool openVideo(const QString& filePath);
     void goToStart();
     void togglePlayback();
-    void pause();
+    void pause(bool restorePlaybackAnchor = true);
+    void seekToFrame(int frameIndex);
     void stepBackward();
     void stepForward();
     void seedTrack(const QPointF& imagePoint);
@@ -34,17 +36,26 @@ public:
     void moveSelectedTrack(const QPointF& imagePoint);
     void deleteSelectedTrack();
     void clearAllTracks();
+    void setSelectedTrackStartToCurrentFrame();
+    void setSelectedTrackEndToCurrentFrame();
+    void setAllTracksStartToCurrentFrame();
+    void setAllTracksEndToCurrentFrame();
+    void setInsertionFollowsPlayback(bool enabled);
     void setMotionTrackingEnabled(bool enabled);
 
     [[nodiscard]] bool hasVideoLoaded() const;
     [[nodiscard]] bool isPlaying() const;
+    [[nodiscard]] bool isInsertionFollowsPlayback() const;
     [[nodiscard]] bool isMotionTrackingEnabled() const;
     [[nodiscard]] bool hasSelection() const;
     [[nodiscard]] bool hasTracks() const;
+    [[nodiscard]] int trackCount() const;
     [[nodiscard]] int currentFrameIndex() const;
     [[nodiscard]] int totalFrames() const;
     [[nodiscard]] double fps() const;
     [[nodiscard]] QString loadedPath() const;
+    [[nodiscard]] QUuid selectedTrackId() const;
+    [[nodiscard]] std::vector<TimelineTrackSpan> timelineTrackSpans() const;
     [[nodiscard]] const std::vector<TrackOverlay>& currentOverlays() const;
 
 signals:
@@ -52,6 +63,7 @@ signals:
     void overlaysChanged();
     void videoLoaded(const QString& filePath, int totalFrames, double fps);
     void playbackStateChanged(bool playing);
+    void insertionFollowsPlaybackChanged(bool enabled);
     void motionTrackingChanged(bool enabled);
     void selectionChanged(bool hasSelection);
     void trackAvailabilityChanged(bool hasTracks);
@@ -78,7 +90,9 @@ private:
     int m_totalFrames = 0;
     double m_fps = 0.0;
     bool m_isPlaying = false;
+    bool m_insertionFollowsPlayback = true;
     bool m_motionTrackingEnabled = false;
+    int m_playbackAnchorFrame = -1;
     QUuid m_selectedTrackId;
     QUuid m_fadingDeselectedTrackId;
     float m_fadingDeselectedTrackOpacity = 0.0F;

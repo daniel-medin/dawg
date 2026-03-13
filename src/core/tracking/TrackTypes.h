@@ -20,6 +20,8 @@ struct TrackPoint
     QString label;
     QColor color;
     int seedFrameIndex = -1;
+    int startFrame = -1;
+    std::optional<int> endFrame;
     bool motionTracked = false;
     std::map<int, QPointF> samples;
     std::optional<AudioAttachment> attachedAudio;
@@ -35,15 +37,51 @@ struct TrackPoint
         return it != samples.end() ? it->second : QPointF{};
     }
 
-    [[nodiscard]] std::optional<QPointF> sampleAtOrBefore(const int frameIndex) const
+    [[nodiscard]] std::optional<QPointF> interpolatedSampleAt(const int frameIndex) const
     {
-        const auto it = samples.upper_bound(frameIndex);
-        if (it == samples.begin())
+        if (samples.empty())
         {
             return std::nullopt;
         }
 
-        return std::prev(it)->second;
+        const auto next = samples.lower_bound(frameIndex);
+        if (next != samples.end() && next->first == frameIndex)
+        {
+            return next->second;
+        }
+
+        if (next == samples.begin())
+        {
+            return next->second;
+        }
+
+        if (next == samples.end())
+        {
+            return std::prev(next)->second;
+        }
+
+        const auto previous = std::prev(next);
+        const auto frameSpan = next->first - previous->first;
+        if (frameSpan <= 0)
+        {
+            return previous->second;
+        }
+
+        const auto progress = static_cast<double>(frameIndex - previous->first) / static_cast<double>(frameSpan);
+        return QPointF{
+            previous->second.x() + (next->second.x() - previous->second.x()) * progress,
+            previous->second.y() + (next->second.y() - previous->second.y()) * progress
+        };
+    }
+
+    [[nodiscard]] bool isVisibleAt(const int frameIndex) const
+    {
+        if (startFrame >= 0 && frameIndex < startFrame)
+        {
+            return false;
+        }
+
+        return !endFrame.has_value() || frameIndex <= *endFrame;
     }
 };
 

@@ -11,6 +11,7 @@ TrackPoint& MotionTracker::seedTrack(const int frameIndex, const QPointF& imageP
     track.label = QStringLiteral("Node %1").arg(m_tracks.size() + 1);
     track.color = nextTrackColor();
     track.seedFrameIndex = frameIndex;
+    track.startFrame = frameIndex;
     track.motionTracked = motionTracked;
     track.samples.emplace(frameIndex, imagePoint);
 
@@ -112,6 +113,72 @@ bool MotionTracker::updateTrackSample(const QUuid& trackId, const int frameIndex
     return false;
 }
 
+bool MotionTracker::setTrackStartFrame(const QUuid& trackId, const int startFrame)
+{
+    for (auto& track : m_tracks)
+    {
+        if (track.id != trackId)
+        {
+            continue;
+        }
+
+        track.startFrame = startFrame;
+        if (track.endFrame.has_value() && *track.endFrame < track.startFrame)
+        {
+            track.endFrame = track.startFrame;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+bool MotionTracker::setTrackEndFrame(const QUuid& trackId, const int endFrame)
+{
+    for (auto& track : m_tracks)
+    {
+        if (track.id != trackId)
+        {
+            continue;
+        }
+
+        track.endFrame = std::max(endFrame, track.startFrame);
+        return true;
+    }
+
+    return false;
+}
+
+int MotionTracker::setAllTrackStartFrames(const int startFrame)
+{
+    int updatedCount = 0;
+
+    for (auto& track : m_tracks)
+    {
+        track.startFrame = startFrame;
+        if (track.endFrame.has_value() && *track.endFrame < track.startFrame)
+        {
+            track.endFrame = track.startFrame;
+        }
+        ++updatedCount;
+    }
+
+    return updatedCount;
+}
+
+int MotionTracker::setAllTrackEndFrames(const int endFrame)
+{
+    int updatedCount = 0;
+
+    for (auto& track : m_tracks)
+    {
+        track.endFrame = std::max(endFrame, track.startFrame);
+        ++updatedCount;
+    }
+
+    return updatedCount;
+}
+
 bool MotionTracker::removeTrack(const QUuid& trackId)
 {
     const auto newEnd = std::remove_if(
@@ -147,9 +214,14 @@ std::vector<TrackOverlay> MotionTracker::overlaysForFrame(
 
     for (const auto& track : m_tracks)
     {
+        if (!track.isVisibleAt(frameIndex))
+        {
+            continue;
+        }
+
         const auto imagePoint = track.motionTracked
             ? (track.hasSample(frameIndex) ? std::optional<QPointF>{track.sampleAt(frameIndex)} : std::nullopt)
-            : track.sampleAtOrBefore(frameIndex);
+            : track.interpolatedSampleAt(frameIndex);
 
         if (!imagePoint.has_value())
         {

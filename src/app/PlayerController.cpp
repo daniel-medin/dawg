@@ -22,7 +22,7 @@ PlayerController::PlayerController(QObject* parent)
 
 bool PlayerController::openVideo(const QString& filePath)
 {
-    pause();
+    pause(false);
 
     auto decoder = std::make_unique<OpenCvVideoDecoder>();
     if (!decoder->open(filePath.toStdString()))
@@ -70,7 +70,7 @@ void PlayerController::goToStart()
         return;
     }
 
-    pause();
+    pause(false);
     if (loadFrameAt(0))
     {
         emit statusChanged(QStringLiteral("Returned to the start of the clip."));
@@ -84,20 +84,19 @@ void PlayerController::togglePlayback()
         return;
     }
 
-    m_isPlaying = !m_isPlaying;
     if (m_isPlaying)
     {
-        m_playbackTimer.start();
-    }
-    else
-    {
-        m_playbackTimer.stop();
+        pause(true);
+        return;
     }
 
-    emit playbackStateChanged(m_isPlaying);
+    m_playbackAnchorFrame = m_currentFrame.index;
+    m_isPlaying = true;
+    m_playbackTimer.start();
+    emit playbackStateChanged(true);
 }
 
-void PlayerController::pause()
+void PlayerController::pause(const bool restorePlaybackAnchor)
 {
     if (!m_isPlaying)
     {
@@ -107,6 +106,35 @@ void PlayerController::pause()
     m_isPlaying = false;
     m_playbackTimer.stop();
     emit playbackStateChanged(false);
+
+    if (restorePlaybackAnchor
+        && !m_insertionFollowsPlayback
+        && m_playbackAnchorFrame >= 0
+        && m_playbackAnchorFrame != m_currentFrame.index)
+    {
+        loadFrameAt(m_playbackAnchorFrame);
+    }
+}
+
+void PlayerController::seekToFrame(const int frameIndex)
+{
+    if (!hasVideoLoaded())
+    {
+        return;
+    }
+
+    pause(false);
+
+    const auto clampedFrameIndex = std::clamp(frameIndex, 0, std::max(0, m_totalFrames - 1));
+    if (clampedFrameIndex == m_currentFrame.index)
+    {
+        return;
+    }
+
+    if (!loadFrameAt(clampedFrameIndex))
+    {
+        emit statusChanged(QStringLiteral("Failed to seek to frame %1.").arg(clampedFrameIndex));
+    }
 }
 
 void PlayerController::stepForward()
@@ -143,7 +171,7 @@ void PlayerController::stepBackward()
         return;
     }
 
-    pause();
+    pause(false);
 
     const auto targetFrameIndex = std::max(0, m_currentFrame.index - 1);
     if (targetFrameIndex == m_currentFrame.index)
@@ -240,6 +268,70 @@ void PlayerController::clearAllTracks()
     emit statusChanged(QStringLiteral("Cleared all nodes."));
 }
 
+void PlayerController::setSelectedTrackStartToCurrentFrame()
+{
+    if (!hasVideoLoaded() || m_selectedTrackId.isNull())
+    {
+        return;
+    }
+
+    if (m_tracker.setTrackStartFrame(m_selectedTrackId, m_currentFrame.index))
+    {
+        refreshOverlays();
+        emit statusChanged(QStringLiteral("Set selected node start to frame %1.").arg(m_currentFrame.index));
+    }
+}
+
+void PlayerController::setSelectedTrackEndToCurrentFrame()
+{
+    if (!hasVideoLoaded() || m_selectedTrackId.isNull())
+    {
+        return;
+    }
+
+    if (m_tracker.setTrackEndFrame(m_selectedTrackId, m_currentFrame.index))
+    {
+        refreshOverlays();
+        emit statusChanged(QStringLiteral("Set selected node end to frame %1.").arg(m_currentFrame.index));
+    }
+}
+
+void PlayerController::setAllTracksStartToCurrentFrame()
+{
+    if (!hasVideoLoaded() || !hasTracks())
+    {
+        return;
+    }
+
+    const auto updatedCount = m_tracker.setAllTrackStartFrames(m_currentFrame.index);
+    if (updatedCount <= 0)
+    {
+        return;
+    }
+
+    refreshOverlays();
+    emit statusChanged(
+        QStringLiteral("Set all node starts to frame %1.").arg(m_currentFrame.index));
+}
+
+void PlayerController::setAllTracksEndToCurrentFrame()
+{
+    if (!hasVideoLoaded() || !hasTracks())
+    {
+        return;
+    }
+
+    const auto updatedCount = m_tracker.setAllTrackEndFrames(m_currentFrame.index);
+    if (updatedCount <= 0)
+    {
+        return;
+    }
+
+    refreshOverlays();
+    emit statusChanged(
+        QStringLiteral("Set all node ends to frame %1.").arg(m_currentFrame.index));
+}
+
 void PlayerController::setMotionTrackingEnabled(const bool enabled)
 {
     if (m_motionTrackingEnabled == enabled)
@@ -255,6 +347,21 @@ void PlayerController::setMotionTrackingEnabled(const bool enabled)
             : QStringLiteral("Motion tracking disabled. New nodes will stay manual."));
 }
 
+void PlayerController::setInsertionFollowsPlayback(const bool enabled)
+{
+    if (m_insertionFollowsPlayback == enabled)
+    {
+        return;
+    }
+
+    m_insertionFollowsPlayback = enabled;
+    emit insertionFollowsPlaybackChanged(m_insertionFollowsPlayback);
+    emit statusChanged(
+        m_insertionFollowsPlayback
+            ? QStringLiteral("Insertion follows playback enabled.")
+            : QStringLiteral("Insertion follows playback disabled."));
+}
+
 bool PlayerController::hasVideoLoaded() const
 {
     return m_decoder != nullptr && m_currentFrame.isValid();
@@ -263,6 +370,11 @@ bool PlayerController::hasVideoLoaded() const
 bool PlayerController::isPlaying() const
 {
     return m_isPlaying;
+}
+
+bool PlayerController::isInsertionFollowsPlayback() const
+{
+    return m_insertionFollowsPlayback;
 }
 
 bool PlayerController::isMotionTrackingEnabled() const
@@ -278,6 +390,11 @@ bool PlayerController::hasSelection() const
 bool PlayerController::hasTracks() const
 {
     return !m_tracker.tracks().empty();
+}
+
+int PlayerController::trackCount() const
+{
+    return static_cast<int>(m_tracker.tracks().size());
 }
 
 int PlayerController::currentFrameIndex() const
@@ -298,6 +415,32 @@ double PlayerController::fps() const
 QString PlayerController::loadedPath() const
 {
     return m_loadedPath;
+}
+
+QUuid PlayerController::selectedTrackId() const
+{
+    return m_selectedTrackId;
+}
+
+std::vector<TimelineTrackSpan> PlayerController::timelineTrackSpans() const
+{
+    std::vector<TimelineTrackSpan> trackSpans;
+    trackSpans.reserve(m_tracker.tracks().size());
+
+    for (const auto& track : m_tracker.tracks())
+    {
+        trackSpans.push_back(TimelineTrackSpan{
+            .id = track.id,
+            .color = track.color,
+            .startFrame = std::max(0, track.startFrame),
+            .endFrame = track.endFrame.has_value()
+                ? std::max(track.startFrame, *track.endFrame)
+                : std::max(track.startFrame, m_totalFrames > 0 ? m_totalFrames - 1 : track.startFrame),
+            .isSelected = track.id == m_selectedTrackId
+        });
+    }
+
+    return trackSpans;
 }
 
 const std::vector<TrackOverlay>& PlayerController::currentOverlays() const

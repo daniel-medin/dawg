@@ -35,6 +35,8 @@ add_executable(dawg WIN32
     src/core/video/VideoDecoder.h
     src/ui/VideoCanvas.cpp
     src/ui/VideoCanvas.h
+    src/ui/TimelineView.cpp
+    src/ui/TimelineView.h
 )
 
 target_include_directories(dawg PRIVATE src)
