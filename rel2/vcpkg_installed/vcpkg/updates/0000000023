@@ -1,0 +1,6 @@
+Package: ffmpeg
+Feature: avformat
+Architecture: x64-windows
+Multi-Arch: same
+Description: Build the avformat library
+Status: install ok installed

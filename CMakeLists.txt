@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.27)
 
-project(dawg VERSION 0.1.0 LANGUAGES CXX)
+project(dawg VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,6 +14,7 @@ option(DAWG_ENABLE_FFMPEG "Link against FFmpeg when available." ON)
 
 find_package(Qt6 6.6 REQUIRED COMPONENTS Widgets)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc video videoio)
+find_package(JUCE CONFIG REQUIRED)
 find_package(PkgConfig QUIET)
 
 if(DAWG_ENABLE_FFMPEG AND PkgConfig_FOUND)
@@ -22,10 +23,21 @@ endif()
 
 add_executable(dawg WIN32
     src/main.cpp
+    src/resources.qrc
     src/app/MainWindow.cpp
     src/app/MainWindow.h
     src/app/PlayerController.cpp
     src/app/PlayerController.h
+    src/app/TransportController.cpp
+    src/app/TransportController.h
+    src/core/audio/AudioDurationProbe.cpp
+    src/core/audio/AudioDurationProbe.h
+    src/core/audio/AudioEngine.cpp
+    src/core/audio/AudioEngine.h
+    src/core/audio/JuceAudioEngine.cpp
+    src/core/audio/JuceAudioEngine.h
+    src/core/audio/MciAudioEngine.cpp
+    src/core/audio/MciAudioEngine.h
     src/core/tracking/MotionTracker.cpp
     src/core/tracking/MotionTracker.h
     src/core/tracking/TrackTypes.h
@@ -45,10 +57,15 @@ target_link_libraries(dawg
     PRIVATE
         Qt6::Widgets
         ${OpenCV_LIBS}
+        juce::juce_audio_basics
+        juce::juce_audio_devices
+        juce::juce_audio_formats
+        juce::juce_core
+        juce::juce_events
 )
 
 if(WIN32)
-    target_link_libraries(dawg PRIVATE Psapi)
+    target_link_libraries(dawg PRIVATE Psapi Winmm)
 endif()
 
 if(TARGET PkgConfig::FFMPEG)

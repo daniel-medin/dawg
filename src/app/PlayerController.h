@@ -4,17 +4,30 @@
 #include <vector>
 
 #include <QImage>
+#include <QList>
 #include <QObject>
 #include <QUuid>
 #include <QString>
+#include <QElapsedTimer>
 #include <QTimer>
 
 #include <opencv2/core/mat.hpp>
 
+#include "app/TransportController.h"
+#include "core/audio/AudioEngine.h"
 #include "core/tracking/MotionTracker.h"
 #include "core/video/DecodedFrame.h"
 #include "core/video/VideoDecoder.h"
 #include "ui/TimelineView.h"
+
+struct AudioPoolItem
+{
+    QString assetPath;
+    QString displayName;
+    int connectedNodeCount = 0;
+    bool isPlaying = false;
+    QString connectionSummary;
+};
 
 class PlayerController final : public QObject
 {
@@ -24,6 +37,7 @@ public:
     explicit PlayerController(QObject* parent = nullptr);
 
     bool openVideo(const QString& filePath);
+    bool importAudioToPool(const QString& filePath);
     void goToStart();
     void togglePlayback();
     void pause(bool restorePlaybackAnchor = true);
@@ -31,15 +45,26 @@ public:
     void stepBackward();
     void stepForward();
     void seedTrack(const QPointF& imagePoint);
+    bool createTrackWithAudioAtCurrentFrame(const QString& filePath);
+    bool createTrackWithAudioAtCurrentFrame(const QString& filePath, const QPointF& imagePoint);
+    bool importSoundForSelectedTrack(const QString& filePath);
+    void selectAllVisibleTracks();
+    void selectTracks(const QList<QUuid>& trackIds);
     void selectTrack(const QUuid& trackId);
     void clearSelection();
+    bool renameTrack(const QUuid& trackId, const QString& label);
+    void setTrackStartFrame(const QUuid& trackId, int frameIndex);
+    void setTrackEndFrame(const QUuid& trackId, int frameIndex);
+    void moveTrackFrameSpan(const QUuid& trackId, int deltaFrames);
     void moveSelectedTrack(const QPointF& imagePoint);
     void deleteSelectedTrack();
     void clearAllTracks();
     void setSelectedTrackStartToCurrentFrame();
     void setSelectedTrackEndToCurrentFrame();
+    void toggleSelectedTrackLabels();
     void setAllTracksStartToCurrentFrame();
     void setAllTracksEndToCurrentFrame();
+    void trimSelectedTracksToAttachedSound();
     void setInsertionFollowsPlayback(bool enabled);
     void setMotionTrackingEnabled(bool enabled);
 
@@ -55,6 +80,11 @@ public:
     [[nodiscard]] double fps() const;
     [[nodiscard]] QString loadedPath() const;
     [[nodiscard]] QUuid selectedTrackId() const;
+    [[nodiscard]] QString trackLabel(const QUuid& trackId) const;
+    [[nodiscard]] bool trackHasAttachedAudio(const QUuid& trackId) const;
+    bool removeAudioFromPool(const QString& filePath);
+    bool removeAudioAndConnectedNodesFromPool(const QString& filePath);
+    [[nodiscard]] std::vector<AudioPoolItem> audioPoolItems() const;
     [[nodiscard]] std::vector<TimelineTrackSpan> timelineTrackSpans() const;
     [[nodiscard]] const std::vector<TrackOverlay>& currentOverlays() const;
 
@@ -67,6 +97,7 @@ signals:
     void motionTrackingChanged(bool enabled);
     void selectionChanged(bool hasSelection);
     void trackAvailabilityChanged(bool hasTracks);
+    void audioPoolChanged();
     void statusChanged(const QString& message);
 
 private slots:
@@ -75,24 +106,32 @@ private slots:
 
 private:
     bool loadFrameAt(int frameIndex);
+    [[nodiscard]] std::vector<double> buildFrameTimestampCache(const QString& filePath) const;
+    [[nodiscard]] double frameTimestampSeconds(int frameIndex) const;
+    [[nodiscard]] std::optional<int> trimmedEndFrameForTrack(const TrackPoint& track) const;
+    void syncAttachedAudioForCurrentFrame();
     void refreshOverlays();
     void emitCurrentFrame();
+    [[nodiscard]] bool isTrackSelected(const QUuid& trackId) const;
     void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
     [[nodiscard]] QImage toImage(const cv::Mat& bgrFrame) const;
 
     std::unique_ptr<VideoDecoder> m_decoder;
+    TransportController m_transport;
+    std::unique_ptr<AudioEngine> m_audioEngine;
     MotionTracker m_tracker;
-    QTimer m_playbackTimer;
+    std::vector<QString> m_audioPoolPaths;
     QString m_loadedPath;
     DecodedFrame m_currentFrame;
     cv::Mat m_currentGrayFrame;
     std::vector<TrackOverlay> m_currentOverlays;
+    std::vector<double> m_frameTimestampsSeconds;
     int m_totalFrames = 0;
     double m_fps = 0.0;
-    bool m_isPlaying = false;
-    bool m_insertionFollowsPlayback = true;
     bool m_motionTrackingEnabled = false;
-    int m_playbackAnchorFrame = -1;
+    double m_playbackStartTimestampSeconds = 0.0;
+    QElapsedTimer m_playbackElapsedTimer;
+    std::vector<QUuid> m_selectedTrackIds;
     QUuid m_selectedTrackId;
     QUuid m_fadingDeselectedTrackId;
     float m_fadingDeselectedTrackOpacity = 0.0F;

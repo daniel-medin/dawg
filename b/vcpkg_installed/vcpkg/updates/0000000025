@@ -1,0 +1,6 @@
+Package: ffmpeg
+Feature: swscale
+Architecture: x64-windows
+Multi-Arch: same
+Description: Build the swscale library
+Status: install ok installed

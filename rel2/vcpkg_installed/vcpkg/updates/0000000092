@@ -1,0 +1,9 @@
+Package: harfbuzz
+Version: 13.0.1
+Depends: vcpkg-tool-meson
+Architecture: x64-windows
+Multi-Arch: same
+Abi: c96407e8469fb76f056e1d82b19d74f316cd544e9a5cfac74712b61ab93704ae
+Description: HarfBuzz OpenType text shaping engine
+Default-Features: freetype
+Status: install ok half-installed

@@ -37,10 +37,14 @@ std::optional<DecodedFrame> OpenCvVideoDecoder::readFrame()
     }
 
     const auto nextPosition = static_cast<int>(m_capture.get(cv::CAP_PROP_POS_FRAMES));
+    const auto timestampMs = m_capture.get(cv::CAP_PROP_POS_MSEC);
+    const auto derivedTimestampSeconds =
+        fps() > 0.0 ? static_cast<double>(std::max(0, nextPosition - 1)) / fps() : 0.0;
+    const auto timestampSeconds = timestampMs >= 0.0 ? (timestampMs / 1000.0) : derivedTimestampSeconds;
 
     return DecodedFrame{
         .index = std::max(0, nextPosition - 1),
-        .timestampSeconds = fps() > 0.0 ? static_cast<double>(std::max(0, nextPosition - 1)) / fps() : 0.0,
+        .timestampSeconds = timestampSeconds,
         .bgr = frame
     };
 }
@@ -73,4 +77,3 @@ cv::Size OpenCvVideoDecoder::frameSize() const
         static_cast<int>(m_capture.get(cv::CAP_PROP_FRAME_HEIGHT))
     };
 }
-

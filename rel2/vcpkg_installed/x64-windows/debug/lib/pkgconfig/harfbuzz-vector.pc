@@ -1,0 +1,13 @@
+prefix=${pcfiledir}/../..
+includedir=${prefix}/../include
+libdir=${prefix}/lib
+
+Name: harfbuzz-vector
+Description: HarfBuzz vector converter
+Version: 13.0.1
+Requires: harfbuzz =  13.0.1
+Requires.private: freetype2 >=  12.0.6
+Libs: "-L${libdir}" -lharfbuzz-vector
+Libs.private: "-L${libdir}" -lharfbuzz
+Cflags: "-I${includedir}/harfbuzz"
+

@@ -3,6 +3,8 @@
 #include <array>
 #include <algorithm>
 
+#include <QFileInfo>
+
 #include <opencv2/video/tracking.hpp>
 
 TrackPoint& MotionTracker::seedTrack(const int frameIndex, const QPointF& imagePoint, const bool motionTracked)
@@ -113,6 +115,63 @@ bool MotionTracker::updateTrackSample(const QUuid& trackId, const int frameIndex
     return false;
 }
 
+bool MotionTracker::setTrackLabel(const QUuid& trackId, const QString& label)
+{
+    for (auto& track : m_tracks)
+    {
+        if (track.id != trackId)
+        {
+            continue;
+        }
+
+        track.label = label;
+        return true;
+    }
+
+    return false;
+}
+
+bool MotionTracker::isTrackLabelVisible(const QUuid& trackId) const
+{
+    for (const auto& track : m_tracks)
+    {
+        if (track.id == trackId)
+        {
+            return track.showLabel;
+        }
+    }
+
+    return false;
+}
+
+int MotionTracker::setTrackLabelsVisible(const std::vector<QUuid>& trackIds, const bool visible)
+{
+    if (trackIds.empty())
+    {
+        return 0;
+    }
+
+    int updatedCount = 0;
+
+    for (auto& track : m_tracks)
+    {
+        if (std::find(trackIds.begin(), trackIds.end(), track.id) == trackIds.end())
+        {
+            continue;
+        }
+
+        if (track.showLabel == visible)
+        {
+            continue;
+        }
+
+        track.showLabel = visible;
+        ++updatedCount;
+    }
+
+    return updatedCount;
+}
+
 bool MotionTracker::setTrackStartFrame(const QUuid& trackId, const int startFrame)
 {
     for (auto& track : m_tracks)
@@ -149,34 +208,155 @@ bool MotionTracker::setTrackEndFrame(const QUuid& trackId, const int endFrame)
     return false;
 }
 
-int MotionTracker::setAllTrackStartFrames(const int startFrame)
+bool MotionTracker::moveTrackFrameSpan(const QUuid& trackId, const int deltaFrames, const int maxFrameIndex)
 {
+    if (deltaFrames == 0)
+    {
+        return false;
+    }
+
+    for (auto& track : m_tracks)
+    {
+        if (track.id != trackId)
+        {
+            continue;
+        }
+
+        const auto currentStart = std::max(0, track.startFrame);
+        const auto currentEnd = track.endFrame.has_value()
+            ? std::max(currentStart, *track.endFrame)
+            : currentStart;
+        const auto spanLength = currentEnd - currentStart;
+        const auto allowedMaxStart = std::max(0, maxFrameIndex - spanLength);
+        const auto newStart = std::clamp(currentStart + deltaFrames, 0, allowedMaxStart);
+        if (newStart == currentStart)
+        {
+            return false;
+        }
+
+        track.startFrame = newStart;
+        track.endFrame = std::clamp(newStart + spanLength, newStart, std::max(newStart, maxFrameIndex));
+        return true;
+    }
+
+    return false;
+}
+
+bool MotionTracker::setTrackAudioAttachment(const QUuid& trackId, const QString& assetPath)
+{
+    for (auto& track : m_tracks)
+    {
+        if (track.id != trackId)
+        {
+            continue;
+        }
+
+        track.attachedAudio = AudioAttachment{.assetPath = assetPath};
+        const QFileInfo fileInfo{assetPath};
+        if (!fileInfo.fileName().isEmpty())
+        {
+            track.label = fileInfo.fileName();
+        }
+        return true;
+    }
+
+    return false;
+}
+
+int MotionTracker::detachTrackAudioByPath(const QString& assetPath)
+{
+    int detachedCount = 0;
+
+    for (auto& track : m_tracks)
+    {
+        if (!track.attachedAudio.has_value() || track.attachedAudio->assetPath != assetPath)
+        {
+            continue;
+        }
+
+        track.attachedAudio.reset();
+        ++detachedCount;
+    }
+
+    return detachedCount;
+}
+
+int MotionTracker::setTrackStartFrames(const std::vector<QUuid>& trackIds, const int startFrame)
+{
+    if (trackIds.empty())
+    {
+        return 0;
+    }
+
     int updatedCount = 0;
 
     for (auto& track : m_tracks)
     {
-        track.startFrame = startFrame;
-        if (track.endFrame.has_value() && *track.endFrame < track.startFrame)
+        if (std::find(trackIds.begin(), trackIds.end(), track.id) == trackIds.end())
         {
-            track.endFrame = track.startFrame;
+            continue;
         }
-        ++updatedCount;
+
+        const auto extendsToFrame = !track.endFrame.has_value() || *track.endFrame >= startFrame;
+        if (track.startFrame < startFrame && extendsToFrame)
+        {
+            track.startFrame = startFrame;
+            ++updatedCount;
+        }
     }
 
     return updatedCount;
 }
 
-int MotionTracker::setAllTrackEndFrames(const int endFrame)
+int MotionTracker::setTrackEndFrames(const std::vector<QUuid>& trackIds, const int endFrame)
 {
+    if (trackIds.empty())
+    {
+        return 0;
+    }
+
     int updatedCount = 0;
 
     for (auto& track : m_tracks)
     {
-        track.endFrame = std::max(endFrame, track.startFrame);
-        ++updatedCount;
+        if (std::find(trackIds.begin(), trackIds.end(), track.id) == trackIds.end())
+        {
+            continue;
+        }
+
+        const auto extendsPastFrame = !track.endFrame.has_value() || *track.endFrame > endFrame;
+        if (track.startFrame <= endFrame && extendsPastFrame)
+        {
+            track.endFrame = endFrame;
+            ++updatedCount;
+        }
     }
 
     return updatedCount;
+}
+
+int MotionTracker::setAllTrackStartFrames(const int startFrame)
+{
+    std::vector<QUuid> trackIds;
+    trackIds.reserve(m_tracks.size());
+    for (const auto& track : m_tracks)
+    {
+        trackIds.push_back(track.id);
+    }
+
+    return setTrackStartFrames(trackIds, startFrame);
+}
+
+int MotionTracker::setAllTrackEndFrames(const int endFrame)
+{
+    std::vector<QUuid> trackIds;
+    trackIds.reserve(m_tracks.size());
+    for (const auto& track : m_tracks)
+    {
+        trackIds.push_back(track.id);
+    }
+
+    return setTrackEndFrames(trackIds, endFrame);
 }
 
 bool MotionTracker::removeTrack(const QUuid& trackId)
@@ -198,6 +378,31 @@ bool MotionTracker::removeTrack(const QUuid& trackId)
     return true;
 }
 
+int MotionTracker::removeTracks(const std::vector<QUuid>& trackIds)
+{
+    if (trackIds.empty())
+    {
+        return 0;
+    }
+
+    const auto previousSize = static_cast<int>(m_tracks.size());
+    const auto newEnd = std::remove_if(
+        m_tracks.begin(),
+        m_tracks.end(),
+        [&trackIds](const auto& track)
+        {
+            return std::find(trackIds.begin(), trackIds.end(), track.id) != trackIds.end();
+        });
+
+    if (newEnd == m_tracks.end())
+    {
+        return 0;
+    }
+
+    m_tracks.erase(newEnd, m_tracks.end());
+    return previousSize - static_cast<int>(m_tracks.size());
+}
+
 const std::vector<TrackPoint>& MotionTracker::tracks() const
 {
     return m_tracks;
@@ -205,7 +410,7 @@ const std::vector<TrackPoint>& MotionTracker::tracks() const
 
 std::vector<TrackOverlay> MotionTracker::overlaysForFrame(
     const int frameIndex,
-    const QUuid& selectedTrackId,
+    const std::vector<QUuid>& selectedTrackIds,
     const QUuid& fadingTrackId,
     const float fadingTrackOpacity) const
 {
@@ -233,9 +438,10 @@ std::vector<TrackOverlay> MotionTracker::overlaysForFrame(
             .label = track.label,
             .color = track.color,
             .imagePoint = *imagePoint,
-            .isSelected = track.id == selectedTrackId,
-            .highlightOpacity = track.id == selectedTrackId ? 1.0F
+            .isSelected = std::find(selectedTrackIds.begin(), selectedTrackIds.end(), track.id) != selectedTrackIds.end(),
+            .highlightOpacity = (std::find(selectedTrackIds.begin(), selectedTrackIds.end(), track.id) != selectedTrackIds.end()) ? 1.0F
                 : (track.id == fadingTrackId ? fadingTrackOpacity : 0.0F),
+            .showLabel = track.showLabel,
             .hasAttachedAudio = track.attachedAudio.has_value()
         });
     }

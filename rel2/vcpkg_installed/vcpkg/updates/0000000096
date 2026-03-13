@@ -1,0 +1,8 @@
+Package: double-conversion
+Version: 3.4.0
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 496bf2b70976c69d72b374bb15529ced4428a87ef6474f1d4beeeae9c18099ca
+Description: Efficient binary-decimal and decimal-binary conversion routines for IEEE doubles.
+Status: install ok half-installed

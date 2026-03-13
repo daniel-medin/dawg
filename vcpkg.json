@@ -5,6 +5,7 @@
   "dependencies": [
     "qtbase",
     "ffmpeg",
+    "juce",
     {
       "name": "opencv4",
       "default-features": false,

@@ -1,0 +1,7 @@
+Package: libpq
+Feature: lz4
+Depends: lz4
+Architecture: x64-windows
+Multi-Arch: same
+Description: Use lz4
+Status: install ok half-installed

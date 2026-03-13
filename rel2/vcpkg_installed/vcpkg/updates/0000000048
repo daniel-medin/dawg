@@ -1,0 +1,7 @@
+Package: libpq
+Feature: openssl
+Depends: openssl
+Architecture: x64-windows
+Multi-Arch: same
+Description: support for encrypted client connections and random number generation on platforms that do not have "/dev/urandom" (except windows)
+Status: install ok half-installed

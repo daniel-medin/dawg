@@ -1,0 +1,349 @@
+Detecting compiler hash for triplet x64-windows...
+Compiler found: C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe
+The following packages will be built and installed:
+  * brotli:x64-windows@1.2.0
+  * bzip2[core,tool]:x64-windows@1.0.8#6
+  * dbus:x64-windows@1.16.2#3
+  * double-conversion:x64-windows@3.4.0
+  * egl-registry:x64-windows@2025-05-27
+  * expat:x64-windows@2.7.4
+    ffmpeg[avcodec,avdevice,avfilter,avformat,core,swresample,swscale]:x64-windows@8.0.1#2
+  * ffmpeg-bin2c:x64-windows@8.0.1
+  * freetype[brotli,bzip2,core,png,zlib]:x64-windows@2.13.3
+  * harfbuzz[core,freetype]:x64-windows@13.0.1
+  * icu[core,tools]:x64-windows@78.2
+  * libjpeg-turbo:x64-windows@3.1.3
+  * libpng:x64-windows@1.6.55
+  * libpq[core,lz4,openssl,zlib]:x64-windows@16.9#3
+  * lz4:x64-windows@1.10.0
+  * md4c:x64-windows@0.5.2
+    opencv4[core,ffmpeg]:x64-windows@4.12.0#1
+  * opengl:x64-windows@2022-12-04#3
+  * opengl-registry:x64-windows@2026-01-26
+  * openssl:x64-windows@3.6.1#2
+  * pcre2[core,jit,platform-default-features]:x64-windows@10.47
+  * pkgconf:x64-windows@2.5.1#4
+    qtbase[brotli,concurrent,core,dbus,dnslookup,doubleconversion,freetype,gui,harfbuzz,icu,jpeg,network,opengl,openssl,pcre2,png,sessionmanager,sql,sql-psql,sql-sqlite,testlib,thread,widgets,zstd]:x64-windows@6.10.1
+  * sqlite3[core,json1]:x64-windows@3.52.0
+  * vcpkg-cmake:x64-windows@2024-04-23
+  * vcpkg-cmake-config:x64-windows@2024-05-23
+  * vcpkg-cmake-get-vars:x64-windows@2025-05-29
+  * vcpkg-get-python-packages:x64-windows@2025-04-05
+  * vcpkg-make:x64-windows@2026-01-01
+  * vcpkg-pkgconfig-get-modules:x64-windows@2024-04-03
+  * vcpkg-tool-meson:x64-windows@1.9.0#3
+  * zlib:x64-windows@1.3.1
+  * zstd:x64-windows@1.5.7
+Additional packages (*) will be modified to complete this operation.
+Restored 23 package(s) from C:\Users\danie\AppData\Local\vcpkg\archives in 2.5 s. Use --debug to see more details.
+Installing 1/33 vcpkg-cmake:x64-windows@2024-04-23...
+vcpkg-cmake:x64-windows@2024-04-23 package ABI: e79fa76841b70d89ca58c35c2a14f367f146b1c56bf64989681ea3743eb690a8
+Elapsed time to handle vcpkg-cmake:x64-windows: 36.7 ms
+Installing 2/33 vcpkg-cmake-get-vars:x64-windows@2025-05-29...
+vcpkg-cmake-get-vars:x64-windows@2025-05-29 package ABI: 9c8abff61eef2791d4fbc438a73b18e024b8c2677f3d3b2c7681ebac6a9d4925
+Elapsed time to handle vcpkg-cmake-get-vars:x64-windows: 63.5 ms
+Installing 3/33 vcpkg-tool-meson:x64-windows@1.9.0#3...
+vcpkg-tool-meson:x64-windows@1.9.0#3 package ABI: 47bf9971e55451def255e0c317d2af8cdb52dbf999a72ab34ff05f32b94b8258
+Elapsed time to handle vcpkg-tool-meson:x64-windows: 45.3 ms
+Installing 4/33 pkgconf:x64-windows@2.5.1#4...
+pkgconf:x64-windows@2.5.1#4 package ABI: eb2b8de54122d8d6389fb6fca48495f08ec3cf3ebe2e4b34671567d79b508bdc
+Elapsed time to handle pkgconf:x64-windows: 47.9 ms
+Installing 5/33 vcpkg-pkgconfig-get-modules:x64-windows@2024-04-03...
+vcpkg-pkgconfig-get-modules:x64-windows@2024-04-03 package ABI: 662d918b9dd886453f9a043118ab003eab9020746c0f3bc6a7a376e501a98c9a
+Elapsed time to handle vcpkg-pkgconfig-get-modules:x64-windows: 50.1 ms
+Installing 6/33 ffmpeg-bin2c:x64-windows@8.0.1...
+ffmpeg-bin2c:x64-windows@8.0.1 package ABI: a0ebb358aa334c8f4b1faf1a8c04c66eda7621dbda238052f61b0631516d0d49
+Elapsed time to handle ffmpeg-bin2c:x64-windows: 40.9 ms
+Installing 7/33 ffmpeg[avcodec,avdevice,avfilter,avformat,core,swresample,swscale]:x64-windows@8.0.1#2...
+ffmpeg[avcodec,avdevice,avfilter,avformat,core,swresample,swscale]:x64-windows@8.0.1#2 package ABI: a7f932eaa0297d99ac6b554499174257acada1728310874cd6e72f1a4e87d53f
+Elapsed time to handle ffmpeg:x64-windows: 86.9 ms
+Installing 8/33 zlib:x64-windows@1.3.1...
+zlib:x64-windows@1.3.1 package ABI: 49e2be0d9d5e3c1c7c4d1bc56865f2ed7bd51ae149c95271a8bf5c7394e66edb
+Elapsed time to handle zlib:x64-windows: 39.2 ms
+Installing 9/33 vcpkg-get-python-packages:x64-windows@2025-04-05...
+vcpkg-get-python-packages:x64-windows@2025-04-05 package ABI: 9334a52a301fde70280e0138e26ab4c241be2476891c855322fe045f31681837
+Elapsed time to handle vcpkg-get-python-packages:x64-windows: 31.3 ms
+Installing 10/33 vcpkg-cmake-config:x64-windows@2024-05-23...
+vcpkg-cmake-config:x64-windows@2024-05-23 package ABI: b1d76dea1f6a3bdd5b36c8ed711cc1f0a6ac9c14926c1e929fd8bdfc15826b78
+Elapsed time to handle vcpkg-cmake-config:x64-windows: 60.6 ms
+Installing 11/33 opencv4[core,ffmpeg]:x64-windows@4.12.0#1...
+opencv4[core,ffmpeg]:x64-windows@4.12.0#1 package ABI: 61f0b9386782cff9608fd9f20804b324cfecb5120bcf7da5b3a4e17108a28092
+Elapsed time to handle opencv4:x64-windows: 114 ms
+Installing 12/33 zstd:x64-windows@1.5.7...
+zstd:x64-windows@1.5.7 package ABI: 210399406d93faab937cb08256bcc2129b457ac01f5ee8fdb51614de222b6fe4
+Elapsed time to handle zstd:x64-windows: 55.4 ms
+Installing 13/33 sqlite3[core,json1]:x64-windows@3.52.0...
+sqlite3[core,json1]:x64-windows@3.52.0 package ABI: 568517f04b21b3daaac6c3449b041b892bf36a5d52d58b92c06cd65bc775c055
+Elapsed time to handle sqlite3:x64-windows: 58.2 ms
+Installing 14/33 openssl:x64-windows@3.6.1#2...
+openssl:x64-windows@3.6.1#2 package ABI: 351bfb52f6261a44e8f2aed65a7619d4f289ad2b86e9a6f9848adba01e051619
+Elapsed time to handle openssl:x64-windows: 79.9 ms
+Installing 15/33 lz4:x64-windows@1.10.0...
+lz4:x64-windows@1.10.0 package ABI: 3d319e55afadd31bd72b2d512b39bb49b0fdf87591e40dba2aa14d9bff752a21
+Elapsed time to handle lz4:x64-windows: 43.6 ms
+Installing 16/33 libpq[core,lz4,openssl,zlib]:x64-windows@16.9#3...
+libpq[core,lz4,openssl,zlib]:x64-windows@16.9#3 package ABI: e97cea2a0ff154cfb327b9c229fcc84c602fc4c70c4c1a7bf3b7fc9b9c37dda1
+Elapsed time to handle libpq:x64-windows: 163 ms
+Installing 17/33 libpng:x64-windows@1.6.55...
+libpng:x64-windows@1.6.55 package ABI: f64b755c8fc5e2783463a2c881a786e382afa06efd2fd53b56820306265bc322
+Elapsed time to handle libpng:x64-windows: 59.7 ms
+Installing 18/33 pcre2[core,jit,platform-default-features]:x64-windows@10.47...
+pcre2[core,jit,platform-default-features]:x64-windows@10.47 package ABI: 00d81aaab092aa36f72206ad68edd7b39b97811a3c0b7c278cba95a9ef9134b7
+Elapsed time to handle pcre2:x64-windows: 95.4 ms
+Installing 19/33 egl-registry:x64-windows@2025-05-27...
+egl-registry:x64-windows@2025-05-27 package ABI: f8d0d57d44f706f94682832aedc52ea2893cacd3ace737c524950ce686268c86
+Elapsed time to handle egl-registry:x64-windows: 28.2 ms
+Installing 20/33 opengl-registry:x64-windows@2026-01-26...
+opengl-registry:x64-windows@2026-01-26 package ABI: 35061d26edbdab858cf989e5f87db1751b3ee038e7388390132cb3521358afd7
+Elapsed time to handle opengl-registry:x64-windows: 47.8 ms
+Installing 21/33 opengl:x64-windows@2022-12-04#3...
+opengl:x64-windows@2022-12-04#3 package ABI: 5d8e6e59ae1f26a714fabde94576dac4c3c85cc0935ce95e0348c02bad40f8cc
+Elapsed time to handle opengl:x64-windows: 30.6 ms
+Installing 22/33 libjpeg-turbo:x64-windows@3.1.3...
+libjpeg-turbo:x64-windows@3.1.3 package ABI: 1aa01e523516835d50663e47ef3bea5034f57a621dc7d391cbf80a1f4bac7527
+Elapsed time to handle libjpeg-turbo:x64-windows: 62.9 ms
+Installing 23/33 vcpkg-make:x64-windows@2026-01-01...
+vcpkg-make:x64-windows@2026-01-01 package ABI: f8dce820f6eea2e01a4f97d78216e2790a5bb6f855d446d0ef6a18050b515e66
+Elapsed time to handle vcpkg-make:x64-windows: 62.8 ms
+Installing 24/33 icu[core,tools]:x64-windows@78.2...
+icu[core,tools]:x64-windows@78.2 package ABI: 87b1f5a7b1ea6f641358f1d188e7d09346b53f6e2fd9eb559f3cb5de8a1beb6f
+Building icu[core,tools]:x64-windows@78.2...
+-- Using cached icu4c-78.2-sources.tgz
+-- Cleaning sources at X:/.tools/vcpkg/buildtrees/icu/src/icu4c-78-54e5864b38.clean. Use --editable to skip cleaning for the packages you specify.
+-- Extracting source X:/.tools/vcpkg/downloads/icu4c-78.2-sources.tgz
+-- Applying patch disable-static-prefix.patch
+-- Applying patch fix_bsd_and_solaris.patch
+-- Applying patch fix_parallel_build_on_windows.patch
+-- Applying patch mh-darwin.patch
+-- Applying patch mh-mingw.patch
+-- Applying patch mh-msys-msvc.patch
+-- Applying patch subdirs.patch
+-- Applying patch vcpkg-cross-data.patch
+-- Using source at X:/.tools/vcpkg/buildtrees/icu/src/icu4c-78-54e5864b38.clean
+-- Getting CMake variables for x64-windows
+-- Loading CMake variables from X:/.tools/vcpkg/buildtrees/icu/cmake-get-vars_C_CXX-x64-windows.cmake.log
+-- Using cached msys2-autoconf-wrapper-20250528-1-any.pkg.tar.zst
+-- Using cached msys2-automake-wrapper-20250528-1-any.pkg.tar.zst
+-- Using cached msys2-autoconf-archive-2024.10.16-1-any.pkg.tar.zst
+-- Using cached msys2-binutils-2.45.1-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libtool-2.5.4-4-x86_64.pkg.tar.zst
+-- Using cached msys2-make-4.4.1-2-x86_64.pkg.tar.zst
+-- Using cached msys2-which-2.23-4-x86_64.pkg.tar.zst
+-- Using cached msys2-bash-5.3.009-1-x86_64.pkg.tar.zst
+-- Using cached msys2-coreutils-8.32-5-x86_64.pkg.tar.zst
+-- Using cached msys2-file-5.46-2-x86_64.pkg.tar.zst
+-- Using cached msys2-gawk-5.3.2-1-x86_64.pkg.tar.zst
+-- Using cached msys2-grep-1~3.0-7-x86_64.pkg.tar.zst
+-- Using cached msys2-gzip-1.14-1-x86_64.pkg.tar.zst
+-- Using cached msys2-diffutils-3.12-1-x86_64.pkg.tar.zst
+-- Using cached msys2-pkgconf-2.5.1-1-x86_64.pkg.tar.zst
+-- Using cached msys2-sed-4.9-1-x86_64.pkg.tar.zst
+-- Using cached msys2-msys2-runtime-3.6.5-1-x86_64.pkg.tar.zst
+-- Using cached msys2-autoconf2.72-2.72-3-any.pkg.tar.zst
+-- Using cached msys2-automake1.16-1.16.5-1-any.pkg.tar.zst
+-- Using cached msys2-automake1.17-1.17-1-any.pkg.tar.zst
+-- Using cached msys2-automake1.18-1.18.1-1-any.pkg.tar.zst
+-- Using cached msys2-libiconv-1.18-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libintl-0.22.5-1-x86_64.pkg.tar.zst
+-- Using cached msys2-zlib-1.3.1-1-x86_64.pkg.tar.zst
+-- Using cached msys2-findutils-4.10.0-2-x86_64.pkg.tar.zst
+-- Using cached msys2-tar-1.35-3-x86_64.pkg.tar.zst
+-- Using cached msys2-gmp-6.3.0-2-x86_64.pkg.tar.zst
+-- Using cached msys2-gcc-libs-15.2.0-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libbz2-1.0.8-4-x86_64.pkg.tar.zst
+-- Using cached msys2-liblzma-5.8.2-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libzstd-1.5.7-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libreadline-8.3.003-1-x86_64.pkg.tar.zst
+-- Using cached msys2-mpfr-4.2.2-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libpcre-8.45-5-x86_64.pkg.tar.zst
+-- Using cached msys2-m4-1.4.19-2-x86_64.pkg.tar.zst
+-- Using cached msys2-perl-5.40.3-1-x86_64.pkg.tar.zst
+-- Using cached msys2-ncurses-6.5.20240831-2-x86_64.pkg.tar.zst
+-- Using cached msys2-libxcrypt-4.5.2-1-x86_64.pkg.tar.zst
+-- Using msys root at X:/.tools/vcpkg/downloads/tools/msys2/19f68f647e350a23
+-- Configuring x64-windows-dbg
+-- Configuring x64-windows-rel
+-- Using cached msys2-autoconf-wrapper-20250528-1-any.pkg.tar.zst
+-- Using cached msys2-automake-wrapper-20250528-1-any.pkg.tar.zst
+-- Using cached msys2-autoconf-archive-2024.10.16-1-any.pkg.tar.zst
+-- Using cached msys2-binutils-2.45.1-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libtool-2.5.4-4-x86_64.pkg.tar.zst
+-- Using cached msys2-make-4.4.1-2-x86_64.pkg.tar.zst
+-- Using cached msys2-which-2.23-4-x86_64.pkg.tar.zst
+-- Using cached msys2-bash-5.3.009-1-x86_64.pkg.tar.zst
+-- Using cached msys2-coreutils-8.32-5-x86_64.pkg.tar.zst
+-- Using cached msys2-file-5.46-2-x86_64.pkg.tar.zst
+-- Using cached msys2-gawk-5.3.2-1-x86_64.pkg.tar.zst
+-- Using cached msys2-grep-1~3.0-7-x86_64.pkg.tar.zst
+-- Using cached msys2-gzip-1.14-1-x86_64.pkg.tar.zst
+-- Using cached msys2-diffutils-3.12-1-x86_64.pkg.tar.zst
+-- Using cached msys2-pkgconf-2.5.1-1-x86_64.pkg.tar.zst
+-- Using cached msys2-sed-4.9-1-x86_64.pkg.tar.zst
+-- Using cached msys2-msys2-runtime-3.6.5-1-x86_64.pkg.tar.zst
+-- Using cached msys2-autoconf2.72-2.72-3-any.pkg.tar.zst
+-- Using cached msys2-automake1.16-1.16.5-1-any.pkg.tar.zst
+-- Using cached msys2-automake1.17-1.17-1-any.pkg.tar.zst
+-- Using cached msys2-automake1.18-1.18.1-1-any.pkg.tar.zst
+-- Using cached msys2-libiconv-1.18-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libintl-0.22.5-1-x86_64.pkg.tar.zst
+-- Using cached msys2-zlib-1.3.1-1-x86_64.pkg.tar.zst
+-- Using cached msys2-findutils-4.10.0-2-x86_64.pkg.tar.zst
+-- Using cached msys2-tar-1.35-3-x86_64.pkg.tar.zst
+-- Using cached msys2-gmp-6.3.0-2-x86_64.pkg.tar.zst
+-- Using cached msys2-gcc-libs-15.2.0-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libbz2-1.0.8-4-x86_64.pkg.tar.zst
+-- Using cached msys2-liblzma-5.8.2-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libzstd-1.5.7-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libreadline-8.3.003-1-x86_64.pkg.tar.zst
+-- Using cached msys2-mpfr-4.2.2-1-x86_64.pkg.tar.zst
+-- Using cached msys2-libpcre-8.45-5-x86_64.pkg.tar.zst
+-- Using cached msys2-m4-1.4.19-2-x86_64.pkg.tar.zst
+-- Using cached msys2-perl-5.40.3-1-x86_64.pkg.tar.zst
+-- Using cached msys2-ncurses-6.5.20240831-2-x86_64.pkg.tar.zst
+-- Using cached msys2-libxcrypt-4.5.2-1-x86_64.pkg.tar.zst
+-- Using msys root at X:/.tools/vcpkg/downloads/tools/msys2/19f68f647e350a23
+-- Building/Installing x64-windows-dbg
+-- Making target 'all' for x64-windows-dbg
+-- Making target 'install' for x64-windows-dbg
+-- Building/Installing x64-windows-rel
+-- Making target 'all' for x64-windows-rel
+-- Making target 'install' for x64-windows-rel
+-- Installing: X:/.tools/vcpkg/packages/icu_x64-windows/tools/icu/config/icucross.inc
+-- Installing: X:/.tools/vcpkg/packages/icu_x64-windows/tools/icu/config/icucross.mk
+CMake Warning at scripts/cmake/vcpkg_copy_pdbs.cmake:44 (message):
+  Could not find a matching pdb file for:
+
+      X:/.tools/vcpkg/packages/icu_x64-windows/bin/icudt78.dll
+      X:/.tools/vcpkg/packages/icu_x64-windows/debug/bin/icudtd78.dll
+
+Call Stack (most recent call first):
+  buildtrees/versioning_/versions/icu/1c024a43e88d0dafa064363ddf49ec0cde221b8a/portfile.cmake:135 (vcpkg_copy_pdbs)
+  scripts/ports.cmake:206 (include)
+
+
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/icu_x64-windows/lib/pkgconfig/icu-i18n.pc
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/icu_x64-windows/lib/pkgconfig/icu-io.pc
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/icu_x64-windows/lib/pkgconfig/icu-uc.pc
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/icu_x64-windows/debug/lib/pkgconfig/icu-i18n.pc
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/icu_x64-windows/debug/lib/pkgconfig/icu-io.pc
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/icu_x64-windows/debug/lib/pkgconfig/icu-uc.pc
+-- Installing: X:/.tools/vcpkg/packages/icu_x64-windows/share/icu/copyright
+-- Performing post-build validation
+Starting submission of icu[core,tools]:x64-windows@78.2 to 1 binary cache(s) in the background
+Elapsed time to handle icu:x64-windows: 5.8 min
+Installing 25/33 bzip2[core,tool]:x64-windows@1.0.8#6...
+bzip2[core,tool]:x64-windows@1.0.8#6 package ABI: 8b3f404391de1fd46524dd6ab5920a2089eef8130730caa6d1313db98cfb9dd3
+Building bzip2[core,tool]:x64-windows@1.0.8#6...
+Downloading bzip2-1.0.8.tar.gz, trying https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
+Successfully downloaded bzip2-1.0.8.tar.gz
+-- Extracting source X:/.tools/vcpkg/downloads/bzip2-1.0.8.tar.gz
+-- Applying patch fix-import-export-macros.patch
+-- Using source at X:/.tools/vcpkg/buildtrees/bzip2/src/bzip2-1-336d4794a3.clean
+-- Configuring x64-windows
+-- Building x64-windows-dbg
+-- Building x64-windows-rel
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/bzip2_x64-windows/lib/pkgconfig/bzip2.pc
+-- Using cached msys2-mingw-w64-x86_64-pkgconf-1~2.5.1-1-any.pkg.tar.zst
+-- Using cached msys2-msys2-runtime-3.6.5-1-x86_64.pkg.tar.zst
+-- Using msys root at X:/.tools/vcpkg/downloads/tools/msys2/3e71d1f8e22ab23f
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/bzip2_x64-windows/debug/lib/pkgconfig/bzip2.pc
+-- Installing: X:/.tools/vcpkg/packages/bzip2_x64-windows/share/bzip2/copyright
+-- Performing post-build validation
+Starting submission of bzip2[core,tool]:x64-windows@1.0.8#6 to 1 binary cache(s) in the background
+Elapsed time to handle bzip2:x64-windows: 5.9 s
+Completed submission of icu[core,tools]:x64-windows@78.2 to 1 binary cache(s) in 3.6 s
+Installing 26/33 brotli:x64-windows@1.2.0...
+brotli:x64-windows@1.2.0 package ABI: ed00eb0857488e8ac7e8586fc038dd04bb1e877bb3dd61908626af76f8947354
+Building brotli:x64-windows@1.2.0...
+Downloading https://github.com/google/brotli/archive/v1.2.0.tar.gz -> google-brotli-v1.2.0.tar.gz
+Successfully downloaded google-brotli-v1.2.0.tar.gz
+-- Extracting source X:/.tools/vcpkg/downloads/google-brotli-v1.2.0.tar.gz
+-- Applying patch install.patch
+-- Applying patch pkgconfig.patch
+-- Using source at X:/.tools/vcpkg/buildtrees/brotli/src/v1.2.0-7af7ca71ad.clean
+-- Configuring x64-windows
+-- Building x64-windows-dbg
+-- Building x64-windows-rel
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/brotli_x64-windows/lib/pkgconfig/libbrotlicommon.pc
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/brotli_x64-windows/lib/pkgconfig/libbrotlidec.pc
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/brotli_x64-windows/lib/pkgconfig/libbrotlienc.pc
+-- Using cached msys2-mingw-w64-x86_64-pkgconf-1~2.5.1-1-any.pkg.tar.zst
+-- Using cached msys2-msys2-runtime-3.6.5-1-x86_64.pkg.tar.zst
+-- Using msys root at X:/.tools/vcpkg/downloads/tools/msys2/3e71d1f8e22ab23f
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/brotli_x64-windows/debug/lib/pkgconfig/libbrotlicommon.pc
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/brotli_x64-windows/debug/lib/pkgconfig/libbrotlidec.pc
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/brotli_x64-windows/debug/lib/pkgconfig/libbrotlienc.pc
+-- Installing: X:/.tools/vcpkg/packages/brotli_x64-windows/share/brotli/usage
+-- Installing: X:/.tools/vcpkg/packages/brotli_x64-windows/share/brotli/copyright
+-- Performing post-build validation
+Starting submission of brotli:x64-windows@1.2.0 to 1 binary cache(s) in the background
+Elapsed time to handle brotli:x64-windows: 11 s
+Completed submission of bzip2[core,tool]:x64-windows@1.0.8#6 to 1 binary cache(s) in 108 ms
+Installing 27/33 freetype[brotli,bzip2,core,png,zlib]:x64-windows@2.13.3...
+freetype[brotli,bzip2,core,png,zlib]:x64-windows@2.13.3 package ABI: 85afc60c93e242610c1cfdabd39c61c5ebac422ea5f5398985779c7f5360362c
+Building freetype[brotli,bzip2,core,png,zlib]:x64-windows@2.13.3...
+Downloading https://gitlab.freedesktop.org//freetype/freetype/-/archive/VER-2-13-3/freetype-VER-2-13-3.tar.gz -> freetype-freetype-VER-2-13-3.tar.gz
+Successfully downloaded freetype-freetype-VER-2-13-3.tar.gz
+-- Extracting source X:/.tools/vcpkg/downloads/freetype-freetype-VER-2-13-3.tar.gz
+-- Applying patch 0003-Fix-UWP.patch
+-- Applying patch brotli-static.patch
+-- Applying patch bzip2.patch
+-- Applying patch fix-exports.patch
+-- Using source at X:/.tools/vcpkg/buildtrees/freetype/src/VER-2-13-3-8b423a038b.clean
+-- Configuring x64-windows
+-- Building x64-windows-dbg
+-- Building x64-windows-rel
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/freetype_x64-windows/lib/pkgconfig/freetype2.pc
+-- Using cached msys2-mingw-w64-x86_64-pkgconf-1~2.5.1-1-any.pkg.tar.zst
+-- Using cached msys2-msys2-runtime-3.6.5-1-x86_64.pkg.tar.zst
+-- Using msys root at X:/.tools/vcpkg/downloads/tools/msys2/3e71d1f8e22ab23f
+-- Fixing pkgconfig file: X:/.tools/vcpkg/packages/freetype_x64-windows/debug/lib/pkgconfig/freetype2.pc
+-- Installing: X:/.tools/vcpkg/packages/freetype_x64-windows/share/freetype/usage
+-- Performing post-build validation
+Starting submission of freetype[brotli,bzip2,core,png,zlib]:x64-windows@2.13.3 to 1 binary cache(s) in the background
+Elapsed time to handle freetype:x64-windows: 9 s
+Completed submission of brotli:x64-windows@1.2.0 to 1 binary cache(s) in 193 ms
+Installing 28/33 harfbuzz[core,freetype]:x64-windows@13.0.1...
+harfbuzz[core,freetype]:x64-windows@13.0.1 package ABI: c96407e8469fb76f056e1d82b19d74f316cd544e9a5cfac74712b61ab93704ae
+Building harfbuzz[core,freetype]:x64-windows@13.0.1...
+-- Found Python version '3.14.2 at X:/.tools/vcpkg/downloads/tools/python/python-3.14.2-x64-1/python.exe'
+-- Using meson: X:/.tools/vcpkg/downloads/tools/meson-1.9.0-d1fcc2/meson.py
+Downloading https://github.com/harfbuzz/harfbuzz/archive/13.0.1.tar.gz -> harfbuzz-harfbuzz-13.0.1.tar.gz
+Successfully downloaded harfbuzz-harfbuzz-13.0.1.tar.gz
+-- Extracting source X:/.tools/vcpkg/downloads/harfbuzz-harfbuzz-13.0.1.tar.gz
+-- Applying patch fix-win32-build.patch
+-- Using source at X:/.tools/vcpkg/buildtrees/harfbuzz/src/13.0.1-cadce58297.clean
+-- Using cached msys2-mingw-w64-x86_64-pkgconf-1~2.5.1-1-any.pkg.tar.zst
+-- Using cached msys2-msys2-runtime-3.6.5-1-x86_64.pkg.tar.zst
+-- Using msys root at X:/.tools/vcpkg/downloads/tools/msys2/3e71d1f8e22ab23f
+-- Configuring x64-windows-dbg
+-- Getting CMake variables for x64-windows
+-- Loading CMake variables from X:/.tools/vcpkg/buildtrees/harfbuzz/cmake-get-vars_C_CXX-x64-windows.cmake.log
+-- Configuring x64-windows-dbg done
+-- Configuring x64-windows-rel
+-- Configuring x64-windows-rel done
+-- Package x64-windows-dbg
+CMake Error at scripts/cmake/vcpkg_execute_required_process.cmake:127 (message):
+    Command failed: X:\\.tools\\vcpkg\\downloads\\tools\\ninja-1.13.2-windows\\ninja.exe install -v
+    Working Directory: X:/.tools/vcpkg/buildtrees/harfbuzz/x64-windows-dbg
+    Error code: 1
+    See logs for more information:
+      X:\.tools\vcpkg\buildtrees\harfbuzz\package-x64-windows-dbg-out.log
+
+Call Stack (most recent call first):
+  X:/rel/vcpkg_installed/x64-windows/share/vcpkg-tool-meson/vcpkg_install_meson.cmake:33 (vcpkg_execute_required_process)
+  buildtrees/versioning_/versions/harfbuzz/8098a83e22c250a2838832a5c92d76812895e888/portfile.cmake:98 (vcpkg_install_meson)
+  scripts/ports.cmake:206 (include)
+
+
+error: building harfbuzz:x64-windows failed with: BUILD_FAILED
+See https://learn.microsoft.com/vcpkg/troubleshoot/build-failures?WT.mc_id=vcpkg_inproduct_cli for more information.
+Elapsed time to handle harfbuzz:x64-windows: 44 s
+Please ensure you're using the latest port files with `git pull` and `vcpkg update`.
+Then check for known issues at:
+  https://github.com/microsoft/vcpkg/issues?q=is%3Aissue+is%3Aopen+in%3Atitle+harfbuzz
+You can submit a new issue at:
+  https://github.com/microsoft/vcpkg/issues/new?title=%5Bharfbuzz%5D%20build%20error%20on%20x64-windows&body=Copy%20issue%20body%20from%20X%3A%2Frel%2Fvcpkg_installed%2Fvcpkg%2Fissue_body.md
+You can also submit an issue by running (GitHub CLI must be installed):
+  "C:\Program Files\GitHub CLI\gh.exe" issue create -R microsoft/vcpkg --title "[harfbuzz] Build failure on x64-windows" --body-file X:/rel/vcpkg_installed/vcpkg/issue_body.md
+Completed submission of freetype[brotli,bzip2,core,png,zlib]:x64-windows@2.13.3 to 1 binary cache(s) in 321 ms
