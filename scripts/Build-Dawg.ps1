@@ -9,4 +9,4 @@ Set-StrictMode -Version Latest
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $helperPath = Join-Path $scriptRoot 'Invoke-DawgDev.ps1'
 
-& $helperPath -Configuration $Configuration -KillRunning -Launch
+& $helperPath -Configuration $Configuration

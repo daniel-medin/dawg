@@ -58,3 +58,17 @@ else()
     target_compile_options(dawg PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+if(WIN32)
+    foreach(_qt_plugin_dir generic imageformats networkinformation platforms sqldrivers styles tls)
+        add_custom_command(
+            TARGET dawg
+            POST_BUILD
+            COMMAND
+                "${CMAKE_COMMAND}" -E copy_directory
+                "$<TARGET_FILE_DIR:Qt6::Core>/../Qt6/plugins/${_qt_plugin_dir}"
+                "$<TARGET_FILE_DIR:dawg>/${_qt_plugin_dir}"
+            COMMENT "Copying Qt ${_qt_plugin_dir} plugins"
+            VERBATIM
+        )
+    endforeach()
+endif()

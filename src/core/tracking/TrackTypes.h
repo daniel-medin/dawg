@@ -20,6 +20,7 @@ struct TrackPoint
     QString label;
     QColor color;
     int seedFrameIndex = -1;
+    bool motionTracked = false;
     std::map<int, QPointF> samples;
     std::optional<AudioAttachment> attachedAudio;
 
@@ -42,6 +43,6 @@ struct TrackOverlay
     QColor color;
     QPointF imagePoint;
     bool isSeedFrame = false;
+    bool isSelected = false;
     bool hasAttachedAudio = false;
 };
-

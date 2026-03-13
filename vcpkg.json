@@ -1,6 +1,7 @@
 {
   "name": "dawg",
   "version-string": "0.1.0",
+  "builtin-baseline": "efa4634bd526b87559684607d2cbbdeeec0f07d8",
   "dependencies": [
     "qtbase",
     "ffmpeg",
@@ -13,4 +14,3 @@
     }
   ]
 }
-

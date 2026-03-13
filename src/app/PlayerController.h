@@ -5,6 +5,7 @@
 
 #include <QImage>
 #include <QObject>
+#include <QUuid>
 #include <QString>
 #include <QTimer>
 
@@ -22,13 +23,22 @@ public:
     explicit PlayerController(QObject* parent = nullptr);
 
     bool openVideo(const QString& filePath);
+    void goToStart();
     void togglePlayback();
     void pause();
+    void stepBackward();
     void stepForward();
     void seedTrack(const QPointF& imagePoint);
+    void selectTrack(const QUuid& trackId);
+    void clearSelection();
+    void moveSelectedTrack(const QPointF& imagePoint);
+    void deleteSelectedTrack();
+    void setMotionTrackingEnabled(bool enabled);
 
     [[nodiscard]] bool hasVideoLoaded() const;
     [[nodiscard]] bool isPlaying() const;
+    [[nodiscard]] bool isMotionTrackingEnabled() const;
+    [[nodiscard]] bool hasSelection() const;
     [[nodiscard]] int currentFrameIndex() const;
     [[nodiscard]] int totalFrames() const;
     [[nodiscard]] double fps() const;
@@ -40,14 +50,18 @@ signals:
     void overlaysChanged();
     void videoLoaded(const QString& filePath, int totalFrames, double fps);
     void playbackStateChanged(bool playing);
+    void motionTrackingChanged(bool enabled);
+    void selectionChanged(bool hasSelection);
     void statusChanged(const QString& message);
 
 private slots:
     void advancePlayback();
 
 private:
+    bool loadFrameAt(int frameIndex);
     void refreshOverlays();
     void emitCurrentFrame();
+    void setSelectedTrackId(const QUuid& trackId);
     [[nodiscard]] QImage toImage(const cv::Mat& bgrFrame) const;
 
     std::unique_ptr<VideoDecoder> m_decoder;
@@ -60,4 +74,6 @@ private:
     int m_totalFrames = 0;
     double m_fps = 0.0;
     bool m_isPlaying = false;
+    bool m_motionTrackingEnabled = false;
+    QUuid m_selectedTrackId;
 };

@@ -34,6 +34,7 @@ bool PlayerController::openVideo(const QString& filePath)
 
     m_tracker.reset();
     m_currentOverlays.clear();
+    m_selectedTrackId = {};
     m_loadedPath = filePath;
     m_totalFrames = decoder->frameCount();
     m_fps = decoder->fps();
@@ -46,9 +47,24 @@ bool PlayerController::openVideo(const QString& filePath)
     refreshOverlays();
     emitCurrentFrame();
     emit videoLoaded(m_loadedPath, m_totalFrames, m_fps);
+    emit selectionChanged(false);
     emit statusChanged(QStringLiteral("Loaded %1").arg(filePath));
 
     return true;
+}
+
+void PlayerController::goToStart()
+{
+    if (!hasVideoLoaded())
+    {
+        return;
+    }
+
+    pause();
+    if (loadFrameAt(0))
+    {
+        emit statusChanged(QStringLiteral("Returned to the start of the clip."));
+    }
 }
 
 void PlayerController::togglePlayback()
@@ -110,6 +126,28 @@ void PlayerController::stepForward()
     emitCurrentFrame();
 }
 
+void PlayerController::stepBackward()
+{
+    if (!hasVideoLoaded())
+    {
+        return;
+    }
+
+    pause();
+
+    const auto targetFrameIndex = std::max(0, m_currentFrame.index - 1);
+    if (targetFrameIndex == m_currentFrame.index)
+    {
+        emit statusChanged(QStringLiteral("Already at the first frame."));
+        return;
+    }
+
+    if (!loadFrameAt(targetFrameIndex))
+    {
+        emit statusChanged(QStringLiteral("Failed to step backward."));
+    }
+}
+
 void PlayerController::seedTrack(const QPointF& imagePoint)
 {
     if (!hasVideoLoaded())
@@ -117,13 +155,78 @@ void PlayerController::seedTrack(const QPointF& imagePoint)
         return;
     }
 
-    auto& track = m_tracker.seedTrack(m_currentFrame.index, imagePoint);
+    auto& track = m_tracker.seedTrack(m_currentFrame.index, imagePoint, m_motionTrackingEnabled);
+    setSelectedTrackId(track.id);
     refreshOverlays();
 
     emit statusChanged(
-        QStringLiteral("Seeded %1 at frame %2")
+        QStringLiteral("Added %1 at frame %2 (%3)")
             .arg(track.label)
-            .arg(m_currentFrame.index));
+            .arg(m_currentFrame.index)
+            .arg(track.motionTracked ? QStringLiteral("tracked") : QStringLiteral("manual")));
+}
+
+void PlayerController::selectTrack(const QUuid& trackId)
+{
+    if (!m_tracker.hasTrack(trackId))
+    {
+        clearSelection();
+        return;
+    }
+
+    setSelectedTrackId(trackId);
+}
+
+void PlayerController::clearSelection()
+{
+    setSelectedTrackId({});
+}
+
+void PlayerController::moveSelectedTrack(const QPointF& imagePoint)
+{
+    if (!hasVideoLoaded() || m_selectedTrackId.isNull())
+    {
+        return;
+    }
+
+    if (m_tracker.updateTrackSample(m_selectedTrackId, m_currentFrame.index, imagePoint))
+    {
+        refreshOverlays();
+    }
+}
+
+void PlayerController::deleteSelectedTrack()
+{
+    if (m_selectedTrackId.isNull())
+    {
+        return;
+    }
+
+    if (!m_tracker.removeTrack(m_selectedTrackId))
+    {
+        setSelectedTrackId({});
+        emit statusChanged(QStringLiteral("The selected node no longer exists."));
+        return;
+    }
+
+    setSelectedTrackId({});
+    refreshOverlays();
+    emit statusChanged(QStringLiteral("Deleted selected node."));
+}
+
+void PlayerController::setMotionTrackingEnabled(const bool enabled)
+{
+    if (m_motionTrackingEnabled == enabled)
+    {
+        return;
+    }
+
+    m_motionTrackingEnabled = enabled;
+    emit motionTrackingChanged(m_motionTrackingEnabled);
+    emit statusChanged(
+        m_motionTrackingEnabled
+            ? QStringLiteral("Motion tracking enabled.")
+            : QStringLiteral("Motion tracking disabled. New nodes will stay manual."));
 }
 
 bool PlayerController::hasVideoLoaded() const
@@ -134,6 +237,16 @@ bool PlayerController::hasVideoLoaded() const
 bool PlayerController::isPlaying() const
 {
     return m_isPlaying;
+}
+
+bool PlayerController::isMotionTrackingEnabled() const
+{
+    return m_motionTrackingEnabled;
+}
+
+bool PlayerController::hasSelection() const
+{
+    return !m_selectedTrackId.isNull();
 }
 
 int PlayerController::currentFrameIndex() const
@@ -166,10 +279,42 @@ void PlayerController::advancePlayback()
     stepForward();
 }
 
+bool PlayerController::loadFrameAt(const int frameIndex)
+{
+    if (!hasVideoLoaded() || !m_decoder->seekFrame(frameIndex))
+    {
+        return false;
+    }
+
+    const auto frame = m_decoder->readFrame();
+    if (!frame.has_value() || !frame->isValid())
+    {
+        return false;
+    }
+
+    m_currentFrame = *frame;
+    cv::cvtColor(m_currentFrame.bgr, m_currentGrayFrame, cv::COLOR_BGR2GRAY);
+    refreshOverlays();
+    emitCurrentFrame();
+    return true;
+}
+
 void PlayerController::refreshOverlays()
 {
-    m_currentOverlays = m_tracker.overlaysForFrame(m_currentFrame.index);
+    m_currentOverlays = m_tracker.overlaysForFrame(m_currentFrame.index, m_selectedTrackId);
     emit overlaysChanged();
+}
+
+void PlayerController::setSelectedTrackId(const QUuid& trackId)
+{
+    if (m_selectedTrackId == trackId)
+    {
+        return;
+    }
+
+    m_selectedTrackId = trackId;
+    refreshOverlays();
+    emit selectionChanged(!m_selectedTrackId.isNull());
 }
 
 void PlayerController::emitCurrentFrame()
@@ -190,4 +335,3 @@ QImage PlayerController::toImage(const cv::Mat& bgrFrame) const
                QImage::Format_RGB888)
         .copy();
 }
-

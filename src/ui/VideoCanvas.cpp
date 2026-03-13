@@ -42,7 +42,7 @@ void VideoCanvas::paintEvent(QPaintEvent* event)
         painter.drawText(
             rect(),
             Qt::AlignCenter,
-            QStringLiteral("Open a clip, click a target to seed tracking, then press Play."));
+            QStringLiteral("Open a clip, click to add a node, drag nodes to move them, and use Play (Space) to preview."));
         return;
     }
 
@@ -61,6 +61,13 @@ void VideoCanvas::paintEvent(QPaintEvent* event)
             frameRect.top() + overlay.imagePoint.y() * scaleY
         };
 
+        if (overlay.isSelected)
+        {
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(QColor{255, 255, 255, 220}, 3.0));
+            painter.drawEllipse(canvasPoint, 15.0, 15.0);
+        }
+
         painter.setBrush(overlay.color);
         painter.setPen(QPen(Qt::black, 2.0));
         painter.drawEllipse(canvasPoint, 7.0, 7.0);
@@ -75,7 +82,9 @@ void VideoCanvas::paintEvent(QPaintEvent* event)
         const auto labelRect = QRectF{canvasPoint.x() + 10.0, canvasPoint.y() - 18.0, 120.0, 22.0};
         QPainterPath path;
         path.addRoundedRect(labelRect, 6.0, 6.0);
-        painter.fillPath(path, QColor{16, 18, 24, 220});
+        painter.fillPath(
+            path,
+            overlay.isSelected ? QColor{34, 42, 57, 235} : QColor{16, 18, 24, 220});
         painter.setPen(Qt::white);
 
         auto label = overlay.label;
@@ -103,7 +112,67 @@ void VideoCanvas::mousePressEvent(QMouseEvent* event)
         return;
     }
 
+    const auto trackId = trackAt(event->position());
+    if (!trackId.isNull())
+    {
+        m_draggedTrackId = trackId;
+        emit trackSelected(trackId);
+        return;
+    }
+
     emit seedPointRequested(widgetToImagePoint(event->position()));
+}
+
+void VideoCanvas::mouseMoveEvent(QMouseEvent* event)
+{
+    QWidget::mouseMoveEvent(event);
+
+    if (m_draggedTrackId.isNull() || m_frame.isNull())
+    {
+        return;
+    }
+
+    emit selectedTrackMoved(widgetToImagePoint(event->position()));
+}
+
+void VideoCanvas::mouseReleaseEvent(QMouseEvent* event)
+{
+    QWidget::mouseReleaseEvent(event);
+
+    if (event->button() == Qt::LeftButton)
+    {
+        m_draggedTrackId = {};
+    }
+}
+
+QUuid VideoCanvas::trackAt(const QPointF& widgetPoint) const
+{
+    if (m_frame.isNull())
+    {
+        return {};
+    }
+
+    const auto frameRect = imageRenderRect();
+    const auto scaleX = frameRect.width() / static_cast<double>(m_frame.width());
+    const auto scaleY = frameRect.height() / static_cast<double>(m_frame.height());
+    constexpr double hitRadius = 14.0;
+    constexpr double hitRadiusSquared = hitRadius * hitRadius;
+
+    for (auto it = m_overlays.rbegin(); it != m_overlays.rend(); ++it)
+    {
+        const QPointF canvasPoint{
+            frameRect.left() + it->imagePoint.x() * scaleX,
+            frameRect.top() + it->imagePoint.y() * scaleY
+        };
+        const auto delta = widgetPoint - canvasPoint;
+        const auto distanceSquared = delta.x() * delta.x() + delta.y() * delta.y();
+        if (distanceSquared <= hitRadiusSquared)
+        {
+            return it->id;
+        }
+    }
+
+    return {};
 }
 
 QRectF VideoCanvas::imageRenderRect() const
@@ -142,4 +211,3 @@ QPointF VideoCanvas::widgetToImagePoint(const QPointF& widgetPoint) const
         std::clamp(yRatio, 0.0, 1.0) * m_frame.height()
     };
 }
-
