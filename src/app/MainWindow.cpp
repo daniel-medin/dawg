@@ -381,7 +381,7 @@ void MainWindow::updateFrame(const QImage& image, const int frameIndex, const do
             .arg(timestampSeconds, 0, 'f', 2));
     if (m_audioPoolPanel && m_audioPoolPanel->isVisible())
     {
-        refreshAudioPool();
+        updateAudioPoolPlaybackIndicators();
     }
     updateDebugText();
 }
@@ -555,6 +555,7 @@ void MainWindow::refreshAudioPool()
     for (const auto& item : items)
     {
         auto* row = new AudioPoolRow(item.assetPath, m_audioPoolListContainer);
+        row->setProperty("assetPath", item.assetPath);
         row->setToolTip(item.connectionSummary);
         row->setStyleSheet(QStringLiteral(
             "QWidget { background: transparent; border: none; }"
@@ -565,6 +566,7 @@ void MainWindow::refreshAudioPool()
         rowLayout->setSpacing(6);
 
         auto* statusDot = new QLabel(row);
+        statusDot->setObjectName(QStringLiteral("audioPoolStatusDot"));
         statusDot->setFixedSize(8, 8);
         statusDot->setAttribute(Qt::WA_TransparentForMouseEvents);
         statusDot->setStyleSheet(
@@ -575,6 +577,7 @@ void MainWindow::refreshAudioPool()
                     : QStringLiteral("background: #cf5f5f; border-radius: 4px;")));
 
         auto* nameLabel = new QLabel(item.displayName, row);
+        nameLabel->setObjectName(QStringLiteral("audioPoolNameLabel"));
         nameLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
         nameLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         nameLabel->setStyleSheet(QStringLiteral("color: #d8e0ea; font-size: 8.5pt; padding: 0; margin: 0;"));
@@ -633,6 +636,56 @@ void MainWindow::refreshAudioPool()
     }
 
     m_audioPoolListLayout->addStretch(1);
+}
+
+void MainWindow::updateAudioPoolPlaybackIndicators()
+{
+    if (!m_audioPoolListContainer)
+    {
+        return;
+    }
+
+    const auto items = m_controller->audioPoolItems();
+    const auto rowObjects = m_audioPoolListContainer->children();
+
+    for (QObject* child : rowObjects)
+    {
+        auto* row = qobject_cast<QWidget*>(child);
+        if (!row || !row->property("assetPath").isValid())
+        {
+            continue;
+        }
+
+        const auto assetPath = row->property("assetPath").toString();
+        const auto itemIt = std::find_if(
+            items.begin(),
+            items.end(),
+            [&assetPath](const AudioPoolItem& item)
+            {
+                return item.assetPath == assetPath;
+            });
+        if (itemIt == items.end())
+        {
+            continue;
+        }
+
+        row->setToolTip(itemIt->connectionSummary);
+
+        if (auto* statusDot = row->findChild<QLabel*>(QStringLiteral("audioPoolStatusDot"), Qt::FindDirectChildrenOnly))
+        {
+            statusDot->setStyleSheet(
+                itemIt->isPlaying
+                    ? QStringLiteral("background: #63c987; border-radius: 4px;")
+                    : (itemIt->connectedNodeCount > 0
+                        ? QStringLiteral("background: #d88932; border-radius: 4px;")
+                        : QStringLiteral("background: #cf5f5f; border-radius: 4px;")));
+        }
+
+        if (auto* nameLabel = row->findChild<QLabel*>(QStringLiteral("audioPoolNameLabel"), Qt::FindDirectChildrenOnly))
+        {
+            nameLabel->setToolTip(itemIt->connectionSummary);
+        }
+    }
 }
 
 void MainWindow::showStatus(const QString& message)

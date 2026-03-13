@@ -46,6 +46,7 @@ private slots:
     void updateDebugVisibility(bool enabled);
     void updateAudioPoolVisibility(bool visible);
     void refreshAudioPool();
+    void updateAudioPoolPlaybackIndicators();
     void showStatus(const QString& message);
     void showNodeContextMenu(const QUuid& trackId, const QPoint& globalPosition);
 
