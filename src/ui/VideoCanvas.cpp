@@ -61,21 +61,16 @@ void VideoCanvas::paintEvent(QPaintEvent* event)
             frameRect.top() + overlay.imagePoint.y() * scaleY
         };
 
-        if (overlay.isSelected)
-        {
-            painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(QColor{255, 255, 255, 220}, 3.0));
-            painter.drawEllipse(canvasPoint, 15.0, 15.0);
-        }
-
         painter.setBrush(overlay.color);
         painter.setPen(QPen(Qt::black, 2.0));
         painter.drawEllipse(canvasPoint, 7.0, 7.0);
 
-        if (overlay.isSeedFrame)
+        if (overlay.highlightOpacity > 0.0F)
         {
             painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(overlay.color.lighter(145), 2.0));
+            auto ringColor = overlay.color.lighter(145);
+            ringColor.setAlphaF(std::clamp(overlay.highlightOpacity, 0.0F, 1.0F));
+            painter.setPen(QPen(ringColor, 2.0));
             painter.drawEllipse(canvasPoint, 12.0, 12.0);
         }
 

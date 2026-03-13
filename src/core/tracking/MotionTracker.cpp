@@ -136,14 +136,22 @@ const std::vector<TrackPoint>& MotionTracker::tracks() const
     return m_tracks;
 }
 
-std::vector<TrackOverlay> MotionTracker::overlaysForFrame(const int frameIndex, const QUuid& selectedTrackId) const
+std::vector<TrackOverlay> MotionTracker::overlaysForFrame(
+    const int frameIndex,
+    const QUuid& selectedTrackId,
+    const QUuid& fadingTrackId,
+    const float fadingTrackOpacity) const
 {
     std::vector<TrackOverlay> overlays;
     overlays.reserve(m_tracks.size());
 
     for (const auto& track : m_tracks)
     {
-        if (!track.hasSample(frameIndex))
+        const auto imagePoint = track.motionTracked
+            ? (track.hasSample(frameIndex) ? std::optional<QPointF>{track.sampleAt(frameIndex)} : std::nullopt)
+            : track.sampleAtOrBefore(frameIndex);
+
+        if (!imagePoint.has_value())
         {
             continue;
         }
@@ -152,9 +160,10 @@ std::vector<TrackOverlay> MotionTracker::overlaysForFrame(const int frameIndex, 
             .id = track.id,
             .label = track.label,
             .color = track.color,
-            .imagePoint = track.sampleAt(frameIndex),
-            .isSeedFrame = track.seedFrameIndex == frameIndex,
+            .imagePoint = *imagePoint,
             .isSelected = track.id == selectedTrackId,
+            .highlightOpacity = track.id == selectedTrackId ? 1.0F
+                : (track.id == fadingTrackId ? fadingTrackOpacity : 0.0F),
             .hasAttachedAudio = track.attachedAudio.has_value()
         });
     }

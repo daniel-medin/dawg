@@ -45,6 +45,10 @@ target_link_libraries(dawg
         ${OpenCV_LIBS}
 )
 
+if(WIN32)
+    target_link_libraries(dawg PRIVATE Psapi)
+endif()
+
 if(TARGET PkgConfig::FFMPEG)
     target_link_libraries(dawg PRIVATE PkgConfig::FFMPEG)
     target_compile_definitions(dawg PRIVATE DAWG_HAS_FFMPEG=1)

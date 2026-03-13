@@ -12,6 +12,12 @@ PlayerController::PlayerController(QObject* parent)
     : QObject(parent)
 {
     connect(&m_playbackTimer, &QTimer::timeout, this, &PlayerController::advancePlayback);
+    m_selectionFadeTimer.setInterval(30);
+    connect(
+        &m_selectionFadeTimer,
+        &QTimer::timeout,
+        this,
+        &PlayerController::advanceSelectionFade);
 }
 
 bool PlayerController::openVideo(const QString& filePath)
@@ -35,6 +41,9 @@ bool PlayerController::openVideo(const QString& filePath)
     m_tracker.reset();
     m_currentOverlays.clear();
     m_selectedTrackId = {};
+    m_fadingDeselectedTrackId = {};
+    m_fadingDeselectedTrackOpacity = 0.0F;
+    m_selectionFadeTimer.stop();
     m_loadedPath = filePath;
     m_totalFrames = decoder->frameCount();
     m_fps = decoder->fps();
@@ -48,6 +57,7 @@ bool PlayerController::openVideo(const QString& filePath)
     emitCurrentFrame();
     emit videoLoaded(m_loadedPath, m_totalFrames, m_fps);
     emit selectionChanged(false);
+    emit trackAvailabilityChanged(false);
     emit statusChanged(QStringLiteral("Loaded %1").arg(filePath));
 
     return true;
@@ -164,6 +174,7 @@ void PlayerController::seedTrack(const QPointF& imagePoint)
             .arg(track.label)
             .arg(m_currentFrame.index)
             .arg(track.motionTracked ? QStringLiteral("tracked") : QStringLiteral("manual")));
+    emit trackAvailabilityChanged(true);
 }
 
 void PlayerController::selectTrack(const QUuid& trackId)
@@ -204,14 +215,29 @@ void PlayerController::deleteSelectedTrack()
 
     if (!m_tracker.removeTrack(m_selectedTrackId))
     {
-        setSelectedTrackId({});
+        setSelectedTrackId({}, false);
         emit statusChanged(QStringLiteral("The selected node no longer exists."));
         return;
     }
 
-    setSelectedTrackId({});
+    setSelectedTrackId({}, false);
     refreshOverlays();
+    emit trackAvailabilityChanged(hasTracks());
     emit statusChanged(QStringLiteral("Deleted selected node."));
+}
+
+void PlayerController::clearAllTracks()
+{
+    if (!hasTracks())
+    {
+        return;
+    }
+
+    m_tracker.reset();
+    setSelectedTrackId({}, false);
+    refreshOverlays();
+    emit trackAvailabilityChanged(false);
+    emit statusChanged(QStringLiteral("Cleared all nodes."));
 }
 
 void PlayerController::setMotionTrackingEnabled(const bool enabled)
@@ -249,6 +275,11 @@ bool PlayerController::hasSelection() const
     return !m_selectedTrackId.isNull();
 }
 
+bool PlayerController::hasTracks() const
+{
+    return !m_tracker.tracks().empty();
+}
+
 int PlayerController::currentFrameIndex() const
 {
     return m_currentFrame.index;
@@ -279,6 +310,24 @@ void PlayerController::advancePlayback()
     stepForward();
 }
 
+void PlayerController::advanceSelectionFade()
+{
+    if (m_fadingDeselectedTrackId.isNull())
+    {
+        m_selectionFadeTimer.stop();
+        return;
+    }
+
+    m_fadingDeselectedTrackOpacity = std::max(0.0F, m_fadingDeselectedTrackOpacity - 0.18F);
+    if (m_fadingDeselectedTrackOpacity <= 0.0F)
+    {
+        m_fadingDeselectedTrackId = {};
+        m_selectionFadeTimer.stop();
+    }
+
+    refreshOverlays();
+}
+
 bool PlayerController::loadFrameAt(const int frameIndex)
 {
     if (!hasVideoLoaded() || !m_decoder->seekFrame(frameIndex))
@@ -301,15 +350,32 @@ bool PlayerController::loadFrameAt(const int frameIndex)
 
 void PlayerController::refreshOverlays()
 {
-    m_currentOverlays = m_tracker.overlaysForFrame(m_currentFrame.index, m_selectedTrackId);
+    m_currentOverlays = m_tracker.overlaysForFrame(
+        m_currentFrame.index,
+        m_selectedTrackId,
+        m_fadingDeselectedTrackId,
+        m_fadingDeselectedTrackOpacity);
     emit overlaysChanged();
 }
 
-void PlayerController::setSelectedTrackId(const QUuid& trackId)
+void PlayerController::setSelectedTrackId(const QUuid& trackId, const bool fadePreviousSelection)
 {
     if (m_selectedTrackId == trackId)
     {
         return;
+    }
+
+    if (fadePreviousSelection && !m_selectedTrackId.isNull())
+    {
+        m_fadingDeselectedTrackId = m_selectedTrackId;
+        m_fadingDeselectedTrackOpacity = 1.0F;
+        m_selectionFadeTimer.start();
+    }
+    else if (!fadePreviousSelection)
+    {
+        m_fadingDeselectedTrackId = {};
+        m_fadingDeselectedTrackOpacity = 0.0F;
+        m_selectionFadeTimer.stop();
     }
 
     m_selectedTrackId = trackId;

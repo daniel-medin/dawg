@@ -33,12 +33,14 @@ public:
     void clearSelection();
     void moveSelectedTrack(const QPointF& imagePoint);
     void deleteSelectedTrack();
+    void clearAllTracks();
     void setMotionTrackingEnabled(bool enabled);
 
     [[nodiscard]] bool hasVideoLoaded() const;
     [[nodiscard]] bool isPlaying() const;
     [[nodiscard]] bool isMotionTrackingEnabled() const;
     [[nodiscard]] bool hasSelection() const;
+    [[nodiscard]] bool hasTracks() const;
     [[nodiscard]] int currentFrameIndex() const;
     [[nodiscard]] int totalFrames() const;
     [[nodiscard]] double fps() const;
@@ -52,16 +54,18 @@ signals:
     void playbackStateChanged(bool playing);
     void motionTrackingChanged(bool enabled);
     void selectionChanged(bool hasSelection);
+    void trackAvailabilityChanged(bool hasTracks);
     void statusChanged(const QString& message);
 
 private slots:
     void advancePlayback();
+    void advanceSelectionFade();
 
 private:
     bool loadFrameAt(int frameIndex);
     void refreshOverlays();
     void emitCurrentFrame();
-    void setSelectedTrackId(const QUuid& trackId);
+    void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
     [[nodiscard]] QImage toImage(const cv::Mat& bgrFrame) const;
 
     std::unique_ptr<VideoDecoder> m_decoder;
@@ -76,4 +80,7 @@ private:
     bool m_isPlaying = false;
     bool m_motionTrackingEnabled = false;
     QUuid m_selectedTrackId;
+    QUuid m_fadingDeselectedTrackId;
+    float m_fadingDeselectedTrackOpacity = 0.0F;
+    QTimer m_selectionFadeTimer;
 };

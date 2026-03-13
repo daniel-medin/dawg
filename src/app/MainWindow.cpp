@@ -1,22 +1,58 @@
 #include "app/MainWindow.h"
 
+#include <QApplication>
+#include <QCoreApplication>
+#include <QDir>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QKeySequence>
 #include <QShortcut>
 #include <QStatusBar>
 #include <QVBoxLayout>
 #include <QWidget>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <psapi.h>
+#endif
+
 #include "app/PlayerController.h"
 #include "ui/VideoCanvas.h"
+
+namespace
+{
+QString currentMemoryUsageText()
+{
+#ifdef Q_OS_WIN
+    PROCESS_MEMORY_COUNTERS_EX counters{};
+    if (GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            reinterpret_cast<PPROCESS_MEMORY_COUNTERS>(&counters),
+            sizeof(counters)))
+    {
+        const auto workingSetMb = static_cast<double>(counters.WorkingSetSize) / (1024.0 * 1024.0);
+        return QStringLiteral("Memory %1 MB").arg(workingSetMb, 0, 'f', 1);
+    }
+#endif
+
+    return QStringLiteral("Memory --");
+}
+}
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_controller(new PlayerController(this))
 {
     buildUi();
+    qApp->installEventFilter(this);
+    m_clearAllShortcutTimer.setSingleShot(true);
+    m_clearAllShortcutTimer.setInterval(1500);
+    m_memoryUsageTimer.setInterval(1000);
+    connect(&m_clearAllShortcutTimer, &QTimer::timeout, this, &MainWindow::clearPendingClearAllShortcut);
+    connect(&m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsage);
 
     connect(m_openButton, &QPushButton::clicked, this, &MainWindow::openVideo);
     connect(
@@ -29,6 +65,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_stepBackButton, &QPushButton::clicked, m_controller, &PlayerController::stepBackward);
     connect(m_stepButton, &QPushButton::clicked, m_controller, &PlayerController::stepForward);
     connect(m_deleteButton, &QPushButton::clicked, m_controller, &PlayerController::deleteSelectedTrack);
+    connect(m_clearAllButton, &QPushButton::clicked, m_controller, &PlayerController::clearAllTracks);
     connect(m_canvas, &VideoCanvas::seedPointRequested, m_controller, &PlayerController::seedTrack);
     connect(m_canvas, &VideoCanvas::trackSelected, m_controller, &PlayerController::selectTrack);
     connect(m_canvas, &VideoCanvas::selectedTrackMoved, m_controller, &PlayerController::moveSelectedTrack);
@@ -38,7 +75,6 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_stepBackShortcut, &QShortcut::activated, m_controller, &PlayerController::stepBackward);
     connect(m_stepForwardShortcut, &QShortcut::activated, m_controller, &PlayerController::stepForward);
     connect(m_deleteShortcut, &QShortcut::activated, m_controller, &PlayerController::deleteSelectedTrack);
-
     connect(m_controller, &PlayerController::frameReady, this, &MainWindow::updateFrame);
     connect(m_controller, &PlayerController::overlaysChanged, this, &MainWindow::refreshOverlays);
     connect(m_controller, &PlayerController::playbackStateChanged, this, &MainWindow::updatePlaybackState);
@@ -48,13 +84,58 @@ MainWindow::MainWindow(QWidget* parent)
         this,
         &MainWindow::updateMotionTrackingState);
     connect(m_controller, &PlayerController::selectionChanged, this, &MainWindow::updateSelectionState);
+    connect(m_controller, &PlayerController::trackAvailabilityChanged, this, &MainWindow::updateTrackAvailabilityState);
     connect(m_controller, &PlayerController::videoLoaded, this, &MainWindow::handleVideoLoaded);
     connect(m_controller, &PlayerController::statusChanged, this, &MainWindow::showStatus);
 
     updatePlaybackState(false);
     syncMotionTrackingUi(m_controller->isMotionTrackingEnabled());
     updateSelectionState(m_controller->hasSelection());
+    updateTrackAvailabilityState(m_controller->hasTracks());
+    updateMemoryUsage();
+    m_memoryUsageTimer.start();
     showStatus(QStringLiteral("Open a clip to start adding nodes."));
+    tryOpenLocalDevVideo();
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() == QEvent::KeyPress)
+    {
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if (!keyEvent->isAutoRepeat())
+        {
+            const auto modifiers = keyEvent->modifiers();
+            const auto key = keyEvent->key();
+
+            if (key == Qt::Key_A && modifiers == Qt::ControlModifier)
+            {
+                armClearAllShortcut();
+                return true;
+            }
+
+            if (key == Qt::Key_Backspace && m_clearAllShortcutArmed)
+            {
+                clearPendingClearAllShortcut();
+                if (m_controller->hasTracks())
+                {
+                    m_controller->clearAllTracks();
+                }
+                return true;
+            }
+
+            if (m_clearAllShortcutArmed
+                && key != Qt::Key_Control
+                && key != Qt::Key_Shift
+                && key != Qt::Key_Alt
+                && key != Qt::Key_Meta)
+            {
+                clearPendingClearAllShortcut();
+            }
+        }
+    }
+
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::openVideo()
@@ -82,6 +163,11 @@ void MainWindow::updateFrame(const QImage& image, const int frameIndex, const do
             .arg(timestampSeconds, 0, 'f', 2));
 }
 
+void MainWindow::updateMemoryUsage()
+{
+    m_memoryLabel->setText(currentMemoryUsageText());
+}
+
 void MainWindow::refreshOverlays()
 {
     m_canvas->setOverlays(m_controller->currentOverlays());
@@ -100,6 +186,15 @@ void MainWindow::updateMotionTrackingState(const bool enabled)
 void MainWindow::updateSelectionState(const bool hasSelection)
 {
     m_deleteButton->setEnabled(hasSelection);
+}
+
+void MainWindow::updateTrackAvailabilityState(const bool hasTracks)
+{
+    m_clearAllButton->setEnabled(hasTracks);
+    if (!hasTracks)
+    {
+        clearPendingClearAllShortcut();
+    }
 }
 
 void MainWindow::handleVideoLoaded(const QString& filePath, const int totalFrames, const double fps)
@@ -139,9 +234,12 @@ void MainWindow::buildUi()
     m_stepBackButton = new QPushButton(QStringLiteral("Step Back (,)"), root);
     m_stepButton = new QPushButton(QStringLiteral("Step (.)"), root);
     m_deleteButton = new QPushButton(QStringLiteral("Delete (Backspace)"), root);
+    m_clearAllButton = new QPushButton(QStringLiteral("Clear All (Ctrl+A, Backspace)"), root);
     m_deleteButton->setEnabled(false);
+    m_clearAllButton->setEnabled(false);
     m_clipLabel = new QLabel(QStringLiteral("No clip loaded"), root);
     m_frameLabel = new QLabel(QStringLiteral("Frame --"), root);
+    m_memoryLabel = new QLabel(currentMemoryUsageText(), root);
     m_playPauseShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
     m_startShortcut = new QShortcut(QKeySequence(Qt::Key_Return), this);
     m_numpadStartShortcut = new QShortcut(QKeySequence(Qt::Key_Enter), this);
@@ -162,8 +260,10 @@ void MainWindow::buildUi()
     transportRow->addWidget(m_stepBackButton);
     transportRow->addWidget(m_stepButton);
     transportRow->addWidget(m_deleteButton);
+    transportRow->addWidget(m_clearAllButton);
     transportRow->addSpacing(12);
     transportRow->addWidget(m_clipLabel, 1);
+    transportRow->addWidget(m_memoryLabel);
     transportRow->addWidget(m_frameLabel);
 
     m_hintLabel = new QLabel(root);
@@ -215,4 +315,58 @@ void MainWindow::syncMotionTrackingUi(const bool enabled)
         enabled
             ? QStringLiteral("Click to add tracked nodes, drag a node to reposition it on the current frame, and use Delete (Backspace) to remove the selected node.")
             : QStringLiteral("Click to add manual nodes, drag a node to reposition it on the current frame, and turn on Motion Tracking if you want new nodes to automatically follow motion."));
+}
+
+void MainWindow::tryOpenLocalDevVideo()
+{
+#ifdef QT_DEBUG
+    const QDir appDir{QCoreApplication::applicationDirPath()};
+    const QStringList candidateRoots{
+        QDir::cleanPath(appDir.filePath("../../src")),
+        QDir::currentPath()
+    };
+
+    for (const auto& rootPath : candidateRoots)
+    {
+        QDir devDir{QDir(rootPath).filePath(".dev")};
+        if (!devDir.exists())
+        {
+            continue;
+        }
+
+        const auto matches = devDir.entryInfoList(
+            QStringList{
+                QStringLiteral("test-video.mov"),
+                QStringLiteral("test-video.MOV")
+            },
+            QDir::Files,
+            QDir::Name);
+
+        if (matches.isEmpty())
+        {
+            continue;
+        }
+
+        m_controller->openVideo(matches.front().absoluteFilePath());
+        return;
+    }
+#endif
+}
+
+void MainWindow::armClearAllShortcut()
+{
+    if (!m_controller->hasTracks())
+    {
+        return;
+    }
+
+    m_clearAllShortcutArmed = true;
+    m_clearAllShortcutTimer.start();
+    showStatus(QStringLiteral("Clear all armed. Press Backspace to remove all nodes."));
+}
+
+void MainWindow::clearPendingClearAllShortcut()
+{
+    m_clearAllShortcutArmed = false;
+    m_clearAllShortcutTimer.stop();
 }

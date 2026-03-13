@@ -1,4 +1,5 @@
 .vs/
+.dev/
 build/
 out/
 dist/
@@ -10,4 +11,3 @@ dist/
 *.pdb
 *.ilk
 *.exe
-

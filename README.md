@@ -120,6 +120,8 @@ What they do:
 
 You still edit code in your normal repo. The short-path workspace is just the build mirror.
 
+For local-only dev convenience, you can place a sample clip at `.dev/test-video.mov`. Debug launches will auto-open it when present, and `.dev/` is ignored by git.
+
 ## Easiest way to start
 
 If you are new to native C++ setup on Windows, use the launcher in the repo root:

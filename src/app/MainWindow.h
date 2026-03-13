@@ -5,6 +5,7 @@
 #include <QMainWindow>
 #include <QPushButton>
 #include <QShortcut>
+#include <QTimer>
 
 class PlayerController;
 class VideoCanvas;
@@ -16,19 +17,27 @@ class MainWindow final : public QMainWindow
 public:
     explicit MainWindow(QWidget* parent = nullptr);
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private slots:
     void openVideo();
     void updateFrame(const QImage& image, int frameIndex, double timestampSeconds);
+    void updateMemoryUsage();
     void refreshOverlays();
     void updatePlaybackState(bool playing);
     void updateMotionTrackingState(bool enabled);
     void updateSelectionState(bool hasSelection);
+    void updateTrackAvailabilityState(bool hasTracks);
     void handleVideoLoaded(const QString& filePath, int totalFrames, double fps);
     void showStatus(const QString& message);
 
 private:
     void buildUi();
     void syncMotionTrackingUi(bool enabled);
+    void tryOpenLocalDevVideo();
+    void armClearAllShortcut();
+    void clearPendingClearAllShortcut();
 
     PlayerController* m_controller = nullptr;
     VideoCanvas* m_canvas = nullptr;
@@ -39,8 +48,10 @@ private:
     QPushButton* m_stepBackButton = nullptr;
     QPushButton* m_stepButton = nullptr;
     QPushButton* m_deleteButton = nullptr;
+    QPushButton* m_clearAllButton = nullptr;
     QLabel* m_clipLabel = nullptr;
     QLabel* m_frameLabel = nullptr;
+    QLabel* m_memoryLabel = nullptr;
     QLabel* m_hintLabel = nullptr;
     QShortcut* m_playPauseShortcut = nullptr;
     QShortcut* m_startShortcut = nullptr;
@@ -48,4 +59,7 @@ private:
     QShortcut* m_stepBackShortcut = nullptr;
     QShortcut* m_stepForwardShortcut = nullptr;
     QShortcut* m_deleteShortcut = nullptr;
+    bool m_clearAllShortcutArmed = false;
+    QTimer m_clearAllShortcutTimer;
+    QTimer m_memoryUsageTimer;
 };

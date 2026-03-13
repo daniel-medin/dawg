@@ -34,6 +34,17 @@ struct TrackPoint
         const auto it = samples.find(frameIndex);
         return it != samples.end() ? it->second : QPointF{};
     }
+
+    [[nodiscard]] std::optional<QPointF> sampleAtOrBefore(const int frameIndex) const
+    {
+        const auto it = samples.upper_bound(frameIndex);
+        if (it == samples.begin())
+        {
+            return std::nullopt;
+        }
+
+        return std::prev(it)->second;
+    }
 };
 
 struct TrackOverlay
@@ -42,7 +53,7 @@ struct TrackOverlay
     QString label;
     QColor color;
     QPointF imagePoint;
-    bool isSeedFrame = false;
     bool isSelected = false;
+    float highlightOpacity = 0.0F;
     bool hasAttachedAudio = false;
 };

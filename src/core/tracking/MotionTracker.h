@@ -17,7 +17,11 @@ public:
     bool removeTrack(const QUuid& trackId);
 
     [[nodiscard]] const std::vector<TrackPoint>& tracks() const;
-    [[nodiscard]] std::vector<TrackOverlay> overlaysForFrame(int frameIndex, const QUuid& selectedTrackId = {}) const;
+    [[nodiscard]] std::vector<TrackOverlay> overlaysForFrame(
+        int frameIndex,
+        const QUuid& selectedTrackId = {},
+        const QUuid& fadingTrackId = {},
+        float fadingTrackOpacity = 0.0F) const;
 
 private:
     [[nodiscard]] QColor nextTrackColor();
