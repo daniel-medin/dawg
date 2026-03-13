@@ -1,6 +1,0 @@
-Package: icu
-Feature: tools
-Architecture: x64-windows
-Multi-Arch: same
-Description: Build tools
-Status: install ok installed

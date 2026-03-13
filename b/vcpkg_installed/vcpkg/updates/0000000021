@@ -1,6 +1,0 @@
-Package: ffmpeg
-Feature: avdevice
-Architecture: x64-windows
-Multi-Arch: same
-Description: Build the avdevice library
-Status: install ok installed

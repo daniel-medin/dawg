@@ -1,8 +1,13 @@
 .vs/
 .dev/
+.tools/vcpkg/
+b/
 build/
+rel/
+rel2/
 out/
 dist/
+.watch-*.log
 *.user
 *.VC.db
 *.VC.opendb

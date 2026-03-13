@@ -1,8 +1,0 @@
-Package: icu
-Version: 78.2
-Depends: vcpkg-cmake-get-vars, vcpkg-make
-Architecture: x64-windows
-Multi-Arch: same
-Abi: 87b1f5a7b1ea6f641358f1d188e7d09346b53f6e2fd9eb559f3cb5de8a1beb6f
-Description: Mature and widely used Unicode and localization library.
-Status: install ok half-installed

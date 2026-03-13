@@ -1,8 +1,0 @@
-Package: md4c
-Version: 0.5.2
-Depends: vcpkg-cmake, vcpkg-cmake-config
-Architecture: x64-windows
-Multi-Arch: same
-Abi: e0fd447d35d154c09ee62d3688b3d381e1fc65e502c608cf9210015a5eb1a3a0
-Description: MD4C is a C library providing a Markdown parser.
-Status: install ok installed

@@ -1,9 +1,0 @@
-Package: pcre2
-Version: 10.47
-Depends: vcpkg-cmake, vcpkg-cmake-config
-Architecture: x64-windows
-Multi-Arch: same
-Abi: 00d81aaab092aa36f72206ad68edd7b39b97811a3c0b7c278cba95a9ef9134b7
-Description: Regular Expression pattern matching using the same syntax and semantics as Perl 5.
-Default-Features: platform-default-features
-Status: install ok installed

@@ -1,9 +1,0 @@
-Package: dbus
-Version: 1.16.2
-Port-Version: 3
-Depends: expat, vcpkg-cmake, vcpkg-cmake-config
-Architecture: x64-windows
-Multi-Arch: same
-Abi: 7f1f6e0acbc8b9a7f17395006f79a40dd8775eaffdef84e0e0a8b61ab5b61e4c
-Description: D-Bus specification and reference implementation, including libdbus and dbus-daemon
-Status: install ok half-installed
