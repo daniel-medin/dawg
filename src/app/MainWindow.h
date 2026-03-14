@@ -16,6 +16,7 @@
 
 class PlayerController;
 class DebugOverlayWindow;
+class NativeVideoViewport;
 class TimelineView;
 class VideoCanvas;
 
@@ -65,6 +66,7 @@ private slots:
     void updateAudioPoolPlaybackIndicators();
     void updateVideoAudioRow();
     void showStatus(const QString& message);
+    void updateNativeViewportVisibility(bool visible);
 
 private:
     void showNodeContextMenu(const QUuid& trackId, const QPoint& globalPosition, bool includeSoundActions);
@@ -98,6 +100,8 @@ private:
     QLabel* m_statusToast = nullptr;
     QLabel* m_canvasTipsOverlay = nullptr;
     DebugOverlayWindow* m_debugOverlay = nullptr;
+    QWidget* m_nativeViewportWindow = nullptr;
+    NativeVideoViewport* m_nativeViewport = nullptr;
     QFrame* m_audioPoolPanel = nullptr;
     QWidget* m_videoAudioRow = nullptr;
     QLabel* m_videoAudioLabel = nullptr;
@@ -139,6 +143,7 @@ private:
     QAction* m_clearAllAction = nullptr;
     QAction* m_motionTrackingAction = nullptr;
     QAction* m_toggleDebugAction = nullptr;
+    QAction* m_showNativeViewportAction = nullptr;
     QShortcut* m_playPauseShortcut = nullptr;
     QShortcut* m_startShortcut = nullptr;
     QShortcut* m_numpadStartShortcut = nullptr;
@@ -171,6 +176,7 @@ private:
     QString m_memoryUsageText;
     QString m_processorUsageText;
     QString m_videoMemoryUsageText;
+    QImage m_lastPresentedFrame;
     QTimer m_clearAllShortcutTimer;
     QTimer m_memoryUsageTimer;
     QTimer m_statusToastTimer;

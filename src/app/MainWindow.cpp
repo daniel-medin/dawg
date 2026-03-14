@@ -40,6 +40,7 @@
 
 #include "app/PlayerController.h"
 #include "ui/DebugOverlayWindow.h"
+#include "ui/NativeVideoViewport.h"
 #include "ui/TimelineView.h"
 #include "ui/VideoCanvas.h"
 
@@ -276,6 +277,14 @@ MainWindow::MainWindow(QWidget* parent)
         updateAudioPoolVisibility(visible);
         showStatus(visible ? QStringLiteral("Audio Pool shown.") : QStringLiteral("Audio Pool hidden."));
     });
+    connect(m_showNativeViewportAction, &QAction::toggled, this, [this](const bool visible)
+    {
+        updateNativeViewportVisibility(visible);
+        showStatus(
+            visible
+                ? QStringLiteral("Native video viewport test shown.")
+                : QStringLiteral("Native video viewport test hidden."));
+    });
     connect(
         m_motionTrackingAction,
         &QAction::toggled,
@@ -320,6 +329,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_showAllNodeNamesAction, &QAction::toggled, this, [this](const bool enabled)
     {
         m_canvas->setShowAllLabels(enabled);
+        if (m_nativeViewport)
+        {
+            m_nativeViewport->setShowAllLabels(enabled);
+        }
         showStatus(
             enabled
                 ? QStringLiteral("Node names always visible.")
@@ -428,6 +441,16 @@ MainWindow::MainWindow(QWidget* parent)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if (watched == m_nativeViewportWindow
+        && (event->type() == QEvent::Hide || event->type() == QEvent::Close))
+    {
+        if (m_showNativeViewportAction && m_showNativeViewportAction->isChecked())
+        {
+            const QSignalBlocker blocker{m_showNativeViewportAction};
+            m_showNativeViewportAction->setChecked(false);
+        }
+    }
+
     if (m_canvasTipsOverlay && m_canvasTipsOverlay->isVisible())
     {
         const auto eventType = event->type();
@@ -683,7 +706,12 @@ void MainWindow::moveSelectedNodeRight()
 
 void MainWindow::updateFrame(const QImage& image, const int frameIndex, const double timestampSeconds)
 {
+    m_lastPresentedFrame = image;
     m_canvas->setPresentedFrame(image, m_controller->currentVideoFrame(), m_controller->videoFrameSize());
+    if (m_nativeViewport)
+    {
+        m_nativeViewport->setPresentedFrame(image, m_controller->currentVideoFrame(), m_controller->videoFrameSize());
+    }
     m_timeline->setCurrentFrame(frameIndex);
     m_frameLabel->setText(
         QStringLiteral("Frame %1  |  %2 s")
@@ -767,6 +795,10 @@ void MainWindow::updateDebugText()
 void MainWindow::refreshOverlays()
 {
     m_canvas->setOverlays(m_controller->currentOverlays());
+    if (m_nativeViewport)
+    {
+        m_nativeViewport->setOverlays(m_controller->currentOverlays());
+    }
     refreshTimeline();
 }
 
@@ -846,6 +878,15 @@ void MainWindow::handleVideoLoaded(const QString& filePath, const int totalFrame
     const QFileInfo fileInfo{filePath};
     m_clipName = fileInfo.fileName();
     m_timeline->setTimeline(totalFrames, fps);
+    if (m_nativeViewportWindow)
+    {
+        m_nativeViewportWindow->setWindowTitle(QStringLiteral("Native Video Viewport Test - %1").arg(m_clipName));
+    }
+    if (m_nativeViewport)
+    {
+        m_nativeViewport->setPresentedFrame(m_lastPresentedFrame, m_controller->currentVideoFrame(), m_controller->videoFrameSize());
+        m_nativeViewport->setOverlays(m_controller->currentOverlays());
+    }
     refreshTimeline();
     showCanvasTipsOverlay();
     updateDebugText();
@@ -861,6 +902,43 @@ void MainWindow::updateDebugVisibility(const bool enabled)
     if (m_toggleDebugAction && m_toggleDebugAction->isChecked() != enabled)
     {
         m_toggleDebugAction->setChecked(enabled);
+    }
+}
+
+void MainWindow::updateNativeViewportVisibility(const bool visible)
+{
+    if (!m_nativeViewportWindow)
+    {
+        return;
+    }
+
+    if (m_canvas)
+    {
+        m_canvas->setNativeProbeEnabled(!visible);
+    }
+
+    if (visible)
+    {
+        if (m_nativeViewport)
+        {
+            m_nativeViewport->setPresentedFrame(m_lastPresentedFrame, m_controller->currentVideoFrame(), m_controller->videoFrameSize());
+            m_nativeViewport->setOverlays(m_controller->currentOverlays());
+            m_nativeViewport->setShowAllLabels(m_showAllNodeNamesAction && m_showAllNodeNamesAction->isChecked());
+        }
+
+        m_nativeViewportWindow->show();
+        m_nativeViewportWindow->raise();
+        m_nativeViewportWindow->activateWindow();
+    }
+    else
+    {
+        m_nativeViewportWindow->hide();
+    }
+
+    if (m_showNativeViewportAction && m_showNativeViewportAction->isChecked() != visible)
+    {
+        const QSignalBlocker blocker{m_showNativeViewportAction};
+        m_showNativeViewportAction->setChecked(visible);
     }
 }
 
@@ -1479,6 +1557,9 @@ void MainWindow::buildMenus()
     m_toggleDebugAction = new QAction(QStringLiteral("Toggle Debug"), this);
     m_toggleDebugAction->setCheckable(true);
     m_toggleDebugAction->setChecked(true);
+    m_showNativeViewportAction = new QAction(QStringLiteral("Native Video Viewport Test"), this);
+    m_showNativeViewportAction->setCheckable(true);
+    m_showNativeViewportAction->setChecked(false);
 
     m_setNodeStartAction->setEnabled(false);
     m_setNodeEndAction->setEnabled(false);
@@ -1556,6 +1637,7 @@ void MainWindow::buildMenus()
 
     auto* debugMenu = menuBar()->addMenu(QStringLiteral("&Debug"));
     debugMenu->addAction(m_toggleDebugAction);
+    debugMenu->addAction(m_showNativeViewportAction);
 }
 
 void MainWindow::buildUi()
@@ -1634,6 +1716,17 @@ void MainWindow::buildUi()
 
     m_canvas = new VideoCanvas(m_mainVerticalSplitter);
     m_canvas->setRenderService(m_controller->renderService());
+    m_nativeViewportWindow = new QWidget(nullptr);
+    m_nativeViewportWindow->setWindowTitle(QStringLiteral("Native Video Viewport Test"));
+    m_nativeViewportWindow->resize(960, 540);
+    m_nativeViewportWindow->hide();
+    m_nativeViewportWindow->installEventFilter(this);
+    auto* nativeViewportLayout = new QVBoxLayout(m_nativeViewportWindow);
+    nativeViewportLayout->setContentsMargins(0, 0, 0, 0);
+    nativeViewportLayout->setSpacing(0);
+    m_nativeViewport = new NativeVideoViewport(m_nativeViewportWindow);
+    m_nativeViewport->setRenderService(nullptr);
+    nativeViewportLayout->addWidget(m_nativeViewport, 1);
     m_timelinePanel = new QFrame(m_mainVerticalSplitter);
     m_timelinePanel->setObjectName(QStringLiteral("timelinePanel"));
     m_timelinePanel->setFrameShape(QFrame::NoFrame);

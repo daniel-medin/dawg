@@ -90,6 +90,18 @@ public:
         update();
     }
 
+    void setNativeProbeEnabled(const bool enabled)
+    {
+        if (m_nativeProbeEnabled == enabled)
+        {
+            return;
+        }
+
+        m_nativeProbeEnabled = enabled;
+        m_nativeProbePending = enabled;
+        update();
+    }
+
     [[nodiscard]] QRectF imageRenderRect() const
     {
         if (m_frame.isNull())
@@ -139,7 +151,10 @@ private:
 
     void runNativeProbe(const QRectF& frameRect)
     {
-        if (!m_nativeProbePending || !m_renderService || !m_renderService->canPresentToNativeWindow())
+        if (!m_nativeProbeEnabled
+            || !m_nativeProbePending
+            || !m_renderService
+            || !m_renderService->canPresentToNativeWindow())
         {
             return;
         }
@@ -157,6 +172,7 @@ private:
     QSize m_sourceFrameSize;
     VideoFrame m_videoFrame;
     RenderService* m_renderService = nullptr;
+    bool m_nativeProbeEnabled = true;
     bool m_nativeProbePending = true;
 };
 
@@ -694,6 +710,11 @@ void VideoCanvas::setSourceFrameSize(const QSize& sourceSize)
 {
     static_cast<VideoSurfaceLayer*>(m_surfaceLayer)->setSourceFrameSize(sourceSize);
     static_cast<VideoOverlayLayer*>(m_overlayLayer)->setSourceFrameSize(sourceSize);
+}
+
+void VideoCanvas::setNativeProbeEnabled(const bool enabled)
+{
+    static_cast<VideoSurfaceLayer*>(m_surfaceLayer)->setNativeProbeEnabled(enabled);
 }
 
 void VideoCanvas::setDisplayScaleFactor(const double scaleFactor)

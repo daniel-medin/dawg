@@ -66,6 +66,8 @@ add_executable(dawg WIN32
     src/core/video/VideoPlaybackService.h
     src/ui/VideoCanvas.cpp
     src/ui/VideoCanvas.h
+    src/ui/NativeVideoViewport.cpp
+    src/ui/NativeVideoViewport.h
     src/ui/DebugOverlayWindow.cpp
     src/ui/DebugOverlayWindow.h
     src/ui/TimelineView.cpp
