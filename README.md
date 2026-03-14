@@ -1,108 +1,87 @@
-# dawg
+# DAWG
 
-![dawg logo](assets/logo.png)
+<p align="center">
+  <img src="assets/logo.png" alt="DAWG logo" width="760">
+</p>
 
-Native desktop foundation for a motion-tracked audio tool.
+<p align="center">
+  Video-first sound design for moving things in moving pictures.
+</p>
 
-## What we are building
+## What DAWG Is
 
-`dawg` is intended to become a video-first audio editing app, not a traditional DAW built around lots of horizontal tracks.
+DAWG is a native desktop app for attaching sound to nodes inside the video frame instead of treating audio as a stack of ordinary timeline lanes.
 
-The core idea is that audio should be attached to nodes in the video frame rather than dropped onto a standard timeline track. A node can follow motion in the shot, and that motion can drive audio behavior over time. Examples we want to support include:
+The idea is simple:
 
-- reverb amount changing with perceived distance
-- EQ changes driven by position or movement
-- doppler-style effects from motion
-- panning based on screen position
-- delay or timing effects influenced by where the node sits in the frame
+- place a node in the picture
+- let it follow motion or keyframe it manually
+- attach sound to that node
+- let picture position drive playback behavior like pan and, later, depth-aware spatial sound
 
-In other words, the video image is not just reference material. It is part of the editing model.
+The video is not just reference. It is part of the editing model.
 
-## First product direction
+## Current Direction
 
-The first version should focus on a stable and editable node workflow before trying to become a complete audio workstation.
+DAWG is moving toward a video-first editor where:
 
-Priority areas for that first version:
+- nodes live in the frame and on the timeline
+- audio belongs to nodes
+- playback is tied to what happens in the picture
+- the UI stays focused on the film, with utility panels around it
 
-- stable motion tracking
-- control over how long a node remains active
-- adjustable tracking resolution or cadence
-- ability to decide whether tracking happens every frame, every few frames, or at a wider interval such as every few seconds
-- keyframe editing with visible lines and handles so tracking mistakes can be corrected manually
+This is not intended to feel like a traditional DAW with lots of horizontal audio tracks first and picture second.
 
-These controls will likely end up as project or tracker settings, but the main goal is to make node behavior predictable and easy to correct.
+## Current Features
 
-## Open product question
+- open a video and play, seek, step, and scrub it
+- create and select nodes in the viewer
+- show nodes as spans in the timeline
+- drag node starts, ends, and full spans in the timeline
+- attach audio to nodes and trim a node to the sound length
+- auto-pan nodes from left to right screen position
+- drag audio from the Audio Pool onto the video to create a node
+- use an Audio Pool side panel for imported sounds
+- show embedded video audio in the Audio Pool with mute/unmute
+- use a floating debug window for runtime stats
 
-Motion tracking may not be the right first interaction model for every case.
+## Tech Stack
 
-A simpler starting point may be:
+- `Qt 6 Widgets` for the desktop UI
+- `JUCE` for the audio backend
+- `FFmpeg` for the main video decode path
+- `OpenCV` for motion tracking and some fallback video utilities
+- `Direct3D 11` groundwork for the render path
+- `CMake` + `vcpkg` on Windows
 
-- click a node on the screen
-- move forward in time
-- place the next keyframe manually
-- nudge and refine the path by editing handles and keyframes
+## Project Layout
 
-That means the product should stay open to a hybrid approach:
+- `src/app` — app-level orchestration and controller logic
+- `src/core/audio` — audio engine, duration probing, video-audio extraction
+- `src/core/video` — playback, decoder abstraction, FFmpeg/OpenCV paths
+- `src/core/render` — render backend abstractions and D3D11 groundwork
+- `src/core/tracking` — node models and motion tracking
+- `src/ui` — timeline, canvas, floating panels, UI widgets
 
-- automatic tracking when it is reliable
-- manual keyframing when the user wants tighter control
-- tooling that makes it easy to switch between the two
+## Build
 
-## First milestone
+### Requirements
 
-The initial vertical slice is:
-
-- open a video file
-- display frames in a Qt canvas
-- click the video to seed a tracking point
-- propagate that point forward with OpenCV optical flow while the video plays
-- keep the track model ready for later audio attachment
-
-This repository is set up so the next milestone can bind an audio asset to a track and pan or spatialize it from the tracked position.
-
-## Stack
-
-- `Qt 6 Widgets` for the desktop UI and canvas
-- `OpenCV` for decoding fallback and optical-flow tracking
-- `FFmpeg` wired in at the build level for the later decoder/export path
-- `CMake` + `vcpkg` for dependency management on Windows
-
-## Project layout
-
-- `src/app`: main window and playback/controller orchestration
-- `src/core/video`: decoder interfaces and the current OpenCV-backed implementation
-- `src/core/tracking`: track models and the motion tracker
-- `src/ui`: custom video canvas and overlay rendering
-
-## Prerequisites
-
-Install these before building:
-
-- Visual Studio 2022 with Desktop development for C++
+- Windows
+- Visual Studio 2022 with C++ desktop tools
 - CMake 3.27+
 - `vcpkg`
 
-One workable Windows setup path is:
-
-```powershell
-winget install Kitware.CMake
-winget install Microsoft.VisualStudio.2022.BuildTools
-git clone https://github.com/microsoft/vcpkg $env:USERPROFILE\vcpkg
-$env:VCPKG_ROOT="$env:USERPROFILE\vcpkg"
-& "$env:VCPKG_ROOT\bootstrap-vcpkg.bat"
-```
-
-## Build
+### Standard build
 
 ```powershell
 cmake --preset windows-msvc
 cmake --build --preset windows-msvc-debug
 ```
 
-## Dev loop on Windows
+### Recommended dev loop
 
-If your normal repo path is long enough to upset `Qt` or `vcpkg`, use the repo scripts from your usual checkout and let them build from a short real path automatically:
+The repo includes helper scripts that mirror the source into a short path to avoid Windows path-length pain with Qt, vcpkg, and generated artifacts:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Dawg.ps1
@@ -110,58 +89,40 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Run-Dawg.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Watch-Dawg.ps1
 ```
 
-What they do:
+These scripts build in a short-path workspace like `C:\dawg-dev\src` and keep your normal checkout as the source of truth.
 
-- sync your current repo into `C:\dawg-dev\src`
-- keep a short-path `vcpkg` checkout in `C:\dv`
-- build the app in `C:\dawg-dev\out`
-- optionally launch the app when using `Run-Dawg.ps1`
-- keep rebuilding, killing, and relaunching the app when using `Watch-Dawg.ps1`
+## Local Dev Notes
 
-You still edit code in your normal repo. The short-path workspace is just the build mirror.
+- `.dev/` is ignored by git and can hold local test videos and audio files
+- build folders like `build/`, `b/`, `rel/`, and `rel2/` are ignored
+- `.tools/vcpkg/` is ignored as well
 
-For local-only dev convenience, you can place a sample clip at `.dev/test-video.mov`. Debug launches will auto-open it when present, and `.dev/` is ignored by git.
+That means the repo folder can be very large on disk without GitHub receiving all of that data.
 
-## Easiest way to start
+## What Is Actually Pushed To GitHub
 
-If you are new to native C++ setup on Windows, use the launcher in the repo root:
+Git only pushes tracked files, not every file sitting in the folder.
 
-- double-click `Open DAWG.cmd`
-- double-click `Build DAWG.cmd` if you only want to build for development
-- double-click `Watch DAWG.cmd` if you want save -> rebuild -> restart behavior
+In this repo, heavy local folders such as:
 
-What it does:
+- `build/`
+- `b/`
+- `rel/`
+- `rel2/`
+- `.vs/`
+- `.dev/`
+- `.tools/vcpkg/`
 
-- checks for Git, CMake, and Visual Studio C++ tools
-- clones `vcpkg` into `.tools/vcpkg` on first run
-- installs/builds the required libraries through the manifest
-- builds the app
-- opens `dawg.exe`
+are ignored, so they should not be committed or pushed.
 
-Notes:
+## Roadmap
 
-- the first run can take a long time because `Qt`, `OpenCV`, and `FFmpeg` may need to build
-- after the first build, launching is much faster
-- if something required is missing, the script stops with a plain-English error
+- tighten playback and scrub performance further
+- deepen the FFmpeg + GPU video path
+- keep pulling panel UI out of `MainWindow` into dedicated widgets
+- extend node audio behavior beyond pan into richer spatial control
+- move toward depth-aware and z-aware sound behavior
 
-## Current behavior
+## Status
 
-- `Open Video` loads a clip through `cv::VideoCapture`
-- clicking the frame creates a seeded track point on the current frame
-- `Play` advances frames and runs Lucas-Kanade optical flow from one frame to the next
-- tracked points are painted as overlays
-
-## Limits of this scaffold
-
-- no timeline yet
-- no reverse tracking yet
-- no persisted project/session format yet
-- no audio engine yet
-- FFmpeg is prepared at the build level, but the runtime decoder still uses OpenCV for the first milestone
-
-## Next steps
-
-1. Replace the temporary decoder path with an FFmpeg-backed frame cache and seek layer.
-2. Add a track inspector with confidence state, retrack, and delete actions.
-3. Attach an audio asset to each tracked target and map screen position to panning/spatial placement.
-4. Add a timeline with keyframes so a user can start or stop tracking from explicit points in the clip.
+DAWG is already usable as a rough experimental editor, but it is still under active development and the internal architecture is evolving quickly.

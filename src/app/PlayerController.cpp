@@ -4,11 +4,8 @@
 #include <cmath>
 
 #include <QFileInfo>
-#include <QImage>
 
-#include <opencv2/imgproc.hpp>
-
-#include "core/video/OpenCvVideoDecoder.h"
+#include "core/audio/VideoAudioExtractor.h"
 
 PlayerController::PlayerController(QObject* parent)
     : QObject(parent)
@@ -34,18 +31,11 @@ PlayerController::PlayerController(QObject* parent)
 bool PlayerController::openVideo(const QString& filePath)
 {
     pause(false);
+    m_audioEngine->stopTrack(m_embeddedVideoAudioTrackId);
 
-    auto decoder = std::make_unique<OpenCvVideoDecoder>();
-    if (!decoder->open(filePath.toStdString()))
+    if (!m_videoPlayback.open(filePath))
     {
         emit statusChanged(QStringLiteral("Failed to open video: %1").arg(filePath));
-        return false;
-    }
-
-    const auto firstFrame = decoder->readFrame();
-    if (!firstFrame.has_value() || !firstFrame->isValid())
-    {
-        emit statusChanged(QStringLiteral("The file opened, but no frames were decoded."));
         return false;
     }
 
@@ -56,15 +46,21 @@ bool PlayerController::openVideo(const QString& filePath)
     m_fadingDeselectedTrackId = {};
     m_fadingDeselectedTrackOpacity = 0.0F;
     m_selectionFadeTimer.stop();
-    m_audioPoolPaths.clear();
+    m_audioPool.clear();
     m_loadedPath = filePath;
-    m_totalFrames = decoder->frameCount();
-    m_fps = decoder->fps();
-    m_frameTimestampsSeconds = buildFrameTimestampCache(filePath);
-    m_currentFrame = *firstFrame;
-    m_decoder = std::move(decoder);
+    m_embeddedVideoAudioPath.clear();
+    m_embeddedVideoAudioDisplayName.clear();
+    m_embeddedVideoAudioMuted = true;
+    m_totalFrames = m_videoPlayback.totalFrames();
+    m_fps = m_videoPlayback.fps();
+    m_currentFrame = m_videoPlayback.currentFrame();
+    if (const auto extractedAudioPath = dawg::audio::extractEmbeddedAudioToWave(filePath); extractedAudioPath.has_value())
+    {
+        m_embeddedVideoAudioPath = *extractedAudioPath;
+        m_embeddedVideoAudioDisplayName = QFileInfo(filePath).fileName();
+    }
 
-    cv::cvtColor(m_currentFrame.bgr, m_currentGrayFrame, cv::COLOR_BGR2GRAY);
+    updateCurrentGrayFrameIfNeeded();
     const auto safeFps = m_fps > 1.0 ? m_fps : 1.0;
     const auto playbackIntervalMs = static_cast<int>(1000.0 / safeFps);
     m_transport.setPlaybackIntervalMs(playbackIntervalMs);
@@ -72,10 +68,15 @@ bool PlayerController::openVideo(const QString& filePath)
     refreshOverlays();
     emitCurrentFrame();
     emit videoLoaded(m_loadedPath, m_totalFrames, m_fps);
+    emit videoAudioStateChanged();
     emit selectionChanged(false);
     emit trackAvailabilityChanged(false);
     emit audioPoolChanged();
-    emit statusChanged(QStringLiteral("Loaded %1").arg(filePath));
+    emit statusChanged(
+        QStringLiteral("Loaded %1 via %2 decode and %3 render.")
+            .arg(filePath)
+            .arg(m_videoPlayback.decoderBackendName())
+            .arg(m_renderService.backendName()));
 
     return true;
 }
@@ -87,9 +88,8 @@ bool PlayerController::importAudioToPool(const QString& filePath)
         return false;
     }
 
-    if (std::find(m_audioPoolPaths.begin(), m_audioPoolPaths.end(), filePath) == m_audioPoolPaths.end())
+    if (m_audioPool.import(filePath))
     {
-        m_audioPoolPaths.push_back(filePath);
         emit audioPoolChanged();
     }
 
@@ -148,8 +148,6 @@ void PlayerController::seekToFrame(const int frameIndex)
         return;
     }
 
-    pause(false);
-
     const auto maxFrameIndex = m_totalFrames > 0 ? (m_totalFrames - 1) : 0;
     const auto clampedFrameIndex = frameIndex < 0 ? 0 : (frameIndex > maxFrameIndex ? maxFrameIndex : frameIndex);
     if (clampedFrameIndex == m_currentFrame.index)
@@ -160,6 +158,15 @@ void PlayerController::seekToFrame(const int frameIndex)
     if (!loadFrameAt(clampedFrameIndex))
     {
         emit statusChanged(QStringLiteral("Failed to seek to frame %1.").arg(clampedFrameIndex));
+        return;
+    }
+
+    if (m_transport.isPlaying())
+    {
+        m_transport.setPlaybackAnchorFrame(clampedFrameIndex);
+        m_playbackStartTimestampSeconds = frameTimestampSeconds(m_currentFrame.index);
+        m_playbackElapsedTimer.restart();
+        syncAttachedAudioForCurrentFrame();
     }
 }
 
@@ -170,8 +177,9 @@ void PlayerController::stepForward()
         return;
     }
 
-    const auto previousGrayFrame = m_currentGrayFrame.clone();
-    const auto nextFrame = m_decoder->readFrame();
+    updateCurrentGrayFrameIfNeeded();
+    const auto previousGrayFrame = m_currentGrayFrame;
+    const auto nextFrame = m_videoPlayback.stepForward();
     if (!nextFrame.has_value() || !nextFrame->isValid())
     {
         pause();
@@ -180,8 +188,11 @@ void PlayerController::stepForward()
     }
 
     cv::Mat nextGrayFrame;
-    cv::cvtColor(nextFrame->bgr, nextGrayFrame, cv::COLOR_BGR2GRAY);
-    m_tracker.trackForward(previousGrayFrame, nextGrayFrame, nextFrame->index);
+    if (needsTrackingFrameProcessing())
+    {
+        nextGrayFrame = m_analysisFrameProvider.grayscaleFrame(*nextFrame);
+        m_tracker.trackForward(previousGrayFrame, nextGrayFrame, nextFrame->index);
+    }
 
     m_currentFrame = *nextFrame;
     m_currentGrayFrame = nextGrayFrame;
@@ -244,8 +255,8 @@ bool PlayerController::createTrackWithAudioAtCurrentFrame(const QString& filePat
     }
 
     const auto imageCenter = QPointF{
-        static_cast<double>(m_currentFrame.bgr.cols) * 0.5,
-        static_cast<double>(m_currentFrame.bgr.rows) * 0.5
+        static_cast<double>(m_currentFrame.cpuBgr.cols) * 0.5,
+        static_cast<double>(m_currentFrame.cpuBgr.rows) * 0.5
     };
     return createTrackWithAudioAtCurrentFrame(filePath, imageCenter);
 }
@@ -747,6 +758,67 @@ void PlayerController::trimSelectedTracksToAttachedSound()
             .arg(failedDurationCount));
 }
 
+void PlayerController::toggleSelectedTrackAutoPan()
+{
+    if (!hasVideoLoaded() || m_selectedTrackIds.empty())
+    {
+        return;
+    }
+
+    const auto enableAutoPan = !selectedTracksAutoPanEnabled();
+    int updatedCount = 0;
+
+    for (const auto& trackId : m_selectedTrackIds)
+    {
+        if (m_tracker.setTrackAutoPanEnabled(trackId, enableAutoPan))
+        {
+            ++updatedCount;
+        }
+    }
+
+    if (updatedCount <= 0)
+    {
+        return;
+    }
+
+    refreshOverlays();
+
+    if (m_transport.isPlaying())
+    {
+        syncAttachedAudioForCurrentFrame();
+    }
+
+    emit statusChanged(
+        enableAutoPan
+            ? QStringLiteral("Auto Pan enabled for %1 selected node(s).").arg(updatedCount)
+            : QStringLiteral("Auto Pan disabled for %1 selected node(s).").arg(updatedCount));
+}
+
+void PlayerController::toggleEmbeddedVideoAudioMuted()
+{
+    if (!hasEmbeddedVideoAudio())
+    {
+        return;
+    }
+
+    m_embeddedVideoAudioMuted = !m_embeddedVideoAudioMuted;
+    emit videoAudioStateChanged();
+
+    if (m_transport.isPlaying())
+    {
+        syncAttachedAudioForCurrentFrame();
+    }
+    else if (m_embeddedVideoAudioMuted)
+    {
+        m_audioEngine->stopTrack(m_embeddedVideoAudioTrackId);
+    }
+
+    emit statusChanged(
+        m_embeddedVideoAudioMuted
+            ? QStringLiteral("Video audio muted.")
+            : QStringLiteral("Video audio unmuted."));
+}
+
 void PlayerController::setMotionTrackingEnabled(const bool enabled)
 {
     if (m_motionTrackingEnabled == enabled)
@@ -778,7 +850,7 @@ void PlayerController::setInsertionFollowsPlayback(const bool enabled)
 
 bool PlayerController::hasVideoLoaded() const
 {
-    return m_decoder != nullptr && m_currentFrame.isValid();
+    return m_videoPlayback.hasVideoLoaded() && m_currentFrame.isValid();
 }
 
 bool PlayerController::isPlaying() const
@@ -836,6 +908,41 @@ QUuid PlayerController::selectedTrackId() const
     return m_selectedTrackId;
 }
 
+QString PlayerController::decoderBackendName() const
+{
+    return m_videoPlayback.decoderBackendName();
+}
+
+bool PlayerController::videoHardwareAccelerated() const
+{
+    return m_videoPlayback.isHardwareDecoded();
+}
+
+QString PlayerController::renderBackendName() const
+{
+    return m_renderService.backendName();
+}
+
+bool PlayerController::renderHardwareAccelerated() const
+{
+    return m_renderService.isHardwareAccelerated();
+}
+
+bool PlayerController::hasEmbeddedVideoAudio() const
+{
+    return !m_embeddedVideoAudioPath.isEmpty();
+}
+
+QString PlayerController::embeddedVideoAudioDisplayName() const
+{
+    return m_embeddedVideoAudioDisplayName;
+}
+
+bool PlayerController::isEmbeddedVideoAudioMuted() const
+{
+    return m_embeddedVideoAudioMuted;
+}
+
 QString PlayerController::trackLabel(const QUuid& trackId) const
 {
     const auto trackIt = std::find_if(
@@ -862,15 +969,30 @@ bool PlayerController::trackHasAttachedAudio(const QUuid& trackId) const
     return trackIt != m_tracker.tracks().end() && trackIt->attachedAudio.has_value();
 }
 
+bool PlayerController::trackAutoPanEnabled(const QUuid& trackId) const
+{
+    return m_tracker.isTrackAutoPanEnabled(trackId);
+}
+
+bool PlayerController::selectedTracksAutoPanEnabled() const
+{
+    return !m_selectedTrackIds.empty()
+        && std::all_of(
+            m_selectedTrackIds.begin(),
+            m_selectedTrackIds.end(),
+            [this](const QUuid& trackId)
+            {
+                return m_tracker.isTrackAutoPanEnabled(trackId);
+            });
+}
+
 bool PlayerController::removeAudioFromPool(const QString& filePath)
 {
-    const auto removeIt = std::remove(m_audioPoolPaths.begin(), m_audioPoolPaths.end(), filePath);
-    if (removeIt == m_audioPoolPaths.end())
+    if (!m_audioPool.remove(filePath))
     {
         return false;
     }
 
-    m_audioPoolPaths.erase(removeIt, m_audioPoolPaths.end());
     const auto detachedCount = m_tracker.detachTrackAudioByPath(filePath);
     m_audioEngine->stopAll();
     if (m_transport.isPlaying())
@@ -888,8 +1010,7 @@ bool PlayerController::removeAudioFromPool(const QString& filePath)
 
 bool PlayerController::removeAudioAndConnectedNodesFromPool(const QString& filePath)
 {
-    const auto removeIt = std::remove(m_audioPoolPaths.begin(), m_audioPoolPaths.end(), filePath);
-    if (removeIt == m_audioPoolPaths.end())
+    if (!m_audioPool.remove(filePath))
     {
         return false;
     }
@@ -903,7 +1024,6 @@ bool PlayerController::removeAudioAndConnectedNodesFromPool(const QString& fileP
         }
     }
 
-    m_audioPoolPaths.erase(removeIt, m_audioPoolPaths.end());
     m_audioEngine->stopAll();
     const auto removedNodeCount = m_tracker.removeTracks(trackIdsToRemove);
 
@@ -937,59 +1057,7 @@ bool PlayerController::removeAudioAndConnectedNodesFromPool(const QString& fileP
 
 std::vector<AudioPoolItem> PlayerController::audioPoolItems() const
 {
-    std::vector<AudioPoolItem> items;
-    items.reserve(m_audioPoolPaths.size());
-
-    for (const auto& assetPath : m_audioPoolPaths)
-    {
-        int connectedNodeCount = 0;
-        bool isPlaying = false;
-        QString firstConnectedLabel;
-
-        for (const auto& track : m_tracker.tracks())
-        {
-            if (!track.attachedAudio.has_value() || track.attachedAudio->assetPath != assetPath)
-            {
-                continue;
-            }
-
-            ++connectedNodeCount;
-            if (firstConnectedLabel.isEmpty())
-            {
-                firstConnectedLabel = track.label;
-            }
-            if (m_audioEngine->isTrackPlaying(track.id))
-            {
-                isPlaying = true;
-            }
-        }
-
-        QString connectionSummary = QStringLiteral("Not connected");
-        if (isPlaying)
-        {
-            connectionSummary = connectedNodeCount == 1
-                ? QStringLiteral("Playing on %1").arg(firstConnectedLabel)
-                : QStringLiteral("Playing on %1 nodes").arg(connectedNodeCount);
-        }
-        else if (connectedNodeCount == 1)
-        {
-            connectionSummary = QStringLiteral("Connected to %1").arg(firstConnectedLabel);
-        }
-        else if (connectedNodeCount > 1)
-        {
-            connectionSummary = QStringLiteral("Connected to %1 nodes").arg(connectedNodeCount);
-        }
-
-        items.push_back(AudioPoolItem{
-            .assetPath = assetPath,
-            .displayName = QFileInfo(assetPath).fileName(),
-            .connectedNodeCount = connectedNodeCount,
-            .isPlaying = isPlaying,
-            .connectionSummary = connectionSummary
-        });
-    }
-
-    return items;
+    return m_audioPool.items(m_tracker.tracks(), *m_audioEngine);
 }
 
 std::vector<TimelineTrackSpan> PlayerController::timelineTrackSpans() const
@@ -1039,20 +1107,7 @@ void PlayerController::advancePlayback()
     const auto targetTimestampSeconds =
         m_playbackStartTimestampSeconds + (static_cast<double>(m_playbackElapsedTimer.elapsed()) / 1000.0);
 
-    int targetFrameIndex = m_currentFrame.index;
-    if (!m_frameTimestampsSeconds.empty())
-    {
-        const auto endIt = std::upper_bound(
-            m_frameTimestampsSeconds.begin(),
-            m_frameTimestampsSeconds.end(),
-            targetTimestampSeconds);
-        targetFrameIndex = static_cast<int>(std::distance(m_frameTimestampsSeconds.begin(), endIt)) - 1;
-    }
-    else
-    {
-        const auto safeFps = m_fps > 0.0 ? m_fps : 30.0;
-        targetFrameIndex = static_cast<int>(std::floor(targetTimestampSeconds * safeFps));
-    }
+    auto targetFrameIndex = m_videoPlayback.frameIndexForPresentationTime(targetTimestampSeconds, m_currentFrame.index);
 
     targetFrameIndex = std::clamp(targetFrameIndex, m_currentFrame.index, std::max(0, m_totalFrames - 1));
     if (targetFrameIndex == m_currentFrame.index)
@@ -1092,102 +1147,37 @@ void PlayerController::advanceSelectionFade()
 
 bool PlayerController::loadFrameAt(const int frameIndex)
 {
-    if (!hasVideoLoaded() || !m_decoder->seekFrame(frameIndex))
+    if (!hasVideoLoaded() || !m_videoPlayback.seekFrame(frameIndex))
     {
         return false;
     }
 
-    const auto frame = m_decoder->readFrame();
-    if (!frame.has_value() || !frame->isValid())
-    {
-        return false;
-    }
-
-    m_currentFrame = *frame;
-    cv::cvtColor(m_currentFrame.bgr, m_currentGrayFrame, cv::COLOR_BGR2GRAY);
+    m_currentFrame = m_videoPlayback.currentFrame();
+    updateCurrentGrayFrameIfNeeded();
     refreshOverlays();
     emitCurrentFrame();
     return true;
 }
 
-std::vector<double> PlayerController::buildFrameTimestampCache(const QString& filePath) const
+bool PlayerController::needsTrackingFrameProcessing() const
 {
-    OpenCvVideoDecoder decoder;
-    if (!decoder.open(filePath.toStdString()))
+    return m_tracker.hasMotionTrackedTracks();
+}
+
+void PlayerController::updateCurrentGrayFrameIfNeeded()
+{
+    if (!needsTrackingFrameProcessing())
     {
-        return {};
+        m_currentGrayFrame.release();
+        return;
     }
 
-    std::vector<double> timestamps;
-    const auto expectedFrameCount = decoder.frameCount();
-    if (expectedFrameCount > 0)
-    {
-        timestamps.reserve(expectedFrameCount);
-    }
-
-    const auto fallbackFps = decoder.fps() > 0.0 ? decoder.fps() : 30.0;
-    double previousTimestamp = 0.0;
-
-    while (true)
-    {
-        const auto frame = decoder.readFrame();
-        if (!frame.has_value() || !frame->isValid())
-        {
-            break;
-        }
-
-        const auto fallbackTimestamp = static_cast<double>(frame->index) / fallbackFps;
-        auto timestamp = frame->timestampSeconds >= 0.0 ? frame->timestampSeconds : fallbackTimestamp;
-        if (!timestamps.empty() && timestamp < previousTimestamp)
-        {
-            timestamp = previousTimestamp;
-        }
-
-        if (frame->index >= static_cast<int>(timestamps.size()))
-        {
-            timestamps.resize(frame->index + 1, fallbackTimestamp);
-        }
-
-        timestamps[frame->index] = timestamp;
-        previousTimestamp = timestamp;
-    }
-
-    if (timestamps.empty() && expectedFrameCount > 0)
-    {
-        timestamps.resize(expectedFrameCount, 0.0);
-    }
-
-    for (int index = 0; index < static_cast<int>(timestamps.size()); ++index)
-    {
-        const auto fallbackTimestamp = static_cast<double>(index) / fallbackFps;
-        if (index > 0 && timestamps[static_cast<std::size_t>(index)] < timestamps[static_cast<std::size_t>(index - 1)])
-        {
-            timestamps[static_cast<std::size_t>(index)] = timestamps[static_cast<std::size_t>(index - 1)];
-        }
-        else if (timestamps[static_cast<std::size_t>(index)] <= 0.0 && index > 0)
-        {
-            timestamps[static_cast<std::size_t>(index)] = std::max(
-                timestamps[static_cast<std::size_t>(index - 1)],
-                fallbackTimestamp);
-        }
-        else if (timestamps[static_cast<std::size_t>(index)] < 0.0)
-        {
-            timestamps[static_cast<std::size_t>(index)] = fallbackTimestamp;
-        }
-    }
-
-    return timestamps;
+    m_currentGrayFrame = m_analysisFrameProvider.grayscaleFrame(m_currentFrame);
 }
 
 double PlayerController::frameTimestampSeconds(const int frameIndex) const
 {
-    if (frameIndex >= 0 && frameIndex < static_cast<int>(m_frameTimestampsSeconds.size()))
-    {
-        return m_frameTimestampsSeconds[static_cast<std::size_t>(frameIndex)];
-    }
-
-    const auto safeFps = m_fps > 0.0 ? m_fps : 30.0;
-    return frameIndex >= 0 ? (static_cast<double>(frameIndex) / safeFps) : 0.0;
+    return m_videoPlayback.frameTimestampSeconds(frameIndex);
 }
 
 std::optional<int> PlayerController::trimmedEndFrameForTrack(const TrackPoint& track) const
@@ -1208,28 +1198,12 @@ std::optional<int> PlayerController::trimmedEndFrameForTrack(const TrackPoint& t
     const auto endExclusiveSeconds = frameTimestampSeconds(startFrame) + (*durationMs / 1000.0);
     int endFrame = startFrame;
 
-    if (!m_frameTimestampsSeconds.empty() && startFrame < static_cast<int>(m_frameTimestampsSeconds.size()))
-    {
-        const auto searchBegin = m_frameTimestampsSeconds.begin() + startFrame;
-        const auto searchEnd = m_frameTimestampsSeconds.begin() + std::min(
-            static_cast<int>(m_frameTimestampsSeconds.size()),
-            maxFrameIndex + 1);
-        const auto endIt = std::lower_bound(searchBegin, searchEnd, endExclusiveSeconds);
-        if (endIt == searchBegin)
-        {
-            endFrame = startFrame;
-        }
-        else
-        {
-            endFrame = static_cast<int>(std::distance(m_frameTimestampsSeconds.begin(), endIt) - 1);
-        }
-    }
-    else
-    {
-        const auto safeFps = m_fps > 0.0 ? m_fps : 30.0;
-        const auto coveredFrames = std::max(1, static_cast<int>(std::lround((*durationMs * safeFps) / 1000.0)));
-        endFrame = startFrame + coveredFrames - 1;
-    }
+    const auto safeFps = m_fps > 0.0 ? m_fps : 30.0;
+    const auto coveredFrames = std::max(1, static_cast<int>(std::lround((*durationMs * safeFps) / 1000.0)));
+    endFrame = std::clamp(
+        m_videoPlayback.frameIndexForPresentationTime(endExclusiveSeconds, startFrame),
+        startFrame,
+        startFrame + coveredFrames);
 
     return std::clamp(endFrame, startFrame, maxFrameIndex);
 }
@@ -1293,7 +1267,7 @@ void PlayerController::setSelectedTrackId(const QUuid& trackId, const bool fadeP
 
 void PlayerController::emitCurrentFrame()
 {
-    emit frameReady(toImage(m_currentFrame.bgr), m_currentFrame.index, m_currentFrame.timestampSeconds);
+    emit frameReady(m_renderService.presentFrame(m_currentFrame), m_currentFrame.index, m_currentFrame.timestampSeconds);
 }
 
 void PlayerController::syncAttachedAudioForCurrentFrame()
@@ -1305,6 +1279,18 @@ void PlayerController::syncAttachedAudioForCurrentFrame()
     }
 
     const auto currentTimestampSeconds = frameTimestampSeconds(m_currentFrame.index);
+    const auto currentOffsetMs =
+        std::max(0, static_cast<int>(std::lround(currentTimestampSeconds * 1000.0)));
+
+    if (hasEmbeddedVideoAudio() && !m_embeddedVideoAudioMuted)
+    {
+        m_audioEngine->playTrack(m_embeddedVideoAudioTrackId, m_embeddedVideoAudioPath, currentOffsetMs);
+        m_audioEngine->setTrackPan(m_embeddedVideoAudioTrackId, 0.0F);
+    }
+    else
+    {
+        m_audioEngine->stopTrack(m_embeddedVideoAudioTrackId);
+    }
 
     for (const auto& track : m_tracker.tracks())
     {
@@ -1329,19 +1315,14 @@ void PlayerController::syncAttachedAudioForCurrentFrame()
             0,
             static_cast<int>(std::lround((currentTimestampSeconds - startTimestampSeconds) * 1000.0)));
         m_audioEngine->playTrack(track.id, track.attachedAudio->assetPath, offsetMs);
+
+        float pan = 0.0F;
+        if (track.autoPanEnabled && m_currentFrame.cpuBgr.cols > 1)
+        {
+            const auto samplePoint = track.interpolatedSampleAt(m_currentFrame.index).value_or(QPointF{});
+            const auto normalizedPan = ((samplePoint.x() / static_cast<double>(m_currentFrame.cpuBgr.cols - 1)) * 2.0) - 1.0;
+            pan = std::clamp(static_cast<float>(normalizedPan), -1.0F, 1.0F);
+        }
+        m_audioEngine->setTrackPan(track.id, pan);
     }
-}
-
-QImage PlayerController::toImage(const cv::Mat& bgrFrame) const
-{
-    cv::Mat rgbFrame;
-    cv::cvtColor(bgrFrame, rgbFrame, cv::COLOR_BGR2RGB);
-
-    return QImage(
-               rgbFrame.data,
-               rgbFrame.cols,
-               rgbFrame.rows,
-               static_cast<int>(rgbFrame.step),
-               QImage::Format_RGB888)
-        .copy();
 }

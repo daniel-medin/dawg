@@ -14,20 +14,14 @@
 #include <opencv2/core/mat.hpp>
 
 #include "app/TransportController.h"
+#include "app/AudioPoolService.h"
 #include "core/audio/AudioEngine.h"
+#include "core/render/RenderService.h"
 #include "core/tracking/MotionTracker.h"
-#include "core/video/DecodedFrame.h"
-#include "core/video/VideoDecoder.h"
+#include "core/video/AnalysisFrameProvider.h"
+#include "core/video/VideoFrame.h"
+#include "core/video/VideoPlaybackService.h"
 #include "ui/TimelineView.h"
-
-struct AudioPoolItem
-{
-    QString assetPath;
-    QString displayName;
-    int connectedNodeCount = 0;
-    bool isPlaying = false;
-    QString connectionSummary;
-};
 
 class PlayerController final : public QObject
 {
@@ -65,6 +59,8 @@ public:
     void setAllTracksStartToCurrentFrame();
     void setAllTracksEndToCurrentFrame();
     void trimSelectedTracksToAttachedSound();
+    void toggleSelectedTrackAutoPan();
+    void toggleEmbeddedVideoAudioMuted();
     void setInsertionFollowsPlayback(bool enabled);
     void setMotionTrackingEnabled(bool enabled);
 
@@ -80,8 +76,17 @@ public:
     [[nodiscard]] double fps() const;
     [[nodiscard]] QString loadedPath() const;
     [[nodiscard]] QUuid selectedTrackId() const;
+    [[nodiscard]] QString decoderBackendName() const;
+    [[nodiscard]] bool videoHardwareAccelerated() const;
+    [[nodiscard]] QString renderBackendName() const;
+    [[nodiscard]] bool renderHardwareAccelerated() const;
+    [[nodiscard]] bool hasEmbeddedVideoAudio() const;
+    [[nodiscard]] QString embeddedVideoAudioDisplayName() const;
+    [[nodiscard]] bool isEmbeddedVideoAudioMuted() const;
     [[nodiscard]] QString trackLabel(const QUuid& trackId) const;
     [[nodiscard]] bool trackHasAttachedAudio(const QUuid& trackId) const;
+    [[nodiscard]] bool trackAutoPanEnabled(const QUuid& trackId) const;
+    [[nodiscard]] bool selectedTracksAutoPanEnabled() const;
     bool removeAudioFromPool(const QString& filePath);
     bool removeAudioAndConnectedNodesFromPool(const QString& filePath);
     [[nodiscard]] std::vector<AudioPoolItem> audioPoolItems() const;
@@ -92,6 +97,7 @@ signals:
     void frameReady(const QImage& image, int frameIndex, double timestampSeconds);
     void overlaysChanged();
     void videoLoaded(const QString& filePath, int totalFrames, double fps);
+    void videoAudioStateChanged();
     void playbackStateChanged(bool playing);
     void insertionFollowsPlaybackChanged(bool enabled);
     void motionTrackingChanged(bool enabled);
@@ -105,8 +111,9 @@ private slots:
     void advanceSelectionFade();
 
 private:
+    [[nodiscard]] bool needsTrackingFrameProcessing() const;
+    void updateCurrentGrayFrameIfNeeded();
     bool loadFrameAt(int frameIndex);
-    [[nodiscard]] std::vector<double> buildFrameTimestampCache(const QString& filePath) const;
     [[nodiscard]] double frameTimestampSeconds(int frameIndex) const;
     [[nodiscard]] std::optional<int> trimmedEndFrameForTrack(const TrackPoint& track) const;
     void syncAttachedAudioForCurrentFrame();
@@ -114,18 +121,21 @@ private:
     void emitCurrentFrame();
     [[nodiscard]] bool isTrackSelected(const QUuid& trackId) const;
     void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
-    [[nodiscard]] QImage toImage(const cv::Mat& bgrFrame) const;
 
-    std::unique_ptr<VideoDecoder> m_decoder;
+    VideoPlaybackService m_videoPlayback;
     TransportController m_transport;
     std::unique_ptr<AudioEngine> m_audioEngine;
+    RenderService m_renderService;
+    AnalysisFrameProvider m_analysisFrameProvider;
+    AudioPoolService m_audioPool;
     MotionTracker m_tracker;
-    std::vector<QString> m_audioPoolPaths;
     QString m_loadedPath;
-    DecodedFrame m_currentFrame;
+    QString m_embeddedVideoAudioPath;
+    QString m_embeddedVideoAudioDisplayName;
+    bool m_embeddedVideoAudioMuted = true;
+    VideoFrame m_currentFrame;
     cv::Mat m_currentGrayFrame;
     std::vector<TrackOverlay> m_currentOverlays;
-    std::vector<double> m_frameTimestampsSeconds;
     int m_totalFrames = 0;
     double m_fps = 0.0;
     bool m_motionTrackingEnabled = false;
@@ -136,4 +146,5 @@ private:
     QUuid m_fadingDeselectedTrackId;
     float m_fadingDeselectedTrackOpacity = 0.0F;
     QTimer m_selectionFadeTimer;
+    const QUuid m_embeddedVideoAudioTrackId = QUuid(QStringLiteral("{eb6fc60f-0781-433f-9f03-ff16531165f7}"));
 };

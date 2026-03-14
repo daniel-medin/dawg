@@ -24,6 +24,7 @@ struct TrackPoint
     std::optional<int> endFrame;
     bool motionTracked = false;
     bool showLabel = false;
+    bool autoPanEnabled = true;
     std::map<int, QPointF> samples;
     std::optional<AudioAttachment> attachedAudio;
 
@@ -96,4 +97,5 @@ struct TrackOverlay
     float highlightOpacity = 0.0F;
     bool showLabel = false;
     bool hasAttachedAudio = false;
+    bool autoPanEnabled = false;
 };

@@ -18,6 +18,7 @@ public:
     [[nodiscard]] static std::unique_ptr<AudioEngine> create(QObject* parent = nullptr);
 
     virtual bool playTrack(const QUuid& trackId, const QString& filePath, int offsetMs = 0) = 0;
+    virtual void setTrackPan(const QUuid& trackId, float pan) = 0;
     virtual void stopTrack(const QUuid& trackId) = 0;
     virtual void stopAll() = 0;
     [[nodiscard]] virtual bool isTrackPlaying(const QUuid& trackId) const = 0;

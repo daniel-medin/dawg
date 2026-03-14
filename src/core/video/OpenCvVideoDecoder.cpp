@@ -2,6 +2,10 @@
 
 #include <algorithm>
 
+#include <QImage>
+
+#include <opencv2/imgproc.hpp>
+
 bool OpenCvVideoDecoder::open(const std::string& filePath)
 {
     m_capture.release();
@@ -23,7 +27,17 @@ bool OpenCvVideoDecoder::seekFrame(const int frameIndex)
     return m_capture.set(cv::CAP_PROP_POS_FRAMES, frameIndex);
 }
 
-std::optional<DecodedFrame> OpenCvVideoDecoder::readFrame()
+bool OpenCvVideoDecoder::seekTimestampSeconds(const double timestampSeconds)
+{
+    if (!isOpen())
+    {
+        return false;
+    }
+
+    return m_capture.set(cv::CAP_PROP_POS_MSEC, std::max(0.0, timestampSeconds) * 1000.0);
+}
+
+std::optional<VideoFrame> OpenCvVideoDecoder::readFrame()
 {
     if (!isOpen())
     {
@@ -41,11 +55,27 @@ std::optional<DecodedFrame> OpenCvVideoDecoder::readFrame()
     const auto derivedTimestampSeconds =
         fps() > 0.0 ? static_cast<double>(std::max(0, nextPosition - 1)) / fps() : 0.0;
     const auto timestampSeconds = timestampMs >= 0.0 ? (timestampMs / 1000.0) : derivedTimestampSeconds;
+    const auto durationSeconds = fps() > 0.0 ? (1.0 / fps()) : 0.0;
 
-    return DecodedFrame{
+    cv::Mat rgbFrame;
+    cv::cvtColor(frame, rgbFrame, cv::COLOR_BGR2RGB);
+    QImage image(
+        rgbFrame.data,
+        rgbFrame.cols,
+        rgbFrame.rows,
+        static_cast<int>(rgbFrame.step[0]),
+        QImage::Format_RGB888);
+
+    return VideoFrame{
         .index = std::max(0, nextPosition - 1),
         .timestampSeconds = timestampSeconds,
-        .bgr = frame
+        .durationSeconds = durationSeconds,
+        .frameSize = cv::Size{frame.cols, frame.rows},
+        .pixelFormatName = QStringLiteral("BGR24"),
+        .nativeHandle = 0,
+        .hardwareBacked = false,
+        .cpuBgr = frame,
+        .cpuImage = image.copy()
     };
 }
 
@@ -76,4 +106,14 @@ cv::Size OpenCvVideoDecoder::frameSize() const
         static_cast<int>(m_capture.get(cv::CAP_PROP_FRAME_WIDTH)),
         static_cast<int>(m_capture.get(cv::CAP_PROP_FRAME_HEIGHT))
     };
+}
+
+QString OpenCvVideoDecoder::backendName() const
+{
+    return QStringLiteral("OpenCV VideoCapture");
+}
+
+bool OpenCvVideoDecoder::isHardwareAccelerated() const
+{
+    return false;
 }

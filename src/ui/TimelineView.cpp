@@ -14,6 +14,7 @@ TimelineView::TimelineView(QWidget* parent)
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
+    updatePreferredHeight();
 }
 
 void TimelineView::clear()
@@ -28,6 +29,8 @@ void TimelineView::clear()
     m_fps = 0.0;
     m_trackSpans.clear();
     m_dragging = false;
+    m_lastRequestedFrame = -1;
+    updatePreferredHeight();
     update();
 }
 
@@ -42,13 +45,30 @@ void TimelineView::setTimeline(const int totalFrames, const double fps)
 void TimelineView::setCurrentFrame(const int frameIndex)
 {
     m_currentFrame = std::clamp(frameIndex, 0, std::max(0, m_totalFrames - 1));
+    m_lastRequestedFrame = m_currentFrame;
     update();
 }
 
 void TimelineView::setTrackSpans(const std::vector<TimelineTrackSpan>& trackSpans)
 {
     m_trackSpans = trackSpans;
+    updatePreferredHeight();
     update();
+}
+
+void TimelineView::setSeekOnClickEnabled(const bool enabled)
+{
+    m_seekOnClickEnabled = enabled;
+}
+
+QSize TimelineView::sizeHint() const
+{
+    return QSize{640, preferredHeight()};
+}
+
+QSize TimelineView::minimumSizeHint() const
+{
+    return QSize{320, preferredHeight()};
 }
 
 void TimelineView::paintEvent(QPaintEvent* event)
@@ -77,8 +97,8 @@ void TimelineView::paintEvent(QPaintEvent* event)
             const auto& trackSpan = m_trackSpans[static_cast<std::size_t>(index)];
             const auto& geometry = geometries[static_cast<std::size_t>(index)];
             const auto y = geometry.hitRect.center().y();
-            const auto startX = geometry.hitRect.left();
-            const auto endX = geometry.hitRect.right();
+            const auto startX = geometry.lineStartX;
+            const auto endX = geometry.lineEndX;
             auto lineColor = trackSpan.color;
             lineColor.setAlphaF(trackSpan.isSelected ? 1.0 : 0.85);
             const auto lineWidth = trackSpan.isSelected ? 2.0 : 1.0;
@@ -127,10 +147,11 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
 
     if (const auto track = trackAt(event->position()); track.has_value())
     {
+        setFocus(Qt::MouseFocusReason);
+        emit trackSelected(track->id);
+
         if (track->startHandleRect.contains(event->position()))
         {
-            setFocus(Qt::MouseFocusReason);
-            emit trackSelected(track->id);
             m_trimmedTrack = track;
             m_trimmingStart = true;
             updateTrimAt(event->position());
@@ -139,8 +160,6 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
 
         if (track->endHandleRect.contains(event->position()))
         {
-            setFocus(Qt::MouseFocusReason);
-            emit trackSelected(track->id);
             m_trimmedTrack = track;
             m_trimmingStart = false;
             updateTrimAt(event->position());
@@ -157,8 +176,10 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
         const auto isSelected = spanIt != m_trackSpans.end() && spanIt->isSelected;
         if (isSelected)
         {
-            setFocus(Qt::MouseFocusReason);
-            emit trackSelected(track->id);
+            if (m_seekOnClickEnabled)
+            {
+                requestFrameAt(event->position());
+            }
             m_draggedTrack = track;
             m_dragAnchorFrame = frameForPosition(event->position().x());
             m_dragAccumulatedDeltaFrames = 0;
@@ -168,7 +189,10 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
 
     m_dragging = true;
     setFocus(Qt::MouseFocusReason);
-    requestFrameAt(event->position());
+    if (m_seekOnClickEnabled)
+    {
+        requestFrameAt(event->position());
+    }
 }
 
 void TimelineView::mouseMoveEvent(QMouseEvent* event)
@@ -275,6 +299,8 @@ std::vector<TimelineView::TimelineTrackGeometry> TimelineView::trackGeometries()
                 12.0,
                 rowHeight + 8.0
             },
+            .lineStartX = startX,
+            .lineEndX = endX,
             .id = trackSpan.id,
             .label = trackSpan.label
         });
@@ -333,7 +359,43 @@ double TimelineView::xForFrame(const int frameIndex) const
 
 void TimelineView::requestFrameAt(const QPointF& position)
 {
-    emit frameRequested(frameForPosition(position.x()));
+    requestFrame(frameForPosition(position.x()));
+}
+
+int TimelineView::preferredHeight() const
+{
+    constexpr int baseHeight = 84;
+    constexpr int verticalPadding = 16;
+    constexpr int rowHeight = 10;
+    constexpr int rowGap = 2;
+
+    if (m_trackSpans.empty())
+    {
+        return baseHeight;
+    }
+
+    const auto trackCount = static_cast<int>(m_trackSpans.size());
+    return std::max(baseHeight, verticalPadding + trackCount * rowHeight + std::max(0, trackCount - 1) * rowGap + 16);
+}
+
+void TimelineView::updatePreferredHeight()
+{
+    const auto height = preferredHeight();
+    setMinimumHeight(height);
+    setMaximumHeight(height);
+    updateGeometry();
+}
+
+void TimelineView::requestFrame(const int frameIndex)
+{
+    const auto clampedFrameIndex = std::clamp(frameIndex, 0, std::max(0, m_totalFrames - 1));
+    if (clampedFrameIndex == m_lastRequestedFrame)
+    {
+        return;
+    }
+
+    m_lastRequestedFrame = clampedFrameIndex;
+    emit frameRequested(clampedFrameIndex);
 }
 
 void TimelineView::updateTrimAt(const QPointF& position)
@@ -353,7 +415,7 @@ void TimelineView::updateTrimAt(const QPointF& position)
         emit trackEndFrameRequested(m_trimmedTrack->id, frameIndex);
     }
 
-    emit frameRequested(frameIndex);
+    requestFrame(frameIndex);
 }
 
 void TimelineView::updateSpanDragAt(const QPointF& position)
@@ -373,5 +435,5 @@ void TimelineView::updateSpanDragAt(const QPointF& position)
 
     emit trackSpanMoveRequested(m_draggedTrack->id, incrementalDelta);
     m_dragAccumulatedDeltaFrames = deltaFrames;
-    emit frameRequested(currentFrame);
+    requestFrame(currentFrame);
 }

@@ -131,6 +131,35 @@ bool MotionTracker::setTrackLabel(const QUuid& trackId, const QString& label)
     return false;
 }
 
+bool MotionTracker::isTrackAutoPanEnabled(const QUuid& trackId) const
+{
+    for (const auto& track : m_tracks)
+    {
+        if (track.id == trackId)
+        {
+            return track.autoPanEnabled;
+        }
+    }
+
+    return false;
+}
+
+bool MotionTracker::setTrackAutoPanEnabled(const QUuid& trackId, const bool enabled)
+{
+    for (auto& track : m_tracks)
+    {
+        if (track.id != trackId)
+        {
+            continue;
+        }
+
+        track.autoPanEnabled = enabled;
+        return true;
+    }
+
+    return false;
+}
+
 bool MotionTracker::isTrackLabelVisible(const QUuid& trackId) const
 {
     for (const auto& track : m_tracks)
@@ -408,6 +437,17 @@ const std::vector<TrackPoint>& MotionTracker::tracks() const
     return m_tracks;
 }
 
+bool MotionTracker::hasMotionTrackedTracks() const
+{
+    return std::any_of(
+        m_tracks.begin(),
+        m_tracks.end(),
+        [](const TrackPoint& track)
+        {
+            return track.motionTracked;
+        });
+}
+
 std::vector<TrackOverlay> MotionTracker::overlaysForFrame(
     const int frameIndex,
     const std::vector<QUuid>& selectedTrackIds,
@@ -442,7 +482,8 @@ std::vector<TrackOverlay> MotionTracker::overlaysForFrame(
             .highlightOpacity = (std::find(selectedTrackIds.begin(), selectedTrackIds.end(), track.id) != selectedTrackIds.end()) ? 1.0F
                 : (track.id == fadingTrackId ? fadingTrackOpacity : 0.0F),
             .showLabel = track.showLabel,
-            .hasAttachedAudio = track.attachedAudio.has_value()
+            .hasAttachedAudio = track.attachedAudio.has_value(),
+            .autoPanEnabled = track.autoPanEnabled
         });
     }
 

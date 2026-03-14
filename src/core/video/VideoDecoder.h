@@ -3,9 +3,10 @@
 #include <optional>
 #include <string>
 
+#include <QString>
 #include <opencv2/core/types.hpp>
 
-#include "DecodedFrame.h"
+#include "core/video/VideoFrame.h"
 
 class VideoDecoder
 {
@@ -15,9 +16,11 @@ public:
     virtual bool open(const std::string& filePath) = 0;
     virtual bool isOpen() const = 0;
     virtual bool seekFrame(int frameIndex) = 0;
-    virtual std::optional<DecodedFrame> readFrame() = 0;
+    virtual bool seekTimestampSeconds(double timestampSeconds) = 0;
+    virtual std::optional<VideoFrame> readFrame() = 0;
     virtual int frameCount() const = 0;
     virtual double fps() const = 0;
     virtual cv::Size frameSize() const = 0;
+    [[nodiscard]] virtual QString backendName() const = 0;
+    [[nodiscard]] virtual bool isHardwareAccelerated() const = 0;
 };
-

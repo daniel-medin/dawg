@@ -13,6 +13,7 @@ public:
     void setPlaybackIntervalMs(int intervalMs);
     void startPlayback(int currentFrame);
     int stopPlayback(int currentFrame, bool restorePlaybackAnchor = true);
+    void setPlaybackAnchorFrame(int frameIndex);
     void setInsertionFollowsPlayback(bool enabled);
 
     [[nodiscard]] bool isPlaying() const;

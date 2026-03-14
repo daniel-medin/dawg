@@ -14,6 +14,7 @@ public:
     explicit MciAudioEngine(QObject* parent = nullptr);
 
     bool playTrack(const QUuid& trackId, const QString& filePath, int offsetMs = 0) override;
+    void setTrackPan(const QUuid& trackId, float pan) override;
     void stopTrack(const QUuid& trackId) override;
     void stopAll() override;
     [[nodiscard]] bool isTrackPlaying(const QUuid& trackId) const override;

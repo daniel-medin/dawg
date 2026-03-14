@@ -33,10 +33,12 @@
 
 #ifdef Q_OS_WIN
 #include <windows.h>
+#include <dxgi1_4.h>
 #include <psapi.h>
 #endif
 
 #include "app/PlayerController.h"
+#include "ui/DebugOverlayWindow.h"
 #include "ui/TimelineView.h"
 #include "ui/VideoCanvas.h"
 
@@ -57,6 +59,112 @@ QString currentMemoryUsageText()
 #endif
 
     return QStringLiteral("Memory --");
+}
+
+QString currentVideoMemoryUsageText()
+{
+#ifdef Q_OS_WIN
+    IDXGIFactory4* factory = nullptr;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) || !factory)
+    {
+        return QStringLiteral("VRAM --");
+    }
+
+    quint64 totalUsageBytes = 0;
+    for (UINT adapterIndex = 0;; ++adapterIndex)
+    {
+        IDXGIAdapter1* adapter = nullptr;
+        if (factory->EnumAdapters1(adapterIndex, &adapter) == DXGI_ERROR_NOT_FOUND)
+        {
+            break;
+        }
+
+        IDXGIAdapter3* adapter3 = nullptr;
+        if (SUCCEEDED(adapter->QueryInterface(IID_PPV_ARGS(&adapter3))) && adapter3)
+        {
+            DXGI_QUERY_VIDEO_MEMORY_INFO localMemoryInfo{};
+            if (SUCCEEDED(adapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &localMemoryInfo)))
+            {
+                totalUsageBytes += localMemoryInfo.CurrentUsage;
+            }
+            adapter3->Release();
+        }
+
+        adapter->Release();
+    }
+
+    factory->Release();
+
+    if (totalUsageBytes > 0)
+    {
+        const auto totalUsageMb = static_cast<double>(totalUsageBytes) / (1024.0 * 1024.0);
+        return QStringLiteral("VRAM %1 MB").arg(totalUsageMb, 0, 'f', 1);
+    }
+#endif
+
+    return QStringLiteral("VRAM --");
+}
+
+QString currentProcessorUsageText()
+{
+#ifdef Q_OS_WIN
+    FILETIME creationTime{};
+    FILETIME exitTime{};
+    FILETIME kernelTime{};
+    FILETIME userTime{};
+    FILETIME systemTime{};
+    if (!GetProcessTimes(GetCurrentProcess(), &creationTime, &exitTime, &kernelTime, &userTime))
+    {
+        return QStringLiteral("CPU --");
+    }
+
+    GetSystemTimeAsFileTime(&systemTime);
+
+    ULARGE_INTEGER kernel{};
+    kernel.LowPart = kernelTime.dwLowDateTime;
+    kernel.HighPart = kernelTime.dwHighDateTime;
+
+    ULARGE_INTEGER user{};
+    user.LowPart = userTime.dwLowDateTime;
+    user.HighPart = userTime.dwHighDateTime;
+
+    ULARGE_INTEGER now{};
+    now.LowPart = systemTime.dwLowDateTime;
+    now.HighPart = systemTime.dwHighDateTime;
+
+    static quint64 previousProcessTicks = 0;
+    static quint64 previousWallTicks = 0;
+    static const unsigned int processorCount = []() -> unsigned int
+    {
+        SYSTEM_INFO systemInfo{};
+        GetSystemInfo(&systemInfo);
+        return std::max<unsigned int>(1u, static_cast<unsigned int>(systemInfo.dwNumberOfProcessors));
+    }();
+
+    const auto processTicks = kernel.QuadPart + user.QuadPart;
+    const auto wallTicks = now.QuadPart;
+    if (previousWallTicks == 0 || wallTicks <= previousWallTicks || processTicks < previousProcessTicks)
+    {
+        previousProcessTicks = processTicks;
+        previousWallTicks = wallTicks;
+        return QStringLiteral("CPU --");
+    }
+
+    const auto processDelta = static_cast<double>(processTicks - previousProcessTicks);
+    const auto wallDelta = static_cast<double>(wallTicks - previousWallTicks);
+    previousProcessTicks = processTicks;
+    previousWallTicks = wallTicks;
+
+    if (wallDelta <= 0.0)
+    {
+        return QStringLiteral("CPU --");
+    }
+
+    const auto cpuPercent = std::clamp((processDelta / wallDelta) * (100.0 / processorCount), 0.0, 999.0);
+    return QStringLiteral("CPU %1%").arg(cpuPercent, 0, 'f', 1);
+#endif
+
+    return QStringLiteral("CPU --");
 }
 
 class AudioPoolRow final : public QWidget
@@ -134,7 +242,24 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(m_openAction, &QAction::triggered, this, &MainWindow::openVideo);
     connect(m_importSoundAction, &QAction::triggered, this, &MainWindow::importSound);
-    connect(m_audioPoolAction, &QAction::toggled, this, &MainWindow::updateAudioPoolVisibility);
+    connect(m_showTimelineAction, &QAction::toggled, this, [this](const bool visible)
+    {
+        updateTimelineVisibility(visible);
+        showStatus(visible ? QStringLiteral("Timeline shown.") : QStringLiteral("Timeline hidden."));
+    });
+    connect(m_timelineClickSeeksAction, &QAction::toggled, this, [this](const bool enabled)
+    {
+        m_timeline->setSeekOnClickEnabled(enabled);
+        showStatus(
+            enabled
+                ? QStringLiteral("Timeline click seek enabled.")
+                : QStringLiteral("Timeline click seek disabled. Use play or scrub to move."));
+    });
+    connect(m_audioPoolAction, &QAction::toggled, this, [this](const bool visible)
+    {
+        updateAudioPoolVisibility(visible);
+        showStatus(visible ? QStringLiteral("Audio Pool shown.") : QStringLiteral("Audio Pool hidden."));
+    });
     connect(
         m_motionTrackingAction,
         &QAction::toggled,
@@ -147,6 +272,7 @@ MainWindow::MainWindow(QWidget* parent)
         &PlayerController::setInsertionFollowsPlayback);
     connect(m_goToStartAction, &QAction::triggered, m_controller, &PlayerController::goToStart);
     connect(m_playAction, &QAction::triggered, m_controller, &PlayerController::togglePlayback);
+    connect(m_stepForwardAction, &QAction::triggered, m_controller, &PlayerController::stepForward);
     connect(m_stepBackAction, &QAction::triggered, m_controller, &PlayerController::stepBackward);
     connect(m_selectAllAction, &QAction::triggered, m_controller, &PlayerController::selectAllVisibleTracks);
     connect(m_unselectAllAction, &QAction::triggered, m_controller, &PlayerController::clearSelection);
@@ -161,8 +287,16 @@ MainWindow::MainWindow(QWidget* parent)
         this,
         &MainWindow::handleNodeEndShortcut);
     connect(m_trimNodeAction, &QAction::triggered, this, &MainWindow::trimSelectedNodeToSound);
+    connect(m_autoPanAction, &QAction::triggered, this, &MainWindow::toggleSelectedNodeAutoPan);
     connect(m_toggleNodeNameAction, &QAction::triggered, m_controller, &PlayerController::toggleSelectedTrackLabels);
-    connect(m_showAllNodeNamesAction, &QAction::toggled, m_canvas, &VideoCanvas::setShowAllLabels);
+    connect(m_showAllNodeNamesAction, &QAction::toggled, this, [this](const bool enabled)
+    {
+        m_canvas->setShowAllLabels(enabled);
+        showStatus(
+            enabled
+                ? QStringLiteral("Node names always visible.")
+                : QStringLiteral("Node names only show when relevant."));
+    });
     connect(m_deleteNodeAction, &QAction::triggered, m_controller, &PlayerController::deleteSelectedTrack);
     connect(m_clearAllAction, &QAction::triggered, m_controller, &PlayerController::clearAllTracks);
     connect(m_canvas, &VideoCanvas::seedPointRequested, m_controller, &PlayerController::seedTrack);
@@ -172,15 +306,25 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(m_canvas, &VideoCanvas::tracksSelected, m_controller, &PlayerController::selectTracks);
     connect(m_canvas, &VideoCanvas::trackSelected, m_controller, &PlayerController::selectTrack);
-    connect(m_canvas, &VideoCanvas::trackContextMenuRequested, this, &MainWindow::showNodeContextMenu);
+    connect(m_canvas, &VideoCanvas::trackContextMenuRequested, this, [this](const QUuid& trackId, const QPoint& globalPosition)
+    {
+        showNodeContextMenu(trackId, globalPosition, true);
+    });
     connect(m_canvas, &VideoCanvas::selectedTrackMoved, m_controller, &PlayerController::moveSelectedTrack);
     connect(m_timeline, &TimelineView::frameRequested, m_controller, &PlayerController::seekToFrame);
     connect(m_timeline, &TimelineView::trackSelected, m_controller, &PlayerController::selectTrack);
     connect(m_timeline, &TimelineView::trackStartFrameRequested, m_controller, &PlayerController::setTrackStartFrame);
     connect(m_timeline, &TimelineView::trackEndFrameRequested, m_controller, &PlayerController::setTrackEndFrame);
     connect(m_timeline, &TimelineView::trackSpanMoveRequested, m_controller, &PlayerController::moveTrackFrameSpan);
-    connect(m_timeline, &TimelineView::trackContextMenuRequested, this, &MainWindow::showNodeContextMenu);
-    connect(m_toggleDebugAction, &QAction::toggled, this, &MainWindow::updateDebugVisibility);
+    connect(m_timeline, &TimelineView::trackContextMenuRequested, this, [this](const QUuid& trackId, const QPoint& globalPosition)
+    {
+        showNodeContextMenu(trackId, globalPosition, false);
+    });
+    connect(m_toggleDebugAction, &QAction::toggled, this, [this](const bool enabled)
+    {
+        updateDebugVisibility(enabled);
+        showStatus(enabled ? QStringLiteral("Debug info shown.") : QStringLiteral("Debug info hidden."));
+    });
     connect(m_playPauseShortcut, &QShortcut::activated, m_controller, &PlayerController::togglePlayback);
     connect(m_startShortcut, &QShortcut::activated, m_controller, &PlayerController::goToStart);
     connect(m_numpadStartShortcut, &QShortcut::activated, m_controller, &PlayerController::goToStart);
@@ -203,6 +347,7 @@ MainWindow::MainWindow(QWidget* parent)
         this,
         &MainWindow::handleNodeEndShortcut);
     connect(m_trimNodeShortcut, &QShortcut::activated, this, &MainWindow::trimSelectedNodeToSound);
+    connect(m_autoPanShortcut, &QShortcut::activated, this, &MainWindow::toggleSelectedNodeAutoPan);
     connect(m_audioPoolShortcut, &QShortcut::activated, m_audioPoolAction, &QAction::trigger);
     connect(m_toggleNodeNameShortcut, &QShortcut::activated, m_controller, &PlayerController::toggleSelectedTrackLabels);
     connect(m_deleteShortcut, &QShortcut::activated, m_controller, &PlayerController::deleteSelectedTrack);
@@ -224,10 +369,12 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_controller, &PlayerController::trackAvailabilityChanged, this, &MainWindow::updateTrackAvailabilityState);
     connect(m_controller, &PlayerController::audioPoolChanged, this, &MainWindow::refreshAudioPool);
     connect(m_controller, &PlayerController::videoLoaded, this, &MainWindow::handleVideoLoaded);
+    connect(m_controller, &PlayerController::videoAudioStateChanged, this, &MainWindow::updateVideoAudioRow);
     connect(m_controller, &PlayerController::statusChanged, this, &MainWindow::showStatus);
     connect(m_audioPoolCloseButton, &QPushButton::clicked, this, [this]()
     {
         updateAudioPoolVisibility(false);
+        showStatus(QStringLiteral("Audio Pool hidden."));
     });
 
     updatePlaybackState(false);
@@ -239,6 +386,7 @@ MainWindow::MainWindow(QWidget* parent)
     updateDebugVisibility(true);
     updateDebugText();
     refreshAudioPool();
+    updateVideoAudioRow();
     m_memoryUsageTimer.start();
     showStatus(QStringLiteral("Open a clip to start adding nodes."));
     tryOpenLocalDevVideo();
@@ -371,6 +519,16 @@ void MainWindow::trimSelectedNodeToSound()
     m_controller->trimSelectedTracksToAttachedSound();
 }
 
+void MainWindow::toggleSelectedNodeAutoPan()
+{
+    m_controller->toggleSelectedTrackAutoPan();
+    if (m_autoPanAction)
+    {
+        const QSignalBlocker blocker{m_autoPanAction};
+        m_autoPanAction->setChecked(m_controller->hasSelection() && m_controller->selectedTracksAutoPanEnabled());
+    }
+}
+
 void MainWindow::updateFrame(const QImage& image, const int frameIndex, const double timestampSeconds)
 {
     m_canvas->setFrame(image);
@@ -389,12 +547,14 @@ void MainWindow::updateFrame(const QImage& image, const int frameIndex, const do
 void MainWindow::updateMemoryUsage()
 {
     m_memoryUsageText = currentMemoryUsageText();
+    m_processorUsageText = currentProcessorUsageText();
+    m_videoMemoryUsageText = currentVideoMemoryUsageText();
     updateDebugText();
 }
 
 void MainWindow::updateDebugText()
 {
-    if (!m_debugMenuLabel)
+    if (!m_debugOverlay)
     {
         return;
     }
@@ -411,10 +571,31 @@ void MainWindow::updateDebugText()
     const auto insertionText = m_controller->isInsertionFollowsPlayback()
         ? QStringLiteral("On")
         : QStringLiteral("Off");
+    const auto processorText = m_processorUsageText.isEmpty() ? QStringLiteral("CPU --") : m_processorUsageText;
+    const auto memoryText = m_memoryUsageText.isEmpty() ? QStringLiteral("Memory --") : m_memoryUsageText;
+    const auto videoMemoryText = m_videoMemoryUsageText.isEmpty() ? QStringLiteral("VRAM --") : m_videoMemoryUsageText;
+    const auto decoderText = m_controller->decoderBackendName().isEmpty()
+        ? QStringLiteral("Decode --")
+        : QStringLiteral("Decode %1").arg(m_controller->decoderBackendName());
+    const auto renderText = m_controller->renderBackendName().isEmpty()
+        ? QStringLiteral("Render --")
+        : QStringLiteral("Render %1").arg(m_controller->renderBackendName());
 
-    m_debugMenuLabel->setText(
+    m_debugOverlay->setListText(
         QStringLiteral(
-            "DEBUG  |  Clip %1  |  Motion %2  |  Insert %3  |  Frame %4/%5  |  Time %6 s  |  FPS %7  |  Nodes %8  |  Selected %9  |  %10")
+            "Clip: %1\n"
+            "Motion: %2\n"
+            "Insert Follow: %3\n"
+            "Frame: %4 / %5\n"
+            "Time: %6 s\n"
+            "FPS: %7\n"
+            "Nodes: %8\n"
+            "Selected: %9\n"
+            "%10\n"
+            "%11\n"
+            "%12\n"
+            "%13\n"
+            "%14")
             .arg(clipText)
             .arg(m_controller->isMotionTrackingEnabled() ? QStringLiteral("On") : QStringLiteral("Off"))
             .arg(insertionText)
@@ -424,7 +605,11 @@ void MainWindow::updateDebugText()
             .arg(fpsText)
             .arg(m_controller->trackCount())
             .arg(m_controller->hasSelection() ? QStringLiteral("Yes") : QStringLiteral("No"))
-            .arg(m_memoryUsageText.isEmpty() ? QStringLiteral("Memory --") : m_memoryUsageText));
+            .arg(processorText)
+            .arg(memoryText)
+            .arg(videoMemoryText)
+            .arg(decoderText)
+            .arg(renderText));
 }
 
 void MainWindow::refreshOverlays()
@@ -446,6 +631,10 @@ void MainWindow::updatePlaybackState(const bool playing)
 {
     const auto label = playing ? QStringLiteral("Pause (Space)") : QStringLiteral("Play (Space)");
     m_playAction->setText(label);
+    if (m_audioPoolPanel && m_audioPoolPanel->isVisible())
+    {
+        updateAudioPoolPlaybackIndicators();
+    }
     updateDebugText();
 }
 
@@ -462,6 +651,12 @@ void MainWindow::updateSelectionState(const bool hasSelection)
     m_setNodeStartAction->setEnabled(hasSelection);
     m_setNodeEndAction->setEnabled(hasSelection);
     m_trimNodeAction->setEnabled(hasSelection);
+    m_autoPanAction->setEnabled(hasSelection);
+    if (m_autoPanAction)
+    {
+        const QSignalBlocker blocker{m_autoPanAction};
+        m_autoPanAction->setChecked(hasSelection && m_controller->selectedTracksAutoPanEnabled());
+    }
     m_toggleNodeNameAction->setEnabled(hasSelection);
     m_importSoundAction->setEnabled(hasSelection);
     m_deleteNodeAction->setEnabled(hasSelection);
@@ -491,9 +686,13 @@ void MainWindow::handleVideoLoaded(const QString& filePath, const int totalFrame
 void MainWindow::updateDebugVisibility(const bool enabled)
 {
     m_debugVisible = enabled;
-    if (m_debugMenuLabel)
+    if (m_debugOverlay)
     {
-        m_debugMenuLabel->setVisible(enabled);
+        m_debugOverlay->setVisible(enabled);
+        if (enabled)
+        {
+            m_debugOverlay->raise();
+        }
     }
     if (m_toggleDebugAction && m_toggleDebugAction->isChecked() != enabled)
     {
@@ -526,6 +725,31 @@ void MainWindow::updateAudioPoolVisibility(const bool visible)
     }
 }
 
+void MainWindow::updateTimelineVisibility(const bool visible)
+{
+    if (m_timelinePanel)
+    {
+        if (!visible)
+        {
+            m_timelinePreferredHeight = std::max(96, m_timelinePanel->height());
+        }
+        m_timelinePanel->setVisible(visible);
+    }
+
+    if (visible && m_mainVerticalSplitter && m_timelinePanel)
+    {
+        const auto totalHeight = std::max(320, m_mainVerticalSplitter->height());
+        const auto timelineHeight = std::clamp(m_timelinePreferredHeight, 96, std::max(96, totalHeight / 2));
+        m_mainVerticalSplitter->setSizes({std::max(200, totalHeight - timelineHeight), timelineHeight});
+    }
+
+    if (m_showTimelineAction && m_showTimelineAction->isChecked() != visible)
+    {
+        const QSignalBlocker blocker{m_showTimelineAction};
+        m_showTimelineAction->setChecked(visible);
+    }
+}
+
 void MainWindow::refreshAudioPool()
 {
     if (!m_audioPoolListLayout)
@@ -555,6 +779,7 @@ void MainWindow::refreshAudioPool()
     for (const auto& item : items)
     {
         auto* row = new AudioPoolRow(item.assetPath, m_audioPoolListContainer);
+        row->setProperty("audioPoolItemKey", item.key);
         row->setProperty("assetPath", item.assetPath);
         row->setToolTip(item.connectionSummary);
         row->setStyleSheet(QStringLiteral(
@@ -580,7 +805,10 @@ void MainWindow::refreshAudioPool()
         nameLabel->setObjectName(QStringLiteral("audioPoolNameLabel"));
         nameLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
         nameLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        nameLabel->setStyleSheet(QStringLiteral("color: #d8e0ea; font-size: 8.5pt; padding: 0; margin: 0;"));
+        nameLabel->setStyleSheet(
+            item.connectedNodeCount > 0
+                ? QStringLiteral("color: #d8e0ea; font-size: 8.5pt; padding: 0; margin: 0;")
+                : QStringLiteral("color: #9ea9b7; font-size: 8.5pt; padding: 0; margin: 0;"));
         nameLabel->setToolTip(item.connectionSummary);
 
         auto* editButton = new QToolButton(row);
@@ -656,13 +884,13 @@ void MainWindow::updateAudioPoolPlaybackIndicators()
             continue;
         }
 
-        const auto assetPath = row->property("assetPath").toString();
+        const auto itemKey = row->property("audioPoolItemKey").toString();
         const auto itemIt = std::find_if(
             items.begin(),
             items.end(),
-            [&assetPath](const AudioPoolItem& item)
+            [&itemKey](const AudioPoolItem& item)
             {
-                return item.assetPath == assetPath;
+                return item.key == itemKey;
             });
         if (itemIt == items.end())
         {
@@ -688,12 +916,39 @@ void MainWindow::updateAudioPoolPlaybackIndicators()
     }
 }
 
+void MainWindow::updateVideoAudioRow()
+{
+    if (!m_videoAudioRow || !m_videoAudioLabel || !m_videoAudioMuteButton)
+    {
+        return;
+    }
+
+    const auto hasVideoAudio = m_controller->hasEmbeddedVideoAudio();
+    m_videoAudioRow->setVisible(hasVideoAudio);
+    if (!hasVideoAudio)
+    {
+        return;
+    }
+
+    const auto displayName = m_controller->embeddedVideoAudioDisplayName();
+    m_videoAudioLabel->setText(displayName);
+    m_videoAudioLabel->setToolTip(QStringLiteral("Embedded audio from %1").arg(displayName));
+
+    const auto muted = m_controller->isEmbeddedVideoAudioMuted();
+    m_videoAudioMuteButton->setIcon(
+        style()->standardIcon(muted ? QStyle::SP_MediaVolumeMuted : QStyle::SP_MediaVolume));
+    m_videoAudioMuteButton->setToolTip(
+        muted
+            ? QStringLiteral("Unmute video audio")
+            : QStringLiteral("Mute video audio"));
+}
+
 void MainWindow::showStatus(const QString& message)
 {
     statusBar()->showMessage(message, 5000);
 }
 
-void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalPosition)
+void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalPosition, const bool includeSoundActions)
 {
     if (trackId.isNull())
     {
@@ -736,9 +991,16 @@ void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalP
     menu.addSeparator();
     auto* importAudioAction = menu.addAction(QStringLiteral("Import Audio..."));
     QAction* trimAction = nullptr;
+    QAction* autoPanAction = nullptr;
     if (hasAttachedAudio)
     {
         trimAction = menu.addAction(QStringLiteral("Trim Node (T)"));
+    }
+    if (includeSoundActions)
+    {
+        autoPanAction = menu.addAction(QStringLiteral("Auto Pan (R)"));
+        autoPanAction->setCheckable(true);
+        autoPanAction->setChecked(m_controller->trackAutoPanEnabled(trackId));
     }
 
     const QFontMetrics metrics{renameEditor->font()};
@@ -768,6 +1030,12 @@ void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalP
     if (chosenAction == trimAction)
     {
         trimSelectedNodeToSound();
+        return;
+    }
+
+    if (chosenAction == autoPanAction)
+    {
+        toggleSelectedNodeAutoPan();
     }
 }
 
@@ -796,6 +1064,7 @@ void MainWindow::buildMenus()
 
     m_goToStartAction = new QAction(QStringLiteral("Start (Enter)"), this);
     m_playAction = new QAction(QStringLiteral("Play (Space)"), this);
+    m_stepForwardAction = new QAction(QStringLiteral("Step Forward (.)"), this);
     m_stepBackAction = new QAction(QStringLiteral("Step Back (,)"), this);
     m_insertionFollowsPlaybackAction = new QAction(QStringLiteral("Insertion Follows Playback (N)"), this);
     m_selectAllAction = new QAction(QStringLiteral("Select All (Ctrl+A)"), this);
@@ -804,19 +1073,27 @@ void MainWindow::buildMenus()
     m_setNodeStartAction = new QAction(QStringLiteral("Set Start (A)"), this);
     m_setNodeEndAction = new QAction(QStringLiteral("Set End (S)"), this);
     m_trimNodeAction = new QAction(QStringLiteral("Trim Node (T)"), this);
+    m_autoPanAction = new QAction(QStringLiteral("Auto Pan (R)"), this);
     m_toggleNodeNameAction = new QAction(QStringLiteral("Toggle Node Name (E)"), this);
     m_showAllNodeNamesAction = new QAction(QStringLiteral("Node Name Always On"), this);
     m_importSoundAction = new QAction(QStringLiteral("Import Sound"), this);
+    m_showTimelineAction = new QAction(QStringLiteral("Show Timeline"), this);
+    m_timelineClickSeeksAction = new QAction(QStringLiteral("Click Seeks Playhead"), this);
     m_audioPoolAction = new QAction(QStringLiteral("Audio Pool (P)"), this);
     m_deleteNodeAction = new QAction(QStringLiteral("Delete (Backspace)"), this);
     m_clearAllAction = new QAction(QStringLiteral("Clear All (Ctrl+Shift+A, Backspace)"), this);
 
     m_motionTrackingAction = new QAction(QStringLiteral("Motion Tracking"), this);
     m_motionTrackingAction->setCheckable(true);
+    m_autoPanAction->setCheckable(true);
     m_insertionFollowsPlaybackAction->setCheckable(true);
     m_insertionFollowsPlaybackAction->setChecked(true);
     m_showAllNodeNamesAction->setCheckable(true);
     m_showAllNodeNamesAction->setChecked(true);
+    m_showTimelineAction->setCheckable(true);
+    m_showTimelineAction->setChecked(true);
+    m_timelineClickSeeksAction->setCheckable(true);
+    m_timelineClickSeeksAction->setChecked(true);
     m_audioPoolAction->setCheckable(true);
     m_audioPoolAction->setChecked(false);
     m_importSoundAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
@@ -828,6 +1105,7 @@ void MainWindow::buildMenus()
     m_setNodeStartAction->setEnabled(false);
     m_setNodeEndAction->setEnabled(false);
     m_trimNodeAction->setEnabled(false);
+    m_autoPanAction->setEnabled(false);
     m_toggleNodeNameAction->setEnabled(false);
     m_importSoundAction->setEnabled(false);
     m_deleteNodeAction->setEnabled(false);
@@ -841,6 +1119,7 @@ void MainWindow::buildMenus()
     auto* editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
     editMenu->addAction(m_goToStartAction);
     editMenu->addAction(m_playAction);
+    editMenu->addAction(m_stepForwardAction);
     editMenu->addAction(m_stepBackAction);
     editMenu->addAction(m_insertionFollowsPlaybackAction);
     editMenu->addAction(m_selectAllAction);
@@ -859,6 +1138,11 @@ void MainWindow::buildMenus()
 
     auto* soundMenu = menuBar()->addMenu(QStringLiteral("&Sound"));
     soundMenu->addAction(m_importSoundAction);
+    soundMenu->addAction(m_autoPanAction);
+
+    auto* timelineMenu = menuBar()->addMenu(QStringLiteral("&Timeline"));
+    timelineMenu->addAction(m_showTimelineAction);
+    timelineMenu->addAction(m_timelineClickSeeksAction);
 
     auto* viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
     viewMenu->addAction(m_toggleNodeNameAction);
@@ -867,12 +1151,6 @@ void MainWindow::buildMenus()
 
     auto* debugMenu = menuBar()->addMenu(QStringLiteral("&Debug"));
     debugMenu->addAction(m_toggleDebugAction);
-
-    m_debugMenuLabel = new QLabel(menuBar());
-    m_debugMenuLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
-    m_debugMenuLabel->setContentsMargins(12, 0, 8, 0);
-    m_debugMenuLabel->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Preferred);
-    menuBar()->setCornerWidget(m_debugMenuLabel, Qt::TopRightCorner);
 }
 
 void MainWindow::buildUi()
@@ -882,7 +1160,7 @@ void MainWindow::buildUi()
 
     auto* root = new QWidget(this);
     auto* outerLayout = new QHBoxLayout(root);
-    outerLayout->setContentsMargins(20, 8, 20, 20);
+    outerLayout->setContentsMargins(0, 0, 0, 0);
     outerLayout->setSpacing(0);
 
     m_contentSplitter = new QSplitter(Qt::Horizontal, root);
@@ -892,7 +1170,7 @@ void MainWindow::buildUi()
     m_mainContent = new QWidget(root);
     auto* layout = new QVBoxLayout(m_mainContent);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(16);
+    layout->setSpacing(0);
     m_frameLabel = new QLabel(QStringLiteral("Frame 0  |  0.00 s"), m_mainContent);
     m_playPauseShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
     m_startShortcut = new QShortcut(QKeySequence(Qt::Key_Return), this);
@@ -904,6 +1182,7 @@ void MainWindow::buildUi()
     m_nodeStartShortcut = new QShortcut(QKeySequence(Qt::Key_A), this);
     m_nodeEndShortcut = new QShortcut(QKeySequence(Qt::Key_S), this);
     m_trimNodeShortcut = new QShortcut(QKeySequence(Qt::Key_T), this);
+    m_autoPanShortcut = new QShortcut(QKeySequence(Qt::Key_R), this);
     m_audioPoolShortcut = new QShortcut(QKeySequence(Qt::Key_P), this);
     m_toggleNodeNameShortcut = new QShortcut(QKeySequence(Qt::Key_E), this);
     m_deleteShortcut = new QShortcut(QKeySequence(Qt::Key_Backspace), this);
@@ -918,17 +1197,34 @@ void MainWindow::buildUi()
     m_nodeStartShortcut->setContext(Qt::ApplicationShortcut);
     m_nodeEndShortcut->setContext(Qt::ApplicationShortcut);
     m_trimNodeShortcut->setContext(Qt::ApplicationShortcut);
+    m_autoPanShortcut->setContext(Qt::ApplicationShortcut);
     m_audioPoolShortcut->setContext(Qt::ApplicationShortcut);
     m_toggleNodeNameShortcut->setContext(Qt::ApplicationShortcut);
     m_deleteShortcut->setContext(Qt::ApplicationShortcut);
     m_unselectAllShortcut->setContext(Qt::ApplicationShortcut);
 
-    m_canvas = new VideoCanvas(m_mainContent);
-    m_timeline = new TimelineView(m_mainContent);
+    m_mainVerticalSplitter = new QSplitter(Qt::Vertical, m_mainContent);
+    m_mainVerticalSplitter->setChildrenCollapsible(false);
+    m_mainVerticalSplitter->setHandleWidth(6);
+
+    m_canvas = new VideoCanvas(m_mainVerticalSplitter);
+    m_timelinePanel = new QFrame(m_mainVerticalSplitter);
+    m_timelinePanel->setObjectName(QStringLiteral("timelinePanel"));
+    m_timelinePanel->setFrameShape(QFrame::NoFrame);
+    m_timelinePanel->setMinimumHeight(72);
+    auto* timelinePanelLayout = new QVBoxLayout(m_timelinePanel);
+    timelinePanelLayout->setContentsMargins(0, 0, 0, 0);
+    timelinePanelLayout->setSpacing(0);
+
     auto* timelineInfoRow = new QHBoxLayout();
+    timelineInfoRow->setContentsMargins(8, 0, 8, 0);
     timelineInfoRow->setSpacing(12);
     timelineInfoRow->addWidget(m_frameLabel);
     timelineInfoRow->addStretch(1);
+
+    m_timeline = new TimelineView(m_timelinePanel);
+    timelinePanelLayout->addLayout(timelineInfoRow);
+    timelinePanelLayout->addWidget(m_timeline, 1);
 
     m_audioPoolPanel = new QFrame(m_contentSplitter);
     m_audioPoolPanel->setObjectName(QStringLiteral("audioPoolPanel"));
@@ -937,10 +1233,11 @@ void MainWindow::buildUi()
     m_audioPoolPanel->setMinimumWidth(240);
     m_audioPoolPanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     auto* audioPoolLayout = new QVBoxLayout(m_audioPoolPanel);
-    audioPoolLayout->setContentsMargins(8, 6, 8, 8);
-    audioPoolLayout->setSpacing(6);
+    audioPoolLayout->setContentsMargins(0, 0, 0, 0);
+    audioPoolLayout->setSpacing(0);
 
     auto* audioPoolHeader = new QHBoxLayout();
+    audioPoolHeader->setContentsMargins(8, 0, 8, 0);
     auto* audioPoolTitle = new QLabel(QStringLiteral("Audio Pool"), m_audioPoolPanel);
     auto* audioPoolImportButton = new QPushButton(QStringLiteral("Import"), m_audioPoolPanel);
     m_audioPoolCloseButton = new QPushButton(QStringLiteral("x"), m_audioPoolPanel);
@@ -953,10 +1250,36 @@ void MainWindow::buildUi()
     audioPoolHeader->addWidget(m_audioPoolCloseButton);
     audioPoolLayout->addLayout(audioPoolHeader);
 
+    m_videoAudioRow = new QWidget(m_audioPoolPanel);
+    auto* videoAudioLayout = new QHBoxLayout(m_videoAudioRow);
+    videoAudioLayout->setContentsMargins(8, 0, 8, 0);
+    videoAudioLayout->setSpacing(6);
+
+    auto* videoAudioIcon = new QLabel(QStringLiteral("\u266B"), m_videoAudioRow);
+    videoAudioIcon->setStyleSheet(QStringLiteral("color: #c7d0da; font-size: 9pt;"));
+
+    m_videoAudioLabel = new QLabel(m_videoAudioRow);
+    m_videoAudioLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_videoAudioLabel->setStyleSheet(QStringLiteral("color: #c7d0da; font-size: 8.5pt;"));
+
+    m_videoAudioMuteButton = new QToolButton(m_videoAudioRow);
+    m_videoAudioMuteButton->setAutoRaise(true);
+    m_videoAudioMuteButton->setCursor(Qt::PointingHandCursor);
+    m_videoAudioMuteButton->setStyleSheet(QStringLiteral(
+        "QToolButton { background: transparent; border: none; padding: 2px; }"
+        "QToolButton:hover { background: rgba(255, 255, 255, 0.06); border-radius: 4px; }"));
+    connect(m_videoAudioMuteButton, &QToolButton::clicked, m_controller, &PlayerController::toggleEmbeddedVideoAudioMuted);
+
+    videoAudioLayout->addWidget(videoAudioIcon, 0, Qt::AlignVCenter);
+    videoAudioLayout->addWidget(m_videoAudioLabel, 1);
+    videoAudioLayout->addWidget(m_videoAudioMuteButton, 0, Qt::AlignVCenter);
+    audioPoolLayout->addWidget(m_videoAudioRow);
+
     auto* audioPoolScroll = new QScrollArea(m_audioPoolPanel);
     audioPoolScroll->setWidgetResizable(true);
     audioPoolScroll->setFrameShape(QFrame::NoFrame);
     audioPoolScroll->setObjectName(QStringLiteral("audioPoolScroll"));
+    audioPoolScroll->setContentsMargins(0, 0, 0, 0);
     m_audioPoolListContainer = new QWidget(audioPoolScroll);
     m_audioPoolListContainer->setObjectName(QStringLiteral("audioPoolListContainer"));
     m_audioPoolListLayout = new QVBoxLayout(m_audioPoolListContainer);
@@ -966,9 +1289,20 @@ void MainWindow::buildUi()
     audioPoolLayout->addWidget(audioPoolScroll, 1);
     connect(audioPoolImportButton, &QPushButton::clicked, this, &MainWindow::importAudioToPool);
 
-    layout->addWidget(m_canvas, 1);
-    layout->addLayout(timelineInfoRow);
-    layout->addWidget(m_timeline);
+    m_mainVerticalSplitter->addWidget(m_canvas);
+    m_mainVerticalSplitter->addWidget(m_timelinePanel);
+    m_mainVerticalSplitter->setStretchFactor(0, 1);
+    m_mainVerticalSplitter->setStretchFactor(1, 0);
+    m_mainVerticalSplitter->setSizes({700, m_timelinePreferredHeight});
+    connect(m_mainVerticalSplitter, &QSplitter::splitterMoved, this, [this]()
+    {
+        if (m_timelinePanel && m_timelinePanel->isVisible())
+        {
+            m_timelinePreferredHeight = std::max(96, m_timelinePanel->height());
+        }
+    });
+
+    layout->addWidget(m_mainVerticalSplitter, 1);
 
     m_contentSplitter->addWidget(m_mainContent);
     m_contentSplitter->addWidget(m_audioPoolPanel);
@@ -986,6 +1320,16 @@ void MainWindow::buildUi()
     outerLayout->addWidget(m_contentSplitter, 1);
 
     setCentralWidget(root);
+
+    auto* debugOverlay = new DebugOverlayWindow(this);
+    m_debugOverlay = debugOverlay;
+    m_debugOverlay->move(16, menuBar()->height() + 16);
+    m_debugOverlay->raise();
+    connect(debugOverlay, &DebugOverlayWindow::closeRequested, this, [this]()
+    {
+        updateDebugVisibility(false);
+        showStatus(QStringLiteral("Debug window hidden."));
+    });
 
     setStyleSheet(R"(
         QMainWindow {
@@ -1044,6 +1388,36 @@ void MainWindow::buildUi()
         }
         QWidget#audioPoolListContainer {
             background: #07090c;
+        }
+        QFrame#debugOverlay {
+            background: #0b0f14;
+            border: 1px solid #253142;
+            border-radius: 8px;
+        }
+        QWidget#debugOverlayTitleBar {
+            background: #111821;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+        QLabel#debugOverlayTitle {
+            color: #f3f5f7;
+            font-weight: 600;
+        }
+        QLabel#debugOverlayText {
+            color: #d8dde4;
+            font-size: 9pt;
+            padding: 10px;
+            background: #0b0f14;
+        }
+        QPushButton#debugOverlayCloseButton {
+            background: #18202b;
+            color: #ecf1f6;
+            border: 1px solid #324155;
+            border-radius: 4px;
+            padding: 0px;
+        }
+        QPushButton#debugOverlayCloseButton:hover {
+            background: #223146;
         }
         QPushButton {
             background: #18202b;

@@ -80,6 +80,13 @@ void VideoCanvas::paintEvent(QPaintEvent* event)
         painter.setPen(QPen(Qt::black, 2.0));
         painter.drawEllipse(canvasPoint, 7.0, 7.0);
 
+        if (overlay.autoPanEnabled)
+        {
+            painter.setBrush(QColor{8, 9, 12});
+            painter.setPen(QPen(QColor{255, 255, 255, 180}, 1.0));
+            painter.drawEllipse(canvasPoint, 2.5, 2.5);
+        }
+
         if (overlay.highlightOpacity > 0.0F)
         {
             painter.setBrush(Qt::NoBrush);

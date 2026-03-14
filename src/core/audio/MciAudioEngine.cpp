@@ -95,6 +95,12 @@ bool MciAudioEngine::playTrack(const QUuid& trackId, const QString& filePath, co
 #endif
 }
 
+void MciAudioEngine::setTrackPan(const QUuid& trackId, const float pan)
+{
+    Q_UNUSED(trackId);
+    Q_UNUSED(pan);
+}
+
 void MciAudioEngine::stopTrack(const QUuid& trackId)
 {
 #ifdef Q_OS_WIN

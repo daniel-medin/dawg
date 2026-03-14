@@ -1,6 +1,7 @@
 #include "core/audio/JuceAudioEngine.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <memory>
 #include <unordered_map>
@@ -31,6 +32,53 @@ juce::File toJuceFile(const QString& filePath)
     const auto widePath = filePath.toStdWString();
     return juce::File(juce::String(widePath.c_str()));
 }
+
+class PanAudioSource final : public juce::AudioSource
+{
+public:
+    explicit PanAudioSource(juce::AudioSource& inputSource)
+        : m_inputSource(inputSource)
+    {
+    }
+
+    void setPan(const float pan)
+    {
+        m_pan.store(juce::jlimit(-1.0f, 1.0f, pan));
+    }
+
+    void prepareToPlay(const int samplesPerBlockExpected, const double sampleRate) override
+    {
+        m_inputSource.prepareToPlay(samplesPerBlockExpected, sampleRate);
+    }
+
+    void releaseResources() override
+    {
+        m_inputSource.releaseResources();
+    }
+
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override
+    {
+        m_inputSource.getNextAudioBlock(bufferToFill);
+
+        auto* buffer = bufferToFill.buffer;
+        if (!buffer || buffer->getNumChannels() < 2)
+        {
+            return;
+        }
+
+        const auto pan = m_pan.load();
+        const auto angle = (pan + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+        const auto leftGain = std::cos(angle);
+        const auto rightGain = std::sin(angle);
+
+        buffer->applyGain(0, bufferToFill.startSample, bufferToFill.numSamples, leftGain);
+        buffer->applyGain(1, bufferToFill.startSample, bufferToFill.numSamples, rightGain);
+    }
+
+private:
+    juce::AudioSource& m_inputSource;
+    std::atomic<float> m_pan{0.0f};
+};
 }
 
 struct JuceAudioEngine::Impl
@@ -39,6 +87,7 @@ struct JuceAudioEngine::Impl
     {
         juce::AudioTransportSource transport;
         std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
+        std::unique_ptr<PanAudioSource> panSource;
         QString filePath;
     };
 
@@ -96,8 +145,22 @@ bool JuceAudioEngine::playTrack(const QUuid& trackId, const QString& filePath, c
     const auto activeIt = m_impl->activeTracks.find(trackId);
     if (activeIt != m_impl->activeTracks.end() && activeIt->second->filePath == filePath)
     {
-        const auto currentOffsetMs = static_cast<int>(std::lround(activeIt->second->transport.getCurrentPosition() * 1000.0));
-        if (activeIt->second->transport.isPlaying() && std::abs(currentOffsetMs - clampedOffsetMs) <= 40)
+        auto& transport = activeIt->second->transport;
+        const auto currentOffsetMs = static_cast<int>(std::lround(transport.getCurrentPosition() * 1000.0));
+        const auto driftMs = std::abs(currentOffsetMs - clampedOffsetMs);
+
+        // Avoid tearing down and recreating the reader on small sync drift.
+        if (driftMs > 120)
+        {
+            transport.setPosition(static_cast<double>(clampedOffsetMs) / 1000.0);
+        }
+
+        if (!transport.isPlaying())
+        {
+            transport.start();
+        }
+
+        if (!transport.hasStreamFinished())
         {
             return true;
         }
@@ -120,11 +183,28 @@ bool JuceAudioEngine::playTrack(const QUuid& trackId, const QString& filePath, c
     playback->readerSource = std::make_unique<juce::AudioFormatReaderSource>(reader.release(), true);
     playback->transport.setSource(playback->readerSource.get(), 0, nullptr, sourceSampleRate);
     playback->transport.setPosition(static_cast<double>(clampedOffsetMs) / 1000.0);
+    playback->panSource = std::make_unique<PanAudioSource>(playback->transport);
 
-    m_impl->mixer.addInputSource(&playback->transport, false);
+    m_impl->mixer.addInputSource(playback->panSource.get(), false);
     playback->transport.start();
     m_impl->activeTracks.emplace(trackId, std::move(playback));
     return true;
+}
+
+void JuceAudioEngine::setTrackPan(const QUuid& trackId, const float pan)
+{
+    if (!m_impl)
+    {
+        return;
+    }
+
+    const auto activeIt = m_impl->activeTracks.find(trackId);
+    if (activeIt == m_impl->activeTracks.end() || !activeIt->second->panSource)
+    {
+        return;
+    }
+
+    activeIt->second->panSource->setPan(pan);
 }
 
 void JuceAudioEngine::stopTrack(const QUuid& trackId)
@@ -142,7 +222,10 @@ void JuceAudioEngine::stopTrack(const QUuid& trackId)
 
     auto& playback = *activeIt->second;
     playback.transport.stop();
-    m_impl->mixer.removeInputSource(&playback.transport);
+    if (playback.panSource)
+    {
+        m_impl->mixer.removeInputSource(playback.panSource.get());
+    }
     playback.transport.setSource(nullptr);
     m_impl->activeTracks.erase(activeIt);
 }

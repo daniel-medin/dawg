@@ -30,6 +30,9 @@ public:
     void setTimeline(int totalFrames, double fps);
     void setCurrentFrame(int frameIndex);
     void setTrackSpans(const std::vector<TimelineTrackSpan>& trackSpans);
+    void setSeekOnClickEnabled(bool enabled);
+    [[nodiscard]] QSize sizeHint() const override;
+    [[nodiscard]] QSize minimumSizeHint() const override;
 
 signals:
     void frameRequested(int frameIndex);
@@ -51,6 +54,8 @@ private:
         QRectF hitRect;
         QRectF startHandleRect;
         QRectF endHandleRect;
+        double lineStartX = 0.0;
+        double lineEndX = 0.0;
         QUuid id;
         QString label;
     };
@@ -62,6 +67,9 @@ private:
     [[nodiscard]] QRectF timelineRect() const;
     [[nodiscard]] int frameForPosition(double x) const;
     [[nodiscard]] double xForFrame(int frameIndex) const;
+    [[nodiscard]] int preferredHeight() const;
+    void updatePreferredHeight();
+    void requestFrame(int frameIndex);
     void requestFrameAt(const QPointF& position);
 
     std::optional<TimelineTrackGeometry> m_trimmedTrack;
@@ -74,4 +82,6 @@ private:
     double m_fps = 0.0;
     std::vector<TimelineTrackSpan> m_trackSpans;
     bool m_dragging = false;
+    bool m_seekOnClickEnabled = true;
+    int m_lastRequestedFrame = -1;
 };

@@ -13,6 +13,7 @@
 #include <QVBoxLayout>
 
 class PlayerController;
+class DebugOverlayWindow;
 class TimelineView;
 class VideoCanvas;
 
@@ -31,6 +32,7 @@ private slots:
     void importSound();
     void importAudioToPool();
     void trimSelectedNodeToSound();
+    void toggleSelectedNodeAutoPan();
     void handleNodeStartShortcut();
     void handleNodeEndShortcut();
     void updateFrame(const QImage& image, int frameIndex, double timestampSeconds);
@@ -45,12 +47,14 @@ private slots:
     void handleVideoLoaded(const QString& filePath, int totalFrames, double fps);
     void updateDebugVisibility(bool enabled);
     void updateAudioPoolVisibility(bool visible);
+    void updateTimelineVisibility(bool visible);
     void refreshAudioPool();
     void updateAudioPoolPlaybackIndicators();
+    void updateVideoAudioRow();
     void showStatus(const QString& message);
-    void showNodeContextMenu(const QUuid& trackId, const QPoint& globalPosition);
 
 private:
+    void showNodeContextMenu(const QUuid& trackId, const QPoint& globalPosition, bool includeSoundActions);
     void buildMenus();
     void buildUi();
     void refreshTimeline();
@@ -65,16 +69,22 @@ private:
     VideoCanvas* m_canvas = nullptr;
     TimelineView* m_timeline = nullptr;
     QSplitter* m_contentSplitter = nullptr;
+    QSplitter* m_mainVerticalSplitter = nullptr;
     QWidget* m_mainContent = nullptr;
+    QFrame* m_timelinePanel = nullptr;
     QLabel* m_frameLabel = nullptr;
-    QLabel* m_debugMenuLabel = nullptr;
+    DebugOverlayWindow* m_debugOverlay = nullptr;
     QFrame* m_audioPoolPanel = nullptr;
+    QWidget* m_videoAudioRow = nullptr;
+    QLabel* m_videoAudioLabel = nullptr;
+    QToolButton* m_videoAudioMuteButton = nullptr;
     QWidget* m_audioPoolListContainer = nullptr;
     QVBoxLayout* m_audioPoolListLayout = nullptr;
     QPushButton* m_audioPoolCloseButton = nullptr;
     QAction* m_openAction = nullptr;
     QAction* m_goToStartAction = nullptr;
     QAction* m_playAction = nullptr;
+    QAction* m_stepForwardAction = nullptr;
     QAction* m_stepBackAction = nullptr;
     QAction* m_insertionFollowsPlaybackAction = nullptr;
     QAction* m_selectAllAction = nullptr;
@@ -82,9 +92,12 @@ private:
     QAction* m_setNodeStartAction = nullptr;
     QAction* m_setNodeEndAction = nullptr;
     QAction* m_trimNodeAction = nullptr;
+    QAction* m_autoPanAction = nullptr;
     QAction* m_toggleNodeNameAction = nullptr;
     QAction* m_showAllNodeNamesAction = nullptr;
     QAction* m_importSoundAction = nullptr;
+    QAction* m_showTimelineAction = nullptr;
+    QAction* m_timelineClickSeeksAction = nullptr;
     QAction* m_audioPoolAction = nullptr;
     QAction* m_deleteNodeAction = nullptr;
     QAction* m_clearAllAction = nullptr;
@@ -100,6 +113,7 @@ private:
     QShortcut* m_nodeStartShortcut = nullptr;
     QShortcut* m_nodeEndShortcut = nullptr;
     QShortcut* m_trimNodeShortcut = nullptr;
+    QShortcut* m_autoPanShortcut = nullptr;
     QShortcut* m_audioPoolShortcut = nullptr;
     QShortcut* m_toggleNodeNameShortcut = nullptr;
     QShortcut* m_deleteShortcut = nullptr;
@@ -107,8 +121,11 @@ private:
     bool m_clearAllShortcutArmed = false;
     bool m_debugVisible = true;
     int m_audioPoolPreferredWidth = 320;
+    int m_timelinePreferredHeight = 148;
     QString m_clipName;
     QString m_memoryUsageText;
+    QString m_processorUsageText;
+    QString m_videoMemoryUsageText;
     QTimer m_clearAllShortcutTimer;
     QTimer m_memoryUsageTimer;
 };

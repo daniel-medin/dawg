@@ -1,12 +1,15 @@
 #pragma once
 
-#include <opencv2/videoio.hpp>
+#include <memory>
 
-#include "VideoDecoder.h"
+#include "core/video/VideoDecoder.h"
 
-class OpenCvVideoDecoder final : public VideoDecoder
+class FfmpegVideoDecoder final : public VideoDecoder
 {
 public:
+    FfmpegVideoDecoder();
+    ~FfmpegVideoDecoder() override;
+
     bool open(const std::string& filePath) override;
     bool isOpen() const override;
     bool seekFrame(int frameIndex) override;
@@ -19,5 +22,7 @@ public:
     [[nodiscard]] bool isHardwareAccelerated() const override;
 
 private:
-    cv::VideoCapture m_capture;
+    struct Impl;
+
+    std::unique_ptr<Impl> m_impl;
 };

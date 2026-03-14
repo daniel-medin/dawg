@@ -47,6 +47,11 @@ int TransportController::stopPlayback(const int currentFrame, const bool restore
     return -1;
 }
 
+void TransportController::setPlaybackAnchorFrame(const int frameIndex)
+{
+    m_playbackAnchorFrame = frameIndex;
+}
+
 void TransportController::setInsertionFollowsPlayback(const bool enabled)
 {
     if (m_insertionFollowsPlayback == enabled)

@@ -18,7 +18,7 @@ find_package(JUCE CONFIG REQUIRED)
 find_package(PkgConfig QUIET)
 
 if(DAWG_ENABLE_FFMPEG AND PkgConfig_FOUND)
-    pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec libavformat libavutil libswscale)
+    pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec libavformat libavutil libswscale libswresample)
 endif()
 
 add_executable(dawg WIN32
@@ -26,6 +26,8 @@ add_executable(dawg WIN32
     src/resources.qrc
     src/app/MainWindow.cpp
     src/app/MainWindow.h
+    src/app/AudioPoolService.cpp
+    src/app/AudioPoolService.h
     src/app/PlayerController.cpp
     src/app/PlayerController.h
     src/app/TransportController.cpp
@@ -38,15 +40,32 @@ add_executable(dawg WIN32
     src/core/audio/JuceAudioEngine.h
     src/core/audio/MciAudioEngine.cpp
     src/core/audio/MciAudioEngine.h
+    src/core/audio/VideoAudioExtractor.cpp
+    src/core/audio/VideoAudioExtractor.h
     src/core/tracking/MotionTracker.cpp
     src/core/tracking/MotionTracker.h
     src/core/tracking/TrackTypes.h
+    src/core/render/D3D11RenderBackend.cpp
+    src/core/render/D3D11RenderBackend.h
+    src/core/render/IRenderBackend.h
+    src/core/render/RenderService.cpp
+    src/core/render/RenderService.h
+    src/core/video/AnalysisFrameProvider.cpp
+    src/core/video/AnalysisFrameProvider.h
     src/core/video/DecodedFrame.h
+    src/core/video/FfmpegVideoDecoder.cpp
+    src/core/video/FfmpegVideoDecoder.h
     src/core/video/OpenCvVideoDecoder.cpp
     src/core/video/OpenCvVideoDecoder.h
     src/core/video/VideoDecoder.h
+    src/core/video/VideoFrame.h
+    src/core/video/VideoFrameQueue.h
+    src/core/video/VideoPlaybackService.cpp
+    src/core/video/VideoPlaybackService.h
     src/ui/VideoCanvas.cpp
     src/ui/VideoCanvas.h
+    src/ui/DebugOverlayWindow.cpp
+    src/ui/DebugOverlayWindow.h
     src/ui/TimelineView.cpp
     src/ui/TimelineView.h
 )
@@ -65,7 +84,7 @@ target_link_libraries(dawg
 )
 
 if(WIN32)
-    target_link_libraries(dawg PRIVATE Psapi Winmm)
+    target_link_libraries(dawg PRIVATE Psapi Winmm d3d11 dxgi)
 endif()
 
 if(TARGET PkgConfig::FFMPEG)
