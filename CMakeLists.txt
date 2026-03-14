@@ -70,6 +70,8 @@ add_executable(dawg WIN32
     src/ui/NativeVideoViewport.h
     src/ui/DebugOverlayWindow.cpp
     src/ui/DebugOverlayWindow.h
+    src/ui/ClipEditorView.cpp
+    src/ui/ClipEditorView.h
     src/ui/MixView.cpp
     src/ui/MixView.h
     src/ui/TimelineView.cpp

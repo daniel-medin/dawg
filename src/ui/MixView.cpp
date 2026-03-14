@@ -19,7 +19,8 @@ namespace
 constexpr int kMixFaderMinValue = -1000;
 constexpr int kMixFaderMaxValue = 120;
 constexpr float kMixSilentGainDb = static_cast<float>(kMixFaderMinValue) / 10.0F;
-constexpr float kMeterFloorDb = -60.0F;
+constexpr float kMeterDisplayFloorDb = kMixSilentGainDb;
+constexpr float kMeterDisplayCeilingDb = static_cast<float>(kMixFaderMaxValue) / 10.0F;
 constexpr float kMeterYellowThresholdDb = -18.0F;
 constexpr float kMeterOrangeThresholdDb = -6.0F;
 
@@ -52,23 +53,25 @@ float meterLevelToDb(const float level)
 {
     if (level <= 0.0F)
     {
-        return kMeterFloorDb;
+        return kMeterDisplayFloorDb;
     }
 
-    return std::clamp(20.0F * std::log10(level), kMeterFloorDb, 0.0F);
+    return std::clamp(20.0F * std::log10(level), kMeterDisplayFloorDb, 0.0F);
 }
 
 int meterValueForLevel(const float level)
 {
     const auto meterDb = meterLevelToDb(level);
-    const auto normalized = (meterDb - kMeterFloorDb) / std::abs(kMeterFloorDb);
+    const auto normalized = (meterDb - kMeterDisplayFloorDb) / (kMeterDisplayCeilingDb - kMeterDisplayFloorDb);
     return static_cast<int>(std::lround(std::clamp(normalized, 0.0F, 1.0F) * 1000.0F));
 }
 
 QString meterStyleSheet()
 {
-    const auto yellowStop = (kMeterYellowThresholdDb - kMeterFloorDb) / std::abs(kMeterFloorDb);
-    const auto orangeStop = (kMeterOrangeThresholdDb - kMeterFloorDb) / std::abs(kMeterFloorDb);
+    const auto yellowStop =
+        (kMeterYellowThresholdDb - kMeterDisplayFloorDb) / (kMeterDisplayCeilingDb - kMeterDisplayFloorDb);
+    const auto orangeStop =
+        (kMeterOrangeThresholdDb - kMeterDisplayFloorDb) / (kMeterDisplayCeilingDb - kMeterDisplayFloorDb);
 
     return QStringLiteral(
         "QProgressBar {"

@@ -292,6 +292,30 @@ bool MotionTracker::setTrackAudioAttachment(const QUuid& trackId, const QString&
     return false;
 }
 
+bool MotionTracker::setTrackAudioClipRange(const QUuid& trackId, const int clipStartMs, std::optional<int> clipEndMs)
+{
+    for (auto& track : m_tracks)
+    {
+        if (track.id != trackId || !track.attachedAudio.has_value())
+        {
+            continue;
+        }
+
+        track.attachedAudio->clipStartMs = std::max(0, clipStartMs);
+        if (clipEndMs.has_value())
+        {
+            track.attachedAudio->clipEndMs = std::max(track.attachedAudio->clipStartMs, *clipEndMs);
+        }
+        else
+        {
+            track.attachedAudio->clipEndMs.reset();
+        }
+        return true;
+    }
+
+    return false;
+}
+
 int MotionTracker::detachTrackAudioByPath(const QString& assetPath)
 {
     int detachedCount = 0;

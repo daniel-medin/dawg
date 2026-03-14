@@ -13,6 +13,8 @@ struct AudioAttachment
 {
     QString assetPath;
     float gainDb = 0.0F;
+    int clipStartMs = 0;
+    std::optional<int> clipEndMs;
 };
 
 struct TrackPoint

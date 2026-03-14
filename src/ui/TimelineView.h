@@ -44,6 +44,7 @@ signals:
     void loopStartFrameRequested(int frameIndex);
     void loopEndFrameRequested(int frameIndex);
     void trackSelected(const QUuid& trackId);
+    void trackActivated(const QUuid& trackId);
     void trackStartFrameRequested(const QUuid& trackId, int frameIndex);
     void trackEndFrameRequested(const QUuid& trackId, int frameIndex);
     void trackSpanMoveRequested(const QUuid& trackId, int deltaFrames);
@@ -52,6 +53,7 @@ signals:
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
@@ -106,7 +108,8 @@ private:
     {
         None,
         Start,
-        End
+        End,
+        Range
     };
 
     std::optional<TimelineTrackGeometry> m_trimmedTrack;
@@ -118,6 +121,7 @@ private:
     std::optional<double> m_hoveredTimelineX;
     bool m_trimmingStart = false;
     LoopHandleDragMode m_loopHandleDragMode = LoopHandleDragMode::None;
+    int m_loopDragAnchorFrame = 0;
     int m_dragAnchorFrame = 0;
     int m_dragAccumulatedDeltaFrames = 0;
     int m_totalFrames = 0;

@@ -27,6 +27,7 @@
 #include "core/video/AnalysisFrameProvider.h"
 #include "core/video/VideoFrame.h"
 #include "core/video/VideoPlaybackService.h"
+#include "ui/ClipEditorView.h"
 #include "ui/MixView.h"
 #include "ui/TimelineView.h"
 
@@ -91,6 +92,9 @@ public:
     void selectNextVisibleTrack();
     bool startAudioPoolPreview(const QString& filePath);
     void stopAudioPoolPreview();
+    bool startSelectedTrackClipPreview();
+    void stopSelectedTrackClipPreview();
+    bool setSelectedTrackClipRangeMs(int clipStartMs, int clipEndMs);
 
     [[nodiscard]] bool hasVideoLoaded() const;
     [[nodiscard]] bool isPlaying() const;
@@ -128,6 +132,7 @@ public:
     [[nodiscard]] bool trackHasAttachedAudio(const QUuid& trackId) const;
     [[nodiscard]] bool trackAutoPanEnabled(const QUuid& trackId) const;
     [[nodiscard]] bool selectedTracksAutoPanEnabled() const;
+    [[nodiscard]] std::optional<ClipEditorState> selectedClipEditorState() const;
     bool removeAudioFromPool(const QString& filePath);
     bool removeAudioAndConnectedNodesFromPool(const QString& filePath);
     [[nodiscard]] std::vector<AudioPoolItem> audioPoolItems() const;
@@ -162,6 +167,7 @@ private:
     bool loadFrameAt(int frameIndex);
     [[nodiscard]] double frameTimestampSeconds(int frameIndex) const;
     [[nodiscard]] std::optional<int> trimmedEndFrameForTrack(const TrackPoint& track) const;
+    [[nodiscard]] std::optional<int> audioDurationMs(const QString& filePath) const;
     void saveUndoState();
     void restoreTrackEditState(const MotionTrackerState& trackerState, const std::vector<QUuid>& selectedTrackIds);
     void syncAttachedAudioForCurrentFrame();
@@ -219,5 +225,8 @@ private:
     std::uint64_t m_lastLoggedQueueStarvationCount = 0;
     const QUuid m_embeddedVideoAudioTrackId = QUuid(QStringLiteral("{eb6fc60f-0781-433f-9f03-ff16531165f7}"));
     const QUuid m_audioPoolPreviewTrackId = QUuid(QStringLiteral("{8d6166c4-b107-4c55-8f11-f9cbf67d0e0a}"));
+    const QUuid m_clipEditorPreviewTrackId = QUuid(QStringLiteral("{3427e43b-a4c0-4d8e-86ea-52e9d85f2747}"));
     QString m_audioPoolPreviewAssetPath;
+    QTimer m_clipEditorPreviewStopTimer;
+    mutable QHash<QString, std::optional<int>> m_audioDurationMsByPath;
 };

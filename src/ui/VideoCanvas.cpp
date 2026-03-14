@@ -426,6 +426,25 @@ protected:
         }
     }
 
+    void mouseDoubleClickEvent(QMouseEvent* event) override
+    {
+        QWidget::mouseDoubleClickEvent(event);
+
+        if (!m_hasFrame || event->button() != Qt::LeftButton)
+        {
+            return;
+        }
+
+        const auto trackId = trackAt(event->position());
+        if (trackId.isNull())
+        {
+            return;
+        }
+
+        m_owner->trackSelected(trackId);
+        m_owner->trackActivated(trackId);
+    }
+
 private:
     [[nodiscard]] QRectF imageRenderRect() const
     {

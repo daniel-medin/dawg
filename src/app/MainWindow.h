@@ -18,6 +18,7 @@
 
 class PlayerController;
 class DebugOverlayWindow;
+class ClipEditorView;
 class MixView;
 class NativeVideoViewport;
 class TimelineView;
@@ -68,6 +69,7 @@ private slots:
     void updateDebugVisibility(bool enabled);
     void updateAudioPoolVisibility(bool visible);
     void updateTimelineVisibility(bool visible);
+    void updateClipEditorVisibility(bool visible);
     void updateMixVisibility(bool visible);
     void refreshAudioPool();
     void updateAudioPoolPlaybackIndicators();
@@ -80,6 +82,7 @@ private:
     void buildMenus();
     void buildUi();
     void refreshTimeline();
+    void refreshClipEditor();
     void refreshMixView();
     void updateEditActionState();
     void updateOverlayPositions();
@@ -102,11 +105,13 @@ private:
     PlayerController* m_controller = nullptr;
     VideoCanvas* m_canvas = nullptr;
     TimelineView* m_timeline = nullptr;
+    ClipEditorView* m_clipEditorView = nullptr;
     MixView* m_mixView = nullptr;
     QSplitter* m_contentSplitter = nullptr;
     QSplitter* m_mainVerticalSplitter = nullptr;
     QWidget* m_mainContent = nullptr;
     QFrame* m_timelinePanel = nullptr;
+    QFrame* m_clipEditorPanel = nullptr;
     QFrame* m_mixPanel = nullptr;
     QLabel* m_frameLabel = nullptr;
     QLabel* m_statusToast = nullptr;
@@ -151,6 +156,7 @@ private:
     QAction* m_toggleNodeNameAction = nullptr;
     QAction* m_showAllNodeNamesAction = nullptr;
     QAction* m_importSoundAction = nullptr;
+    QAction* m_showClipEditorAction = nullptr;
     QAction* m_showTimelineAction = nullptr;
     QAction* m_showMixAction = nullptr;
     QAction* m_timelineClickSeeksAction = nullptr;
@@ -178,6 +184,7 @@ private:
     QShortcut* m_nodeEndShortcut = nullptr;
     QShortcut* m_selectNextNodeShortcut = nullptr;
     QShortcut* m_showTimelineShortcut = nullptr;
+    QShortcut* m_showClipEditorShortcut = nullptr;
     QShortcut* m_showMixShortcut = nullptr;
     QShortcut* m_trimNodeShortcut = nullptr;
     QShortcut* m_autoPanShortcut = nullptr;
@@ -189,6 +196,7 @@ private:
     bool m_debugVisible = true;
     int m_audioPoolPreferredWidth = 320;
     int m_timelinePreferredHeight = 148;
+    int m_clipEditorPreferredHeight = 224;
     int m_mixPreferredHeight = 368;
     QString m_clipName;
     QString m_memoryUsageText;

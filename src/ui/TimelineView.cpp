@@ -50,6 +50,7 @@ void TimelineView::clear()
     m_hoveredTimelineX.reset();
     m_trimmingStart = false;
     m_loopHandleDragMode = LoopHandleDragMode::None;
+    m_loopDragAnchorFrame = 0;
     m_dragAnchorFrame = 0;
     m_dragAccumulatedDeltaFrames = 0;
     m_totalFrames = 0;
@@ -177,9 +178,10 @@ void TimelineView::paintEvent(QPaintEvent* event)
     painter.setPen(QPen(QColor{32, 36, 42}, 1.0));
     painter.setBrush(QColor{7, 8, 10});
     painter.drawRect(fullRect);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor{11, 14, 18});
+    painter.setPen(QPen(QColor{36, 41, 48}, 1.0));
+    painter.setBrush(QColor{18, 22, 27});
     painter.drawRoundedRect(loopRect, 4.0, 4.0);
+    painter.setPen(Qt::NoPen);
     painter.setBrush(QColor{8, 10, 13});
     painter.drawRoundedRect(laneRect, 4.0, 4.0);
 
@@ -308,6 +310,7 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
         m_hoveredLoopFrame = m_loopEditFrame;
         m_hoveredTimelineX = event->position().x();
         m_loopHandleDragMode = LoopHandleDragMode::None;
+        m_loopDragAnchorFrame = *m_loopEditFrame;
         if (const auto loopGeometry = loopRangeGeometry(); loopGeometry.has_value())
         {
             if (m_loopStartFrame.has_value() && loopGeometry->startHandleRect.contains(event->position()))
@@ -318,6 +321,10 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
             {
                 m_loopHandleDragMode = LoopHandleDragMode::End;
             }
+        }
+        if (m_loopHandleDragMode == LoopHandleDragMode::None)
+        {
+            m_loopHandleDragMode = LoopHandleDragMode::Range;
         }
 
         setFocus(Qt::MouseFocusReason);
@@ -395,6 +402,23 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
     if (m_seekOnClickEnabled)
     {
         requestFrameAt(event->position());
+    }
+}
+
+void TimelineView::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    QWidget::mouseDoubleClickEvent(event);
+
+    if (event->button() != Qt::LeftButton || m_totalFrames <= 0)
+    {
+        return;
+    }
+
+    if (const auto track = trackAt(event->position()); track.has_value())
+    {
+        setFocus(Qt::MouseFocusReason);
+        emit trackSelected(track->id);
+        emit trackActivated(track->id);
     }
 }
 
@@ -487,6 +511,7 @@ void TimelineView::mouseReleaseEvent(QMouseEvent* event)
         m_draggedTrack.reset();
         m_trimmingStart = false;
         m_loopHandleDragMode = LoopHandleDragMode::None;
+        m_loopDragAnchorFrame = 0;
         m_dragAnchorFrame = 0;
         m_dragAccumulatedDeltaFrames = 0;
         m_dragging = false;
@@ -921,6 +946,17 @@ void TimelineView::updateLoopHandleDragAt(const QPointF& position)
     else if (m_loopHandleDragMode == LoopHandleDragMode::End)
     {
         emit loopEndFrameRequested(frameIndex);
+    }
+    else if (m_loopHandleDragMode == LoopHandleDragMode::Range)
+    {
+        if (frameIndex == m_loopDragAnchorFrame)
+        {
+            update();
+            return;
+        }
+
+        emit loopStartFrameRequested(std::min(m_loopDragAnchorFrame, frameIndex));
+        emit loopEndFrameRequested(std::max(m_loopDragAnchorFrame, frameIndex));
     }
 
     requestFrame(frameIndex);

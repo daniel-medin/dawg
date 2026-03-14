@@ -1,6 +1,7 @@
 #include "app/MainWindow.h"
 
 #include <algorithm>
+#include <array>
 #include <functional>
 
 #include <QApplication>
@@ -45,6 +46,7 @@
 #endif
 
 #include "app/PlayerController.h"
+#include "ui/ClipEditorView.h"
 #include "ui/DebugOverlayWindow.h"
 #include "ui/MixView.h"
 #include "ui/NativeVideoViewport.h"
@@ -206,12 +208,14 @@ public:
         std::function<bool(const QString&)> startPreview,
         std::function<void()> stopPreview,
         std::function<void()> activateItem,
+        std::function<void()> doubleActivateItem,
         QWidget* parent = nullptr)
         : QWidget(parent)
         , m_assetPath(assetPath)
         , m_startPreview(std::move(startPreview))
         , m_stopPreview(std::move(stopPreview))
         , m_activateItem(std::move(activateItem))
+        , m_doubleActivateItem(std::move(doubleActivateItem))
     {
         setCursor(Qt::OpenHandCursor);
         setMouseTracking(true);
@@ -332,6 +336,14 @@ protected:
 
     void mouseReleaseEvent(QMouseEvent* event) override
     {
+        if (event->button() == Qt::LeftButton && m_skipNextReleaseActivation)
+        {
+            m_skipNextReleaseActivation = false;
+            updateCursorState();
+            event->accept();
+            return;
+        }
+
         if (event->button() == Qt::LeftButton && m_previewHeld)
         {
             stopPreviewIfNeeded();
@@ -356,6 +368,25 @@ protected:
 
         updateCursorState();
         QWidget::mouseReleaseEvent(event);
+    }
+
+    void mouseDoubleClickEvent(QMouseEvent* event) override
+    {
+        if (event->button() == Qt::LeftButton
+            && !previewModifierActive(event->modifiers())
+            && rect().contains(event->position().toPoint()))
+        {
+            m_skipNextReleaseActivation = true;
+            if (m_doubleActivateItem)
+            {
+                m_doubleActivateItem();
+            }
+            updateCursorState();
+            event->accept();
+            return;
+        }
+
+        QWidget::mouseDoubleClickEvent(event);
     }
 
 private:
@@ -399,10 +430,12 @@ private:
     std::function<bool(const QString&)> m_startPreview;
     std::function<void()> m_stopPreview;
     std::function<void()> m_activateItem;
+    std::function<void()> m_doubleActivateItem;
     QPoint m_dragStartPosition;
     bool m_dragPerformed = false;
     bool m_hovered = false;
     bool m_previewHeld = false;
+    bool m_skipNextReleaseActivation = false;
 };
 }
 
@@ -442,6 +475,11 @@ MainWindow::MainWindow(QWidget* parent)
     {
         updateTimelineVisibility(visible);
         showStatus(visible ? QStringLiteral("Timeline shown.") : QStringLiteral("Timeline hidden."));
+    });
+    connect(m_showClipEditorAction, &QAction::toggled, this, [this](const bool visible)
+    {
+        updateClipEditorVisibility(visible);
+        showStatus(visible ? QStringLiteral("Clip editor shown.") : QStringLiteral("Clip editor hidden."));
     });
     connect(m_showMixAction, &QAction::toggled, this, [this](const bool visible)
     {
@@ -534,6 +572,11 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(m_canvas, &VideoCanvas::tracksSelected, m_controller, &PlayerController::selectTracks);
     connect(m_canvas, &VideoCanvas::trackSelected, m_controller, &PlayerController::selectTrack);
+    connect(m_canvas, &VideoCanvas::trackActivated, this, [this](const QUuid& trackId)
+    {
+        m_controller->selectTrack(trackId);
+        updateClipEditorVisibility(true);
+    });
     connect(m_canvas, &VideoCanvas::trackContextMenuRequested, this, [this](const QUuid& trackId, const QPoint& globalPosition)
     {
         showNodeContextMenu(trackId, globalPosition, true);
@@ -543,6 +586,11 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_timeline, &TimelineView::loopStartFrameRequested, m_controller, &PlayerController::setLoopStartFrame);
     connect(m_timeline, &TimelineView::loopEndFrameRequested, m_controller, &PlayerController::setLoopEndFrame);
     connect(m_timeline, &TimelineView::trackSelected, m_controller, &PlayerController::selectTrack);
+    connect(m_timeline, &TimelineView::trackActivated, this, [this](const QUuid& trackId)
+    {
+        m_controller->selectTrack(trackId);
+        updateClipEditorVisibility(true);
+    });
     connect(m_timeline, &TimelineView::trackStartFrameRequested, m_controller, &PlayerController::setTrackStartFrame);
     connect(m_timeline, &TimelineView::trackEndFrameRequested, m_controller, &PlayerController::setTrackEndFrame);
     connect(m_timeline, &TimelineView::trackSpanMoveRequested, m_controller, &PlayerController::moveTrackFrameSpan);
@@ -585,6 +633,7 @@ MainWindow::MainWindow(QWidget* parent)
         this,
         &MainWindow::handleNodeEndShortcut);
     connect(m_showTimelineShortcut, &QShortcut::activated, m_showTimelineAction, &QAction::trigger);
+    connect(m_showClipEditorShortcut, &QShortcut::activated, m_showClipEditorAction, &QAction::trigger);
     connect(m_trimNodeShortcut, &QShortcut::activated, this, &MainWindow::trimSelectedNodeToSound);
     connect(m_autoPanShortcut, &QShortcut::activated, this, &MainWindow::toggleSelectedNodeAutoPan);
     connect(m_audioPoolShortcut, &QShortcut::activated, m_audioPoolAction, &QAction::trigger);
@@ -614,6 +663,9 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_controller, &PlayerController::videoAudioStateChanged, this, &MainWindow::updateVideoAudioRow);
     connect(m_controller, &PlayerController::statusChanged, this, &MainWindow::showStatus);
     connect(m_showMixShortcut, &QShortcut::activated, m_showMixAction, &QAction::trigger);
+    connect(m_clipEditorView, &ClipEditorView::playRequested, m_controller, &PlayerController::startSelectedTrackClipPreview);
+    connect(m_clipEditorView, &ClipEditorView::stopRequested, m_controller, &PlayerController::stopSelectedTrackClipPreview);
+    connect(m_clipEditorView, &ClipEditorView::clipRangeChanged, m_controller, &PlayerController::setSelectedTrackClipRangeMs);
     connect(m_mixView, &MixView::masterGainChanged, m_controller, &PlayerController::setMasterMixGainDb);
     connect(m_mixView, &MixView::masterMutedChanged, m_controller, &PlayerController::setMasterMixMuted);
     connect(m_mixView, &MixView::laneGainChanged, m_controller, &PlayerController::setMixLaneGainDb);
@@ -632,7 +684,6 @@ MainWindow::MainWindow(QWidget* parent)
     refreshAudioPool();
     updateVideoAudioRow();
     m_memoryUsageTimer.start();
-    m_mixMeterTimer.start();
     showStatus(QStringLiteral("Open a clip to start adding nodes."));
     tryOpenLocalDevVideo();
 }
@@ -961,6 +1012,7 @@ void MainWindow::updateFrame(const QImage& image, const int frameIndex, const do
     {
         updateAudioPoolPlaybackIndicators();
     }
+    refreshClipEditor();
     updateDebugText();
 }
 
@@ -1040,6 +1092,7 @@ void MainWindow::refreshOverlays()
         m_nativeViewport->setOverlays(m_controller->currentOverlays());
     }
     refreshTimeline();
+    refreshClipEditor();
 }
 
 void MainWindow::updateInsertionFollowsPlaybackState(const bool enabled)
@@ -1093,6 +1146,7 @@ void MainWindow::updateSelectionState(const bool hasSelection)
     m_toggleNodeNameAction->setEnabled(hasSelection);
     m_importSoundAction->setEnabled(hasSelection);
     m_deleteNodeAction->setEnabled(hasSelection);
+    refreshClipEditor();
     updateEditActionState();
     updateDebugText();
 }
@@ -1128,6 +1182,7 @@ void MainWindow::handleVideoLoaded(const QString& filePath, const int totalFrame
         m_nativeViewport->setOverlays(m_controller->currentOverlays());
     }
     refreshTimeline();
+    refreshClipEditor();
     showCanvasTipsOverlay();
     updateDebugText();
 }
@@ -1222,6 +1277,31 @@ void MainWindow::updateTimelineVisibility(const bool visible)
     }
 }
 
+void MainWindow::updateClipEditorVisibility(const bool visible)
+{
+    if (m_clipEditorPanel)
+    {
+        if (!visible)
+        {
+            m_clipEditorPreferredHeight = std::max(148, m_clipEditorPanel->height());
+        }
+        m_clipEditorPanel->setVisible(visible);
+    }
+
+    if (visible)
+    {
+        refreshClipEditor();
+    }
+
+    syncMainVerticalPanelSizes();
+
+    if (m_showClipEditorAction && m_showClipEditorAction->isChecked() != visible)
+    {
+        const QSignalBlocker blocker{m_showClipEditorAction};
+        m_showClipEditorAction->setChecked(visible);
+    }
+}
+
 void MainWindow::updateMixVisibility(const bool visible)
 {
     if (m_mixPanel)
@@ -1231,6 +1311,19 @@ void MainWindow::updateMixVisibility(const bool visible)
             m_mixPreferredHeight = std::max(132, m_mixPanel->height());
         }
         m_mixPanel->setVisible(visible);
+    }
+
+    if (visible)
+    {
+        if (!m_mixMeterTimer.isActive())
+        {
+            m_mixMeterTimer.start();
+        }
+        refreshMixView();
+    }
+    else
+    {
+        m_mixMeterTimer.stop();
     }
 
     syncMainVerticalPanelSizes();
@@ -1251,15 +1344,66 @@ void MainWindow::syncMainVerticalPanelSizes()
 
     const auto totalHeight = std::max(320, m_mainVerticalSplitter->height());
     const auto timelineVisible = m_timelinePanel && m_timelinePanel->isVisible();
+    const auto clipEditorVisible = m_clipEditorPanel && m_clipEditorPanel->isVisible();
     const auto mixVisible = m_mixPanel && m_mixPanel->isVisible();
-    const auto timelineHeight = timelineVisible
-        ? std::clamp(m_timelinePreferredHeight, 96, std::max(96, totalHeight / 2))
-        : 0;
-    const auto mixHeight = mixVisible
-        ? std::clamp(m_mixPreferredHeight, 132, std::max(132, totalHeight / 2))
-        : 0;
-    const auto canvasHeight = std::max(200, totalHeight - timelineHeight - mixHeight);
-    m_mainVerticalSplitter->setSizes({canvasHeight, timelineHeight, mixHeight});
+    struct PanelTarget
+    {
+        bool visible = false;
+        int preferred = 0;
+        int minimum = 0;
+        int assigned = 0;
+    };
+
+    std::array<PanelTarget, 3> panels{{
+        PanelTarget{timelineVisible, m_timelinePreferredHeight, 96, 0},
+        PanelTarget{clipEditorVisible, m_clipEditorPreferredHeight, 148, 0},
+        PanelTarget{mixVisible, m_mixPreferredHeight, 132, 0}
+    }};
+
+    const auto canvasMinimum = 220;
+    const auto availableForPanels = std::max(0, totalHeight - canvasMinimum);
+    int assignedTotal = 0;
+    for (auto& panel : panels)
+    {
+        if (!panel.visible)
+        {
+            continue;
+        }
+
+        panel.assigned = std::max(panel.minimum, panel.preferred);
+        assignedTotal += panel.assigned;
+    }
+
+    int overflow = assignedTotal - availableForPanels;
+    while (overflow > 0)
+    {
+        bool reducedAny = false;
+        for (auto& panel : panels)
+        {
+            if (!panel.visible || panel.assigned <= panel.minimum)
+            {
+                continue;
+            }
+
+            --panel.assigned;
+            --overflow;
+            reducedAny = true;
+            if (overflow <= 0)
+            {
+                break;
+            }
+        }
+
+        if (!reducedAny)
+        {
+            break;
+        }
+    }
+
+    const auto canvasHeight = std::max(
+        200,
+        totalHeight - panels[0].assigned - panels[1].assigned - panels[2].assigned);
+    m_mainVerticalSplitter->setSizes({canvasHeight, panels[0].assigned, panels[1].assigned, panels[2].assigned});
 }
 
 void MainWindow::refreshAudioPool()
@@ -1306,6 +1450,10 @@ void MainWindow::refreshAudioPool()
                 {
                     m_controller->selectTrackAndJumpToStart(trackId);
                 }
+            },
+            [this, assetPath = item.assetPath]()
+            {
+                m_controller->createTrackWithAudioAtCurrentFrame(assetPath);
             },
             m_audioPoolListContainer);
         row->setProperty("audioPoolItemKey", item.key);
@@ -1769,9 +1917,19 @@ void MainWindow::refreshTimeline()
     refreshMixView();
 }
 
+void MainWindow::refreshClipEditor()
+{
+    if (!m_clipEditorView || !m_clipEditorPanel || !m_clipEditorPanel->isVisible())
+    {
+        return;
+    }
+
+    m_clipEditorView->setState(m_controller->selectedClipEditorState());
+}
+
 void MainWindow::refreshMixView()
 {
-    if (m_mixView)
+    if (m_mixView && m_mixPanel && m_mixPanel->isVisible())
     {
         const auto laneStrips = m_controller->mixLaneStrips();
         m_mixView->setMixState(
@@ -1864,6 +2022,7 @@ void MainWindow::buildMenus()
     m_toggleNodeNameAction = new QAction(QStringLiteral("Toggle Node Name (E)"), this);
     m_showAllNodeNamesAction = new QAction(QStringLiteral("Node Name Always On"), this);
     m_importSoundAction = new QAction(QStringLiteral("Import Sound (Shift+Ctrl+I)"), this);
+    m_showClipEditorAction = new QAction(QStringLiteral("Toggle Clip Editor (Ctrl+-)"), this);
     m_showTimelineAction = new QAction(QStringLiteral("Show Timeline (T)"), this);
     m_showMixAction = new QAction(QStringLiteral("Toggle Mix Window (Ctrl++)"), this);
     m_timelineClickSeeksAction = new QAction(QStringLiteral("Click Seeks Playhead"), this);
@@ -1878,6 +2037,8 @@ void MainWindow::buildMenus()
     m_insertionFollowsPlaybackAction->setChecked(false);
     m_showAllNodeNamesAction->setCheckable(true);
     m_showAllNodeNamesAction->setChecked(true);
+    m_showClipEditorAction->setCheckable(true);
+    m_showClipEditorAction->setChecked(false);
     m_showTimelineAction->setCheckable(true);
     m_showTimelineAction->setChecked(true);
     m_showMixAction->setCheckable(true);
@@ -1950,6 +2111,7 @@ void MainWindow::buildMenus()
 
     auto* soundMenu = menuBar()->addMenu(QStringLiteral("&Sound"));
     soundMenu->addAction(m_importSoundAction);
+    soundMenu->addAction(m_showClipEditorAction);
     soundMenu->addAction(m_autoPanAction);
 
     auto* timelineMenu = menuBar()->addMenu(QStringLiteral("&Timeline"));
@@ -2020,6 +2182,7 @@ void MainWindow::buildUi()
     m_nodeEndShortcut = new QShortcut(QKeySequence(Qt::Key_S), this);
     m_selectNextNodeShortcut = new QShortcut(QKeySequence(Qt::Key_Tab), this);
     m_showTimelineShortcut = new QShortcut(QKeySequence(Qt::Key_T), this);
+    m_showClipEditorShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+-")), this);
     m_showMixShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl++")), this);
     m_trimNodeShortcut = new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_T), this);
     m_autoPanShortcut = new QShortcut(QKeySequence(Qt::Key_R), this);
@@ -2045,6 +2208,7 @@ void MainWindow::buildUi()
     m_nodeEndShortcut->setContext(Qt::ApplicationShortcut);
     m_selectNextNodeShortcut->setContext(Qt::ApplicationShortcut);
     m_showTimelineShortcut->setContext(Qt::ApplicationShortcut);
+    m_showClipEditorShortcut->setContext(Qt::ApplicationShortcut);
     m_showMixShortcut->setContext(Qt::ApplicationShortcut);
     m_trimNodeShortcut->setContext(Qt::ApplicationShortcut);
     m_autoPanShortcut->setContext(Qt::ApplicationShortcut);
@@ -2077,6 +2241,18 @@ void MainWindow::buildUi()
 
     m_timeline = new TimelineView(m_timelinePanel);
     timelinePanelLayout->addWidget(m_timeline, 1);
+
+    m_clipEditorPanel = new QFrame(m_mainVerticalSplitter);
+    m_clipEditorPanel->setObjectName(QStringLiteral("clipEditorPanel"));
+    m_clipEditorPanel->setVisible(false);
+    m_clipEditorPanel->setFrameShape(QFrame::NoFrame);
+    m_clipEditorPanel->setMinimumHeight(148);
+    auto* clipEditorPanelLayout = new QVBoxLayout(m_clipEditorPanel);
+    clipEditorPanelLayout->setContentsMargins(0, 0, 0, 0);
+    clipEditorPanelLayout->setSpacing(0);
+
+    m_clipEditorView = new ClipEditorView(m_clipEditorPanel);
+    clipEditorPanelLayout->addWidget(m_clipEditorView, 1);
 
     m_mixPanel = new QFrame(m_mainVerticalSplitter);
     m_mixPanel->setObjectName(QStringLiteral("mixPanel"));
@@ -2253,16 +2429,22 @@ void MainWindow::buildUi()
 
     m_mainVerticalSplitter->addWidget(m_canvas);
     m_mainVerticalSplitter->addWidget(m_timelinePanel);
+    m_mainVerticalSplitter->addWidget(m_clipEditorPanel);
     m_mainVerticalSplitter->addWidget(m_mixPanel);
     m_mainVerticalSplitter->setStretchFactor(0, 1);
     m_mainVerticalSplitter->setStretchFactor(1, 0);
     m_mainVerticalSplitter->setStretchFactor(2, 0);
-    m_mainVerticalSplitter->setSizes({700, m_timelinePreferredHeight, 0});
+    m_mainVerticalSplitter->setStretchFactor(3, 0);
+    m_mainVerticalSplitter->setSizes({700, m_timelinePreferredHeight, 0, 0});
     connect(m_mainVerticalSplitter, &QSplitter::splitterMoved, this, [this]()
     {
         if (m_timelinePanel && m_timelinePanel->isVisible())
         {
             m_timelinePreferredHeight = std::max(96, m_timelinePanel->height());
+        }
+        if (m_clipEditorPanel && m_clipEditorPanel->isVisible())
+        {
+            m_clipEditorPreferredHeight = std::max(148, m_clipEditorPanel->height());
         }
         if (m_mixPanel && m_mixPanel->isVisible())
         {
