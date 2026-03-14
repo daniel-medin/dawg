@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include <QAction>
 #include <QFrame>
 #include <QImage>
@@ -48,6 +50,9 @@ private slots:
     void moveSelectedNodeDown();
     void moveSelectedNodeLeft();
     void moveSelectedNodeRight();
+    void handleLoopStartShortcut();
+    void handleLoopEndShortcut();
+    void clearLoopRange();
     void handleNodeStartShortcut();
     void handleNodeEndShortcut();
     void updateFrame(const QImage& image, int frameIndex, double timestampSeconds);
@@ -92,6 +97,7 @@ private:
     void armClearAllShortcut();
     void clearPendingClearAllShortcut();
     void syncMainVerticalPanelSizes();
+    [[nodiscard]] std::optional<int> timelineLoopTargetFrame() const;
 
     PlayerController* m_controller = nullptr;
     VideoCanvas* m_canvas = nullptr;
@@ -132,6 +138,9 @@ private:
     QAction* m_unselectAllAction = nullptr;
     QAction* m_setNodeStartAction = nullptr;
     QAction* m_setNodeEndAction = nullptr;
+    QAction* m_setLoopStartAction = nullptr;
+    QAction* m_setLoopEndAction = nullptr;
+    QAction* m_clearLoopRangeAction = nullptr;
     QAction* m_selectNextNodeAction = nullptr;
     QAction* m_moveNodeUpAction = nullptr;
     QAction* m_moveNodeDownAction = nullptr;

@@ -10,7 +10,7 @@
 TimelineView::TimelineView(QWidget* parent)
     : QWidget(parent)
 {
-    setMinimumHeight(84);
+    setMinimumHeight(104);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -24,7 +24,11 @@ void TimelineView::clear()
 {
     m_trimmedTrack.reset();
     m_draggedTrack.reset();
+    m_loopStartFrame.reset();
+    m_loopEndFrame.reset();
+    m_loopEditFrame.reset();
     m_trimmingStart = false;
+    m_loopHandleDragMode = LoopHandleDragMode::None;
     m_dragAnchorFrame = 0;
     m_dragAccumulatedDeltaFrames = 0;
     m_totalFrames = 0;
@@ -44,6 +48,28 @@ void TimelineView::setTimeline(const int totalFrames, const double fps)
     m_totalFrames = std::max(0, totalFrames);
     m_fps = fps > 0.0 ? fps : 30.0;
     m_currentFrame = std::clamp(m_currentFrame, 0, std::max(0, m_totalFrames - 1));
+    if (m_totalFrames <= 0)
+    {
+        m_loopStartFrame.reset();
+        m_loopEndFrame.reset();
+        m_loopEditFrame.reset();
+    }
+    else
+    {
+        const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
+        if (m_loopStartFrame.has_value())
+        {
+            m_loopStartFrame = std::clamp(*m_loopStartFrame, 0, maxFrameIndex);
+        }
+        if (m_loopEndFrame.has_value())
+        {
+            m_loopEndFrame = std::clamp(*m_loopEndFrame, 0, maxFrameIndex);
+        }
+        if (m_loopEditFrame.has_value())
+        {
+            m_loopEditFrame = std::clamp(*m_loopEditFrame, 0, maxFrameIndex);
+        }
+    }
     update();
 }
 
@@ -52,6 +78,18 @@ void TimelineView::setCurrentFrame(const int frameIndex)
     m_currentFrame = std::clamp(frameIndex, 0, std::max(0, m_totalFrames - 1));
     m_lastRequestedFrame = m_currentFrame;
     m_pendingRequestedFrame = -1;
+    update();
+}
+
+void TimelineView::setLoopRange(const std::optional<int> startFrame, const std::optional<int> endFrame)
+{
+    if (m_loopStartFrame == startFrame && m_loopEndFrame == endFrame)
+    {
+        return;
+    }
+
+    m_loopStartFrame = startFrame;
+    m_loopEndFrame = endFrame;
     update();
 }
 
@@ -65,6 +103,11 @@ void TimelineView::setTrackSpans(const std::vector<TimelineTrackSpan>& trackSpan
 void TimelineView::setSeekOnClickEnabled(const bool enabled)
 {
     m_seekOnClickEnabled = enabled;
+}
+
+std::optional<int> TimelineView::loopEditFrame() const
+{
+    return m_loopEditFrame;
 }
 
 QSize TimelineView::sizeHint() const
@@ -85,14 +128,49 @@ void TimelineView::paintEvent(QPaintEvent* event)
     painter.setRenderHint(QPainter::Antialiasing);
     painter.fillRect(rect(), QColor{5, 6, 8});
 
-    const auto laneRect = timelineRect();
+    const auto fullRect = timelineRect();
+    const auto loopRect = loopBarRect();
+    const auto laneRect = trackAreaRect();
     painter.setPen(QPen(QColor{32, 36, 42}, 1.0));
     painter.setBrush(QColor{7, 8, 10});
-    painter.drawRect(laneRect);
+    painter.drawRect(fullRect);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor{11, 14, 18});
+    painter.drawRoundedRect(loopRect, 4.0, 4.0);
+    painter.setBrush(QColor{8, 10, 13});
+    painter.drawRoundedRect(laneRect, 4.0, 4.0);
 
     if (m_totalFrames <= 0)
     {
         return;
+    }
+
+    if (const auto loopGeometry = loopRangeGeometry(); loopGeometry.has_value())
+    {
+        if (loopGeometry->selectionRect.width() > 0.0)
+        {
+            painter.setPen(QPen(QColor{117, 165, 228, 220}, 1.0));
+            painter.setBrush(QColor{66, 110, 170, 72});
+            painter.drawRoundedRect(loopGeometry->selectionRect, 3.0, 3.0);
+        }
+
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor{233, 239, 246});
+        if (m_loopStartFrame.has_value())
+        {
+            painter.drawRoundedRect(loopGeometry->startHandleRect, 2.0, 2.0);
+        }
+        if (m_loopEndFrame.has_value())
+        {
+            painter.drawRoundedRect(loopGeometry->endHandleRect, 2.0, 2.0);
+        }
+    }
+
+    if (m_loopEditFrame.has_value())
+    {
+        const auto anchorX = xForFrame(*m_loopEditFrame);
+        painter.setPen(QPen(QColor{220, 228, 236, 176}, 1.0, Qt::DashLine));
+        painter.drawLine(QPointF{anchorX, loopRect.top() + 1.0}, QPointF{anchorX, loopRect.bottom() - 1.0});
     }
 
     const auto geometries = trackGeometries();
@@ -123,7 +201,7 @@ void TimelineView::paintEvent(QPaintEvent* event)
 
     const auto markerX = xForFrame(m_currentFrame);
     painter.setPen(QPen(QColor{225, 229, 234}, 2.0));
-    painter.drawLine(QPointF{markerX, laneRect.top()}, QPointF{markerX, laneRect.bottom()});
+    painter.drawLine(QPointF{markerX, loopRect.top()}, QPointF{markerX, laneRect.bottom()});
 }
 
 void TimelineView::mousePressEvent(QMouseEvent* event)
@@ -149,6 +227,44 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
     if (event->button() != Qt::LeftButton)
     {
         return;
+    }
+
+    if (loopBarRect().contains(event->position()))
+    {
+        m_trimmedTrack.reset();
+        m_draggedTrack.reset();
+        m_dragging = false;
+        m_loopEditFrame = frameForPosition(event->position().x());
+        m_loopHandleDragMode = LoopHandleDragMode::None;
+        if (const auto loopGeometry = loopRangeGeometry(); loopGeometry.has_value())
+        {
+            if (m_loopStartFrame.has_value() && loopGeometry->startHandleRect.contains(event->position()))
+            {
+                m_loopHandleDragMode = LoopHandleDragMode::Start;
+            }
+            else if (m_loopEndFrame.has_value() && loopGeometry->endHandleRect.contains(event->position()))
+            {
+                m_loopHandleDragMode = LoopHandleDragMode::End;
+            }
+        }
+
+        setFocus(Qt::MouseFocusReason);
+        if (m_seekOnClickEnabled)
+        {
+            requestFrameAt(event->position());
+        }
+        if (m_loopHandleDragMode != LoopHandleDragMode::None)
+        {
+            updateLoopHandleDragAt(event->position());
+        }
+        update();
+        return;
+    }
+
+    if (m_loopEditFrame.has_value())
+    {
+        m_loopEditFrame.reset();
+        update();
     }
 
     if (const auto track = trackAt(event->position()); track.has_value())
@@ -205,7 +321,18 @@ void TimelineView::mouseMoveEvent(QMouseEvent* event)
 {
     QWidget::mouseMoveEvent(event);
 
-    if (const auto track = trackAt(event->position()); track.has_value())
+    if (const auto loopGeometry = loopRangeGeometry(); loopGeometry.has_value()
+        && (loopGeometry->startHandleRect.contains(event->position()) || loopGeometry->endHandleRect.contains(event->position())))
+    {
+        QToolTip::hideText();
+        setCursor(Qt::SizeHorCursor);
+    }
+    else if (loopBarRect().contains(event->position()))
+    {
+        QToolTip::hideText();
+        unsetCursor();
+    }
+    else if (const auto track = trackAt(event->position()); track.has_value())
     {
         QToolTip::showText(event->globalPosition().toPoint(), track->label, this);
         if (track->startHandleRect.contains(event->position()) || track->endHandleRect.contains(event->position()))
@@ -221,6 +348,12 @@ void TimelineView::mouseMoveEvent(QMouseEvent* event)
     {
         QToolTip::hideText();
         unsetCursor();
+    }
+
+    if (m_loopHandleDragMode != LoopHandleDragMode::None)
+    {
+        updateLoopHandleDragAt(event->position());
+        return;
     }
 
     if (m_trimmedTrack.has_value())
@@ -253,6 +386,7 @@ void TimelineView::mouseReleaseEvent(QMouseEvent* event)
         m_trimmedTrack.reset();
         m_draggedTrack.reset();
         m_trimmingStart = false;
+        m_loopHandleDragMode = LoopHandleDragMode::None;
         m_dragAnchorFrame = 0;
         m_dragAccumulatedDeltaFrames = 0;
         m_dragging = false;
@@ -269,7 +403,7 @@ std::vector<TimelineView::TimelineTrackGeometry> TimelineView::trackGeometries()
         return geometries;
     }
 
-    const auto laneRect = timelineRect();
+    const auto laneRect = trackAreaRect();
     const auto trackLaneCount = laneCount();
     const auto verticalPadding = 8.0;
     const auto rowGap = trackLaneCount > 10 ? 1.0 : 2.0;
@@ -317,6 +451,37 @@ std::vector<TimelineView::TimelineTrackGeometry> TimelineView::trackGeometries()
     return geometries;
 }
 
+std::optional<TimelineView::LoopRangeGeometry> TimelineView::loopRangeGeometry() const
+{
+    const auto barRect = loopBarRect();
+    if (!m_loopStartFrame.has_value() && !m_loopEndFrame.has_value())
+    {
+        return LoopRangeGeometry{
+            .barRect = barRect,
+            .selectionRect = {},
+            .startHandleRect = {},
+            .endHandleRect = {}
+        };
+    }
+
+    const auto startFrame = m_loopStartFrame.value_or(m_loopEndFrame.value_or(0));
+    const auto endFrame = m_loopEndFrame.value_or(m_loopStartFrame.value_or(0));
+    const auto startX = xForFrame(startFrame);
+    const auto endX = xForFrame(endFrame);
+    const auto left = std::min(startX, endX);
+    const auto right = std::max(startX, endX);
+    const auto handleWidth = 7.0;
+    const auto handleTop = barRect.top() - 1.0;
+    const auto handleHeight = barRect.height() + 2.0;
+
+    return LoopRangeGeometry{
+        .barRect = barRect,
+        .selectionRect = QRectF{left, barRect.top(), std::max(0.0, right - left), barRect.height()},
+        .startHandleRect = QRectF{startX - handleWidth * 0.5, handleTop, handleWidth, handleHeight},
+        .endHandleRect = QRectF{endX - handleWidth * 0.5, handleTop, handleWidth, handleHeight}
+    };
+}
+
 int TimelineView::laneCount() const
 {
     int maxLaneIndex = -1;
@@ -352,6 +517,29 @@ QRectF TimelineView::timelineRect() const
     };
 }
 
+QRectF TimelineView::loopBarRect() const
+{
+    const auto rect = timelineRect();
+    return QRectF{
+        rect.left() + 6.0,
+        rect.top() + 6.0,
+        std::max(108.0, rect.width() - 12.0),
+        14.0
+    };
+}
+
+QRectF TimelineView::trackAreaRect() const
+{
+    const auto rect = timelineRect();
+    const auto top = loopBarRect().bottom() + 6.0;
+    return QRectF{
+        rect.left() + 6.0,
+        top,
+        std::max(108.0, rect.width() - 12.0),
+        std::max(28.0, rect.bottom() - top - 6.0)
+    };
+}
+
 int TimelineView::frameForPosition(const double x) const
 {
     if (m_totalFrames <= 1)
@@ -359,14 +547,14 @@ int TimelineView::frameForPosition(const double x) const
         return 0;
     }
 
-    const auto rect = timelineRect();
+    const auto rect = loopBarRect();
     const auto ratio = std::clamp((x - rect.left()) / rect.width(), 0.0, 1.0);
     return static_cast<int>(std::lround(ratio * static_cast<double>(m_totalFrames - 1)));
 }
 
 double TimelineView::xForFrame(const int frameIndex) const
 {
-    const auto rect = timelineRect();
+    const auto rect = loopBarRect();
     if (m_totalFrames <= 1)
     {
         return rect.left();
@@ -383,8 +571,8 @@ void TimelineView::requestFrameAt(const QPointF& position)
 
 int TimelineView::preferredHeight() const
 {
-    constexpr int baseHeight = 84;
-    constexpr int verticalPadding = 16;
+    constexpr int baseHeight = 104;
+    constexpr int verticalPadding = 40;
     constexpr int rowHeight = 10;
     constexpr int rowGap = 2;
 
@@ -465,6 +653,28 @@ void TimelineView::updateTrimAt(const QPointF& position)
     }
 
     requestFrame(frameIndex);
+}
+
+void TimelineView::updateLoopHandleDragAt(const QPointF& position)
+{
+    if (m_loopHandleDragMode == LoopHandleDragMode::None)
+    {
+        return;
+    }
+
+    const auto frameIndex = frameForPosition(position.x());
+    m_loopEditFrame = frameIndex;
+    if (m_loopHandleDragMode == LoopHandleDragMode::Start)
+    {
+        emit loopStartFrameRequested(frameIndex);
+    }
+    else if (m_loopHandleDragMode == LoopHandleDragMode::End)
+    {
+        emit loopEndFrameRequested(frameIndex);
+    }
+
+    requestFrame(frameIndex);
+    update();
 }
 
 void TimelineView::updateSpanDragAt(const QPointF& position)

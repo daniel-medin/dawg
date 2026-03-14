@@ -31,13 +31,17 @@ public:
     void clear();
     void setTimeline(int totalFrames, double fps);
     void setCurrentFrame(int frameIndex);
+    void setLoopRange(std::optional<int> startFrame, std::optional<int> endFrame);
     void setTrackSpans(const std::vector<TimelineTrackSpan>& trackSpans);
     void setSeekOnClickEnabled(bool enabled);
+    [[nodiscard]] std::optional<int> loopEditFrame() const;
     [[nodiscard]] QSize sizeHint() const override;
     [[nodiscard]] QSize minimumSizeHint() const override;
 
 signals:
     void frameRequested(int frameIndex);
+    void loopStartFrameRequested(int frameIndex);
+    void loopEndFrameRequested(int frameIndex);
     void trackSelected(const QUuid& trackId);
     void trackStartFrameRequested(const QUuid& trackId, int frameIndex);
     void trackEndFrameRequested(const QUuid& trackId, int frameIndex);
@@ -51,6 +55,14 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
 
 private:
+    struct LoopRangeGeometry
+    {
+        QRectF barRect;
+        QRectF selectionRect;
+        QRectF startHandleRect;
+        QRectF endHandleRect;
+    };
+
     struct TimelineTrackGeometry
     {
         QRectF hitRect;
@@ -63,10 +75,14 @@ private:
     };
 
     [[nodiscard]] std::vector<TimelineTrackGeometry> trackGeometries() const;
+    [[nodiscard]] std::optional<LoopRangeGeometry> loopRangeGeometry() const;
     [[nodiscard]] std::optional<TimelineTrackGeometry> trackAt(const QPointF& position) const;
     void updateTrimAt(const QPointF& position);
+    void updateLoopHandleDragAt(const QPointF& position);
     void updateSpanDragAt(const QPointF& position);
     [[nodiscard]] QRectF timelineRect() const;
+    [[nodiscard]] QRectF loopBarRect() const;
+    [[nodiscard]] QRectF trackAreaRect() const;
     [[nodiscard]] int frameForPosition(double x) const;
     [[nodiscard]] double xForFrame(int frameIndex) const;
     [[nodiscard]] int laneCount() const;
@@ -77,9 +93,20 @@ private:
     void flushPendingFrameRequest();
     void requestFrameAt(const QPointF& position);
 
+    enum class LoopHandleDragMode
+    {
+        None,
+        Start,
+        End
+    };
+
     std::optional<TimelineTrackGeometry> m_trimmedTrack;
     std::optional<TimelineTrackGeometry> m_draggedTrack;
+    std::optional<int> m_loopStartFrame;
+    std::optional<int> m_loopEndFrame;
+    std::optional<int> m_loopEditFrame;
     bool m_trimmingStart = false;
+    LoopHandleDragMode m_loopHandleDragMode = LoopHandleDragMode::None;
     int m_dragAnchorFrame = 0;
     int m_dragAccumulatedDeltaFrames = 0;
     int m_totalFrames = 0;

@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <utility>
 #include <unordered_map>
 #include <vector>
 
@@ -78,6 +80,9 @@ public:
     void setFastPlaybackEnabled(bool enabled);
     void setInsertionFollowsPlayback(bool enabled);
     void setMotionTrackingEnabled(bool enabled);
+    void setLoopStartFrame(int frameIndex);
+    void setLoopEndFrame(int frameIndex);
+    void clearLoopRange();
     void setMasterMixGainDb(float gainDb);
     void setMasterMixMuted(bool muted);
     void setMixLaneGainDb(int laneIndex, float gainDb);
@@ -113,6 +118,8 @@ public:
     [[nodiscard]] bool isEmbeddedVideoAudioMuted() const;
     [[nodiscard]] bool isFastPlaybackEnabled() const;
     [[nodiscard]] bool isFastPlaybackActive() const;
+    [[nodiscard]] std::optional<int> loopStartFrame() const;
+    [[nodiscard]] std::optional<int> loopEndFrame() const;
     [[nodiscard]] float masterMixGainDb() const;
     [[nodiscard]] bool masterMixMuted() const;
     [[nodiscard]] float masterMixLevel() const;
@@ -136,6 +143,7 @@ signals:
     void playbackStateChanged(bool playing);
     void insertionFollowsPlaybackChanged(bool enabled);
     void motionTrackingChanged(bool enabled);
+    void loopRangeChanged();
     void selectionChanged(bool hasSelection);
     void trackAvailabilityChanged(bool hasTracks);
     void audioPoolChanged();
@@ -165,6 +173,7 @@ private:
     [[nodiscard]] bool isMixLaneMuted(int laneIndex) const;
     [[nodiscard]] bool isMixLaneSoloed(int laneIndex) const;
     [[nodiscard]] bool anyMixLaneSoloed() const;
+    [[nodiscard]] std::optional<std::pair<int, int>> activeLoopRange() const;
     void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
     void logPlaybackHitchIfNeeded(int targetFrameIndex, int previousFrameIndex, int advancedFrames);
 
@@ -188,6 +197,8 @@ private:
     double m_playbackStartTimestampSeconds = 0.0;
     QElapsedTimer m_playbackElapsedTimer;
     QElapsedTimer m_perfPlaybackTickTimer;
+    std::optional<int> m_loopStartFrame;
+    std::optional<int> m_loopEndFrame;
     float m_masterMixGainDb = 0.0F;
     bool m_masterMixMuted = false;
     std::unordered_map<int, float> m_mixLaneGainDbByLane;

@@ -100,6 +100,8 @@ bool PlayerController::openVideo(const QString& filePath)
     m_undoSelectedTrackIds.clear();
     m_redoTrackerState.reset();
     m_redoSelectedTrackIds.clear();
+    m_loopStartFrame.reset();
+    m_loopEndFrame.reset();
     m_masterMixGainDb = 0.0F;
     m_masterMixMuted = false;
     m_mixLaneGainDbByLane.clear();
@@ -128,6 +130,7 @@ bool PlayerController::openVideo(const QString& filePath)
     emitCurrentFrame();
     emit videoLoaded(m_loadedPath, m_totalFrames, m_fps);
     emit videoAudioStateChanged();
+    emit loopRangeChanged();
     emit selectionChanged(false);
     emit trackAvailabilityChanged(false);
     emit audioPoolChanged();
@@ -199,6 +202,70 @@ void PlayerController::stopAudioPoolPreview()
     }
 
     m_audioPoolPreviewAssetPath.clear();
+}
+
+void PlayerController::setLoopStartFrame(const int frameIndex)
+{
+    if (!hasVideoLoaded())
+    {
+        return;
+    }
+
+    const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
+    const auto clampedFrameIndex = std::clamp(frameIndex, 0, maxFrameIndex);
+    auto nextLoopStartFrame = std::optional<int>{clampedFrameIndex};
+    auto nextLoopEndFrame = m_loopEndFrame;
+    if (nextLoopEndFrame.has_value() && clampedFrameIndex > *nextLoopEndFrame)
+    {
+        nextLoopEndFrame = clampedFrameIndex;
+    }
+
+    if (m_loopStartFrame == nextLoopStartFrame && m_loopEndFrame == nextLoopEndFrame)
+    {
+        return;
+    }
+
+    m_loopStartFrame = nextLoopStartFrame;
+    m_loopEndFrame = nextLoopEndFrame;
+    emit loopRangeChanged();
+}
+
+void PlayerController::setLoopEndFrame(const int frameIndex)
+{
+    if (!hasVideoLoaded())
+    {
+        return;
+    }
+
+    const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
+    const auto clampedFrameIndex = std::clamp(frameIndex, 0, maxFrameIndex);
+    auto nextLoopStartFrame = m_loopStartFrame;
+    auto nextLoopEndFrame = std::optional<int>{clampedFrameIndex};
+    if (nextLoopStartFrame.has_value() && clampedFrameIndex < *nextLoopStartFrame)
+    {
+        nextLoopStartFrame = clampedFrameIndex;
+    }
+
+    if (m_loopStartFrame == nextLoopStartFrame && m_loopEndFrame == nextLoopEndFrame)
+    {
+        return;
+    }
+
+    m_loopStartFrame = nextLoopStartFrame;
+    m_loopEndFrame = nextLoopEndFrame;
+    emit loopRangeChanged();
+}
+
+void PlayerController::clearLoopRange()
+{
+    if (!m_loopStartFrame.has_value() && !m_loopEndFrame.has_value())
+    {
+        return;
+    }
+
+    m_loopStartFrame.reset();
+    m_loopEndFrame.reset();
+    emit loopRangeChanged();
 }
 
 void PlayerController::setMasterMixGainDb(const float gainDb)
@@ -1604,6 +1671,16 @@ bool PlayerController::isFastPlaybackActive() const
     return m_renderService.fastPlaybackEnabled() && m_transport.isPlaying();
 }
 
+std::optional<int> PlayerController::loopStartFrame() const
+{
+    return m_loopStartFrame;
+}
+
+std::optional<int> PlayerController::loopEndFrame() const
+{
+    return m_loopEndFrame;
+}
+
 float PlayerController::masterMixGainDb() const
 {
     return m_masterMixGainDb;
@@ -1934,6 +2011,22 @@ void PlayerController::advancePlayback()
         return;
     }
 
+    if (const auto loopRange = activeLoopRange(); loopRange.has_value()
+        && m_currentFrame.index == loopRange->second)
+    {
+        if (!loadFrameAt(loopRange->first))
+        {
+            pause(false);
+            return;
+        }
+
+        m_playbackStartTimestampSeconds = frameTimestampSeconds(m_currentFrame.index);
+        m_playbackElapsedTimer.restart();
+        m_perfPlaybackTickTimer.restart();
+        syncAttachedAudioForCurrentFrame();
+        return;
+    }
+
     if (!m_playbackElapsedTimer.isValid())
     {
         m_playbackStartTimestampSeconds = frameTimestampSeconds(m_currentFrame.index);
@@ -1946,8 +2039,16 @@ void PlayerController::advancePlayback()
         m_playbackStartTimestampSeconds + (static_cast<double>(m_playbackElapsedTimer.elapsed()) / 1000.0);
 
     auto targetFrameIndex = m_videoPlayback.frameIndexForPresentationTime(targetTimestampSeconds, m_currentFrame.index);
-
-    targetFrameIndex = std::clamp(targetFrameIndex, m_currentFrame.index, std::max(0, m_totalFrames - 1));
+    if (const auto loopRange = activeLoopRange(); loopRange.has_value()
+        && m_currentFrame.index >= loopRange->first
+        && m_currentFrame.index <= loopRange->second)
+    {
+        targetFrameIndex = std::clamp(targetFrameIndex, m_currentFrame.index, loopRange->second);
+    }
+    else
+    {
+        targetFrameIndex = std::clamp(targetFrameIndex, m_currentFrame.index, std::max(0, m_totalFrames - 1));
+    }
     if (targetFrameIndex == m_currentFrame.index)
     {
         return;
@@ -2248,6 +2349,23 @@ bool PlayerController::anyMixLaneSoloed() const
         {
             return entry.second;
         });
+}
+
+std::optional<std::pair<int, int>> PlayerController::activeLoopRange() const
+{
+    if (!m_loopStartFrame.has_value() || !m_loopEndFrame.has_value())
+    {
+        return std::nullopt;
+    }
+
+    const auto startFrame = std::min(*m_loopStartFrame, *m_loopEndFrame);
+    const auto endFrame = std::max(*m_loopStartFrame, *m_loopEndFrame);
+    if (endFrame <= startFrame)
+    {
+        return std::nullopt;
+    }
+
+    return std::pair<int, int>{startFrame, endFrame};
 }
 
 void PlayerController::syncAttachedAudioForCurrentFrame()

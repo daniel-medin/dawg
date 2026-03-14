@@ -507,6 +507,9 @@ MainWindow::MainWindow(QWidget* parent)
         &QAction::triggered,
         this,
         &MainWindow::handleNodeEndShortcut);
+    connect(m_setLoopStartAction, &QAction::triggered, this, &MainWindow::handleLoopStartShortcut);
+    connect(m_setLoopEndAction, &QAction::triggered, this, &MainWindow::handleLoopEndShortcut);
+    connect(m_clearLoopRangeAction, &QAction::triggered, this, &MainWindow::clearLoopRange);
     connect(m_trimNodeAction, &QAction::triggered, this, &MainWindow::trimSelectedNodeToSound);
     connect(m_autoPanAction, &QAction::triggered, this, &MainWindow::toggleSelectedNodeAutoPan);
     connect(m_toggleNodeNameAction, &QAction::triggered, m_controller, &PlayerController::toggleSelectedTrackLabels);
@@ -537,6 +540,8 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(m_canvas, &VideoCanvas::selectedTrackMoved, m_controller, &PlayerController::moveSelectedTrack);
     connect(m_timeline, &TimelineView::frameRequested, m_controller, &PlayerController::seekToFrame);
+    connect(m_timeline, &TimelineView::loopStartFrameRequested, m_controller, &PlayerController::setLoopStartFrame);
+    connect(m_timeline, &TimelineView::loopEndFrameRequested, m_controller, &PlayerController::setLoopEndFrame);
     connect(m_timeline, &TimelineView::trackSelected, m_controller, &PlayerController::selectTrack);
     connect(m_timeline, &TimelineView::trackStartFrameRequested, m_controller, &PlayerController::setTrackStartFrame);
     connect(m_timeline, &TimelineView::trackEndFrameRequested, m_controller, &PlayerController::setTrackEndFrame);
@@ -599,6 +604,7 @@ MainWindow::MainWindow(QWidget* parent)
         &PlayerController::motionTrackingChanged,
         this,
         &MainWindow::updateMotionTrackingState);
+    connect(m_controller, &PlayerController::loopRangeChanged, this, &MainWindow::refreshTimeline);
     connect(m_controller, &PlayerController::selectionChanged, this, &MainWindow::updateSelectionState);
     connect(m_controller, &PlayerController::trackAvailabilityChanged, this, &MainWindow::updateTrackAvailabilityState);
     connect(m_controller, &PlayerController::editStateChanged, this, &MainWindow::updateEditActionState);
@@ -804,8 +810,35 @@ void MainWindow::importAudioToPool()
     }
 }
 
+void MainWindow::handleLoopStartShortcut()
+{
+    if (const auto targetFrame = timelineLoopTargetFrame(); targetFrame.has_value())
+    {
+        m_controller->setLoopStartFrame(*targetFrame);
+    }
+}
+
+void MainWindow::handleLoopEndShortcut()
+{
+    if (const auto targetFrame = timelineLoopTargetFrame(); targetFrame.has_value())
+    {
+        m_controller->setLoopEndFrame(*targetFrame);
+    }
+}
+
+void MainWindow::clearLoopRange()
+{
+    m_controller->clearLoopRange();
+}
+
 void MainWindow::handleNodeStartShortcut()
 {
+    if (m_timeline && m_timeline->hasFocus() && m_timeline->loopEditFrame().has_value())
+    {
+        handleLoopStartShortcut();
+        return;
+    }
+
     if (shouldApplyNodeShortcutToAll())
     {
         m_controller->setAllTracksStartToCurrentFrame();
@@ -817,6 +850,12 @@ void MainWindow::handleNodeStartShortcut()
 
 void MainWindow::handleNodeEndShortcut()
 {
+    if (m_timeline && m_timeline->hasFocus() && m_timeline->loopEditFrame().has_value())
+    {
+        handleLoopEndShortcut();
+        return;
+    }
+
     if (shouldApplyNodeShortcutToAll())
     {
         m_controller->setAllTracksEndToCurrentFrame();
@@ -1711,6 +1750,12 @@ void MainWindow::refreshTimeline()
     if (m_timeline)
     {
         m_timeline->setTrackSpans(trackSpans);
+        m_timeline->setLoopRange(m_controller->loopStartFrame(), m_controller->loopEndFrame());
+    }
+    if (m_clearLoopRangeAction)
+    {
+        m_clearLoopRangeAction->setEnabled(
+            m_controller->loopStartFrame().has_value() || m_controller->loopEndFrame().has_value());
     }
     refreshMixView();
 }
@@ -1760,6 +1805,21 @@ bool MainWindow::shouldApplyNodeShortcutToAll() const
         && m_controller->hasTracks();
 }
 
+std::optional<int> MainWindow::timelineLoopTargetFrame() const
+{
+    if (!m_controller || !m_controller->hasVideoLoaded())
+    {
+        return std::nullopt;
+    }
+
+    if (m_timeline && m_timeline->loopEditFrame().has_value())
+    {
+        return m_timeline->loopEditFrame();
+    }
+
+    return m_controller->currentFrameIndex();
+}
+
 void MainWindow::buildMenus()
 {
     m_openAction = new QAction(QStringLiteral("Open Video"), this);
@@ -1782,6 +1842,9 @@ void MainWindow::buildMenus()
 
     m_setNodeStartAction = new QAction(QStringLiteral("Set Start (A)"), this);
     m_setNodeEndAction = new QAction(QStringLiteral("Set End (S)"), this);
+    m_setLoopStartAction = new QAction(QStringLiteral("Set Loop Start (A)"), this);
+    m_setLoopEndAction = new QAction(QStringLiteral("Set Loop End (S)"), this);
+    m_clearLoopRangeAction = new QAction(QStringLiteral("Clear Loop Range"), this);
     m_selectNextNodeAction = new QAction(QStringLiteral("Select Next (Tab)"), this);
     m_moveNodeUpAction = new QAction(QStringLiteral("Move Up (Up)"), this);
     m_moveNodeDownAction = new QAction(QStringLiteral("Move Down (Down)"), this);
@@ -1824,6 +1887,7 @@ void MainWindow::buildMenus()
 
     m_setNodeStartAction->setEnabled(false);
     m_setNodeEndAction->setEnabled(false);
+    m_clearLoopRangeAction->setEnabled(false);
     m_selectNextNodeAction->setEnabled(false);
     m_moveNodeUpAction->setEnabled(false);
     m_moveNodeDownAction->setEnabled(false);
@@ -1887,6 +1951,10 @@ void MainWindow::buildMenus()
     timelineMenu->addAction(m_stepFastForwardAction);
     timelineMenu->addAction(m_stepFastBackAction);
     timelineMenu->addAction(m_insertionFollowsPlaybackAction);
+    timelineMenu->addSeparator();
+    timelineMenu->addAction(m_setLoopStartAction);
+    timelineMenu->addAction(m_setLoopEndAction);
+    timelineMenu->addAction(m_clearLoopRangeAction);
     timelineMenu->addSeparator();
     timelineMenu->addAction(m_showTimelineAction);
     timelineMenu->addAction(m_timelineClickSeeksAction);
