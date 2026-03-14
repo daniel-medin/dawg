@@ -95,9 +95,13 @@ public:
     bool startSelectedTrackClipPreview();
     void stopSelectedTrackClipPreview();
     bool setSelectedTrackClipRangeMs(int clipStartMs, int clipEndMs);
+    bool setSelectedTrackClipPlayheadMs(int playheadMs);
+    bool setSelectedTrackAudioGainDb(float gainDb);
+    bool setSelectedTrackLoopEnabled(bool enabled);
 
     [[nodiscard]] bool hasVideoLoaded() const;
     [[nodiscard]] bool isPlaying() const;
+    [[nodiscard]] bool isSelectedTrackClipPreviewPlaying() const;
     [[nodiscard]] bool isInsertionFollowsPlayback() const;
     [[nodiscard]] bool isMotionTrackingEnabled() const;
     [[nodiscard]] bool hasSelection() const;
@@ -130,6 +134,7 @@ public:
     [[nodiscard]] QSize videoFrameSize() const;
     [[nodiscard]] QString trackLabel(const QUuid& trackId) const;
     [[nodiscard]] bool trackHasAttachedAudio(const QUuid& trackId) const;
+    [[nodiscard]] bool selectedTrackLoopEnabled() const;
     [[nodiscard]] bool trackAutoPanEnabled(const QUuid& trackId) const;
     [[nodiscard]] bool selectedTracksAutoPanEnabled() const;
     [[nodiscard]] std::optional<ClipEditorState> selectedClipEditorState() const;
@@ -181,6 +186,8 @@ private:
     [[nodiscard]] bool anyMixLaneSoloed() const;
     [[nodiscard]] std::optional<std::pair<int, int>> activeLoopRange() const;
     void applyLiveMixStateToCurrentPlayback();
+    [[nodiscard]] std::optional<int> currentSelectedTrackClipPreviewPlayheadMs() const;
+    void handleClipEditorPreviewTimeout();
     void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
     void logPlaybackHitchIfNeeded(int targetFrameIndex, int previousFrameIndex, int advancedFrames);
 
@@ -226,7 +233,13 @@ private:
     const QUuid m_embeddedVideoAudioTrackId = QUuid(QStringLiteral("{eb6fc60f-0781-433f-9f03-ff16531165f7}"));
     const QUuid m_audioPoolPreviewTrackId = QUuid(QStringLiteral("{8d6166c4-b107-4c55-8f11-f9cbf67d0e0a}"));
     const QUuid m_clipEditorPreviewTrackId = QUuid(QStringLiteral("{3427e43b-a4c0-4d8e-86ea-52e9d85f2747}"));
+    QUuid m_clipEditorPreviewSourceTrackId;
     QString m_audioPoolPreviewAssetPath;
     QTimer m_clipEditorPreviewStopTimer;
+    QElapsedTimer m_clipEditorPreviewElapsedTimer;
+    int m_clipEditorPreviewStartMs = 0;
+    int m_clipEditorPreviewClipStartMs = 0;
+    int m_clipEditorPreviewClipEndMs = 0;
     mutable QHash<QString, std::optional<int>> m_audioDurationMsByPath;
+    QHash<QUuid, int> m_clipEditorPlayheadMsByTrack;
 };

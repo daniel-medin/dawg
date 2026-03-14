@@ -316,6 +316,38 @@ bool MotionTracker::setTrackAudioClipRange(const QUuid& trackId, const int clipS
     return false;
 }
 
+bool MotionTracker::setTrackAudioGainDb(const QUuid& trackId, const float gainDb)
+{
+    for (auto& track : m_tracks)
+    {
+        if (track.id != trackId || !track.attachedAudio.has_value())
+        {
+            continue;
+        }
+
+        track.attachedAudio->gainDb = gainDb;
+        return true;
+    }
+
+    return false;
+}
+
+bool MotionTracker::setTrackAudioLoopEnabled(const QUuid& trackId, const bool enabled)
+{
+    for (auto& track : m_tracks)
+    {
+        if (track.id != trackId || !track.attachedAudio.has_value())
+        {
+            continue;
+        }
+
+        track.attachedAudio->loopEnabled = enabled;
+        return true;
+    }
+
+    return false;
+}
+
 int MotionTracker::detachTrackAudioByPath(const QString& assetPath)
 {
     int detachedCount = 0;

@@ -450,9 +450,11 @@ MainWindow::MainWindow(QWidget* parent)
     m_clearAllShortcutTimer.setInterval(1500);
     m_memoryUsageTimer.setInterval(1000);
     m_mixMeterTimer.setInterval(33);
+    m_clipEditorPreviewTimer.setInterval(33);
     connect(&m_clearAllShortcutTimer, &QTimer::timeout, this, &MainWindow::clearPendingClearAllShortcut);
     connect(&m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsage);
     connect(&m_mixMeterTimer, &QTimer::timeout, this, &MainWindow::refreshMixView);
+    connect(&m_clipEditorPreviewTimer, &QTimer::timeout, this, &MainWindow::refreshClipEditor);
     m_statusToastTimer.setSingleShot(true);
     m_statusToastTimer.setInterval(2800);
     connect(&m_statusToastTimer, &QTimer::timeout, this, [this]()
@@ -550,6 +552,13 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_clearLoopRangeAction, &QAction::triggered, this, &MainWindow::clearLoopRange);
     connect(m_trimNodeAction, &QAction::triggered, this, &MainWindow::trimSelectedNodeToSound);
     connect(m_autoPanAction, &QAction::triggered, this, &MainWindow::toggleSelectedNodeAutoPan);
+    connect(m_loopSoundAction, &QAction::toggled, this, [this](const bool enabled)
+    {
+        if (m_controller->setSelectedTrackLoopEnabled(enabled))
+        {
+            refreshClipEditor();
+        }
+    });
     connect(m_toggleNodeNameAction, &QAction::triggered, m_controller, &PlayerController::toggleSelectedTrackLabels);
     connect(m_showAllNodeNamesAction, &QAction::toggled, this, [this](const bool enabled)
     {
@@ -663,9 +672,28 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_controller, &PlayerController::videoAudioStateChanged, this, &MainWindow::updateVideoAudioRow);
     connect(m_controller, &PlayerController::statusChanged, this, &MainWindow::showStatus);
     connect(m_showMixShortcut, &QShortcut::activated, m_showMixAction, &QAction::trigger);
-    connect(m_clipEditorView, &ClipEditorView::playRequested, m_controller, &PlayerController::startSelectedTrackClipPreview);
-    connect(m_clipEditorView, &ClipEditorView::stopRequested, m_controller, &PlayerController::stopSelectedTrackClipPreview);
     connect(m_clipEditorView, &ClipEditorView::clipRangeChanged, m_controller, &PlayerController::setSelectedTrackClipRangeMs);
+    connect(m_clipEditorView, &ClipEditorView::playheadChanged, this, [this](const int playheadMs)
+    {
+        if (m_controller->setSelectedTrackClipPlayheadMs(playheadMs))
+        {
+            refreshClipEditor();
+        }
+    });
+    connect(m_clipEditorView, &ClipEditorView::gainChanged, this, [this](const float gainDb)
+    {
+        if (m_controller->setSelectedTrackAudioGainDb(gainDb))
+        {
+            refreshClipEditor();
+        }
+    });
+    connect(m_clipEditorView, &ClipEditorView::loopSoundChanged, this, [this](const bool enabled)
+    {
+        if (m_controller->setSelectedTrackLoopEnabled(enabled))
+        {
+            refreshClipEditor();
+        }
+    });
     connect(m_mixView, &MixView::masterGainChanged, m_controller, &PlayerController::setMasterMixGainDb);
     connect(m_mixView, &MixView::masterMutedChanged, m_controller, &PlayerController::setMasterMixMuted);
     connect(m_mixView, &MixView::laneGainChanged, m_controller, &PlayerController::setMixLaneGainDb);
@@ -675,6 +703,14 @@ MainWindow::MainWindow(QWidget* parent)
     updatePlaybackState(false);
     updateInsertionFollowsPlaybackState(m_controller->isInsertionFollowsPlayback());
     syncMotionTrackingUi(m_controller->isMotionTrackingEnabled());
+    if (m_showAllNodeNamesAction && m_showAllNodeNamesAction->isChecked())
+    {
+        m_canvas->setShowAllLabels(true);
+        if (m_nativeViewport)
+        {
+            m_nativeViewport->setShowAllLabels(true);
+        }
+    }
     updateSelectionState(m_controller->hasSelection());
     updateTrackAvailabilityState(m_controller->hasTracks());
     updateEditActionState();
@@ -690,6 +726,17 @@ MainWindow::MainWindow(QWidget* parent)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    const auto clipEditorFocused = [this]() -> bool
+    {
+        if (!m_clipEditorView)
+        {
+            return false;
+        }
+
+        const auto* focused = QApplication::focusWidget();
+        return focused && (focused == m_clipEditorView || m_clipEditorView->isAncestorOf(focused));
+    };
+
     if (watched == m_nativeViewportWindow
         && (event->type() == QEvent::Hide || event->type() == QEvent::Close))
     {
@@ -714,6 +761,40 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                     hideCanvasTipsOverlay();
                 }
             }
+        }
+    }
+
+    if (event->type() == QEvent::ShortcutOverride)
+    {
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if (!keyEvent->isAutoRepeat()
+            && keyEvent->key() == Qt::Key_Space
+            && keyEvent->modifiers() == Qt::NoModifier
+            && clipEditorFocused())
+        {
+            event->accept();
+            return true;
+        }
+    }
+
+    if (event->type() == QEvent::KeyPress)
+    {
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if (!keyEvent->isAutoRepeat()
+            && keyEvent->key() == Qt::Key_Space
+            && keyEvent->modifiers() == Qt::NoModifier
+            && clipEditorFocused())
+        {
+            if (m_controller->isSelectedTrackClipPreviewPlaying())
+            {
+                m_controller->stopSelectedTrackClipPreview();
+            }
+            else
+            {
+                static_cast<void>(m_controller->startSelectedTrackClipPreview());
+            }
+            refreshClipEditor();
+            return true;
         }
     }
 
@@ -893,6 +974,23 @@ void MainWindow::clearLoopRange()
 
 void MainWindow::handleNodeStartShortcut()
 {
+    const auto* focused = QApplication::focusWidget();
+    const auto clipEditorFocused =
+        m_clipEditorView && focused && (focused == m_clipEditorView || m_clipEditorView->isAncestorOf(focused));
+    if (clipEditorFocused)
+    {
+        if (const auto state = m_controller->selectedClipEditorState();
+            state.has_value() && state->hasAttachedAudio && state->playheadMs.has_value())
+        {
+            const auto nextClipEndMs = std::max(*state->playheadMs + 1, state->clipEndMs);
+            if (m_controller->setSelectedTrackClipRangeMs(*state->playheadMs, nextClipEndMs))
+            {
+                refreshClipEditor();
+            }
+            return;
+        }
+    }
+
     if (m_timeline && m_timeline->loopShortcutFrame().has_value())
     {
         handleLoopStartShortcut();
@@ -910,6 +1008,23 @@ void MainWindow::handleNodeStartShortcut()
 
 void MainWindow::handleNodeEndShortcut()
 {
+    const auto* focused = QApplication::focusWidget();
+    const auto clipEditorFocused =
+        m_clipEditorView && focused && (focused == m_clipEditorView || m_clipEditorView->isAncestorOf(focused));
+    if (clipEditorFocused)
+    {
+        if (const auto state = m_controller->selectedClipEditorState();
+            state.has_value() && state->hasAttachedAudio && state->playheadMs.has_value())
+        {
+            const auto nextClipEndMs = std::max(state->clipStartMs + 1, *state->playheadMs);
+            if (m_controller->setSelectedTrackClipRangeMs(state->clipStartMs, nextClipEndMs))
+            {
+                refreshClipEditor();
+            }
+            return;
+        }
+    }
+
     if (m_timeline && m_timeline->loopShortcutFrame().has_value())
     {
         handleLoopEndShortcut();
@@ -1291,6 +1406,10 @@ void MainWindow::updateClipEditorVisibility(const bool visible)
     if (visible)
     {
         refreshClipEditor();
+    }
+    else
+    {
+        m_clipEditorPreviewTimer.stop();
     }
 
     syncMainVerticalPanelSizes();
@@ -1921,10 +2040,22 @@ void MainWindow::refreshClipEditor()
 {
     if (!m_clipEditorView || !m_clipEditorPanel || !m_clipEditorPanel->isVisible())
     {
+        m_clipEditorPreviewTimer.stop();
         return;
     }
 
     m_clipEditorView->setState(m_controller->selectedClipEditorState());
+    if (m_controller->isSelectedTrackClipPreviewPlaying())
+    {
+        if (!m_clipEditorPreviewTimer.isActive())
+        {
+            m_clipEditorPreviewTimer.start();
+        }
+    }
+    else
+    {
+        m_clipEditorPreviewTimer.stop();
+    }
 }
 
 void MainWindow::refreshMixView()
@@ -1942,6 +2073,14 @@ void MainWindow::refreshMixView()
 
 void MainWindow::updateEditActionState()
 {
+    if (m_loopSoundAction)
+    {
+        const auto selectedTrackId = m_controller->selectedTrackId();
+        const auto hasSelectedTrackAudio = !selectedTrackId.isNull() && m_controller->trackHasAttachedAudio(selectedTrackId);
+        const QSignalBlocker blocker{m_loopSoundAction};
+        m_loopSoundAction->setEnabled(hasSelectedTrackAudio);
+        m_loopSoundAction->setChecked(hasSelectedTrackAudio && m_controller->selectedTrackLoopEnabled());
+    }
     if (m_copyAction)
     {
         m_copyAction->setEnabled(m_controller->hasSelection());
@@ -2019,6 +2158,7 @@ void MainWindow::buildMenus()
     m_moveNodeRightAction = new QAction(QStringLiteral("Move Right (Right)"), this);
     m_trimNodeAction = new QAction(QStringLiteral("Trim Node (Shift+T)"), this);
     m_autoPanAction = new QAction(QStringLiteral("Auto Pan (R)"), this);
+    m_loopSoundAction = new QAction(QStringLiteral("Loop Sound"), this);
     m_toggleNodeNameAction = new QAction(QStringLiteral("Toggle Node Name (E)"), this);
     m_showAllNodeNamesAction = new QAction(QStringLiteral("Node Name Always On"), this);
     m_importSoundAction = new QAction(QStringLiteral("Import Sound (Shift+Ctrl+I)"), this);
@@ -2033,6 +2173,7 @@ void MainWindow::buildMenus()
     m_motionTrackingAction = new QAction(QStringLiteral("Motion Tracking"), this);
     m_motionTrackingAction->setCheckable(true);
     m_autoPanAction->setCheckable(true);
+    m_loopSoundAction->setCheckable(true);
     m_insertionFollowsPlaybackAction->setCheckable(true);
     m_insertionFollowsPlaybackAction->setChecked(false);
     m_showAllNodeNamesAction->setCheckable(true);
@@ -2065,6 +2206,7 @@ void MainWindow::buildMenus()
     m_moveNodeRightAction->setEnabled(false);
     m_trimNodeAction->setEnabled(false);
     m_autoPanAction->setEnabled(false);
+    m_loopSoundAction->setEnabled(false);
     m_toggleNodeNameAction->setEnabled(false);
     m_importSoundAction->setEnabled(false);
     m_copyAction->setEnabled(false);
@@ -2111,7 +2253,7 @@ void MainWindow::buildMenus()
 
     auto* soundMenu = menuBar()->addMenu(QStringLiteral("&Sound"));
     soundMenu->addAction(m_importSoundAction);
-    soundMenu->addAction(m_showClipEditorAction);
+    soundMenu->addAction(m_loopSoundAction);
     soundMenu->addAction(m_autoPanAction);
 
     auto* timelineMenu = menuBar()->addMenu(QStringLiteral("&Timeline"));
@@ -2127,16 +2269,16 @@ void MainWindow::buildMenus()
     timelineMenu->addAction(m_setLoopEndAction);
     timelineMenu->addAction(m_clearLoopRangeAction);
     timelineMenu->addSeparator();
-    timelineMenu->addAction(m_showTimelineAction);
     timelineMenu->addAction(m_timelineClickSeeksAction);
 
-    auto* mixMenu = menuBar()->addMenu(QStringLiteral("&Mix"));
-    mixMenu->addAction(m_showMixAction);
-
     auto* viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
+    viewMenu->addAction(m_showTimelineAction);
+    viewMenu->addAction(m_showClipEditorAction);
+    viewMenu->addAction(m_showMixAction);
+    viewMenu->addAction(m_audioPoolAction);
+    viewMenu->addSeparator();
     viewMenu->addAction(m_toggleNodeNameAction);
     viewMenu->addAction(m_showAllNodeNamesAction);
-    viewMenu->addAction(m_audioPoolAction);
 
     auto* debugMenu = menuBar()->addMenu(QStringLiteral("&Debug"));
     debugMenu->addAction(m_toggleDebugAction);

@@ -22,6 +22,8 @@ public:
     bool moveTrackFrameSpan(const QUuid& trackId, int deltaFrames, int maxFrameIndex);
     bool setTrackAudioAttachment(const QUuid& trackId, const QString& assetPath);
     bool setTrackAudioClipRange(const QUuid& trackId, int clipStartMs, std::optional<int> clipEndMs);
+    bool setTrackAudioGainDb(const QUuid& trackId, float gainDb);
+    bool setTrackAudioLoopEnabled(const QUuid& trackId, bool enabled);
     int detachTrackAudioByPath(const QString& assetPath);
     void addTrack(const TrackPoint& track);
     void restoreState(const MotionTrackerState& state);

@@ -15,6 +15,7 @@ struct AudioAttachment
     float gainDb = 0.0F;
     int clipStartMs = 0;
     std::optional<int> clipEndMs;
+    bool loopEnabled = false;
 };
 
 struct TrackPoint

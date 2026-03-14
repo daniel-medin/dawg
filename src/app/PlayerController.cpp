@@ -75,6 +75,21 @@ int audioClipDurationMs(const AudioAttachment& attachment, const int sourceDurat
 {
     return std::max(1, audioClipEndMs(attachment, sourceDurationMs) - audioClipStartMs(attachment));
 }
+
+int audioClipPlaybackOffsetMs(
+    const AudioAttachment& attachment,
+    const int sourceDurationMs,
+    const int elapsedWithinNodeMs)
+{
+    const auto clipStartMs = audioClipStartMs(attachment);
+    const auto clipDurationMs = audioClipDurationMs(attachment, sourceDurationMs);
+    if (attachment.loopEnabled && clipDurationMs > 0)
+    {
+        return clipStartMs + (std::max(0, elapsedWithinNodeMs) % clipDurationMs);
+    }
+
+    return clipStartMs + std::max(0, elapsedWithinNodeMs);
+}
 }
 
 PlayerController::PlayerController(QObject* parent)
@@ -98,7 +113,7 @@ PlayerController::PlayerController(QObject* parent)
         this,
         &PlayerController::advanceSelectionFade);
     m_clipEditorPreviewStopTimer.setSingleShot(true);
-    connect(&m_clipEditorPreviewStopTimer, &QTimer::timeout, this, &PlayerController::stopSelectedTrackClipPreview);
+    connect(&m_clipEditorPreviewStopTimer, &QTimer::timeout, this, &PlayerController::handleClipEditorPreviewTimeout);
 }
 
 bool PlayerController::openVideo(const QString& filePath)
@@ -136,6 +151,11 @@ bool PlayerController::openVideo(const QString& filePath)
     m_mixLaneMutedByLane.clear();
     m_mixLaneSoloByLane.clear();
     m_audioDurationMsByPath.clear();
+    m_clipEditorPlayheadMsByTrack.clear();
+    m_clipEditorPreviewSourceTrackId = {};
+    m_clipEditorPreviewStartMs = 0;
+    m_clipEditorPreviewClipStartMs = 0;
+    m_clipEditorPreviewClipEndMs = 0;
     m_audioEngine->setMasterGain(m_masterMixGainDb);
     m_loadedPath = filePath;
     m_embeddedVideoAudioPath.clear();
@@ -192,6 +212,149 @@ bool PlayerController::importAudioToPool(const QString& filePath)
         emit audioPoolChanged();
     }
 
+    return true;
+}
+
+bool PlayerController::setSelectedTrackClipPlayheadMs(const int playheadMs)
+{
+    if (!hasVideoLoaded() || m_selectedTrackId.isNull())
+    {
+        return false;
+    }
+
+    const auto trackIt = std::find_if(
+        m_tracker.tracks().begin(),
+        m_tracker.tracks().end(),
+        [this](const TrackPoint& track)
+        {
+            return track.id == m_selectedTrackId;
+        });
+    if (trackIt == m_tracker.tracks().end() || !trackIt->attachedAudio.has_value())
+    {
+        return false;
+    }
+
+    const auto sourceDurationMs = audioDurationMs(trackIt->attachedAudio->assetPath);
+    if (!sourceDurationMs.has_value() || *sourceDurationMs <= 0)
+    {
+        return false;
+    }
+
+    const auto clipStartMs = audioClipStartMs(*trackIt->attachedAudio);
+    const auto clipEndMs = audioClipEndMs(*trackIt->attachedAudio, *sourceDurationMs);
+    const auto clampedPlayheadMs = std::clamp(playheadMs, clipStartMs, std::max(clipStartMs, clipEndMs - 1));
+    const auto currentIt = m_clipEditorPlayheadMsByTrack.constFind(m_selectedTrackId);
+    const auto changed =
+        currentIt == m_clipEditorPlayheadMsByTrack.cend() || currentIt.value() != clampedPlayheadMs;
+    if (!changed
+        && !(m_clipEditorPreviewSourceTrackId == m_selectedTrackId
+            && m_audioEngine->isTrackPlaying(m_clipEditorPreviewTrackId)))
+    {
+        return false;
+    }
+
+    m_clipEditorPlayheadMsByTrack.insert(m_selectedTrackId, clampedPlayheadMs);
+    if (m_clipEditorPreviewSourceTrackId != m_selectedTrackId
+        || !m_audioEngine->isTrackPlaying(m_clipEditorPreviewTrackId))
+    {
+        return changed;
+    }
+
+    if (!m_audioEngine->playTrack(m_clipEditorPreviewTrackId, trackIt->attachedAudio->assetPath, clampedPlayheadMs))
+    {
+        return changed;
+    }
+
+    m_clipEditorPreviewStartMs = clampedPlayheadMs;
+    m_clipEditorPreviewClipStartMs = clipStartMs;
+    m_clipEditorPreviewClipEndMs = clipEndMs;
+    m_clipEditorPreviewElapsedTimer.restart();
+    m_audioEngine->setTrackGain(m_clipEditorPreviewTrackId, trackIt->attachedAudio->gainDb);
+    m_audioEngine->setTrackPan(m_clipEditorPreviewTrackId, 0.0F);
+    m_clipEditorPreviewStopTimer.start(std::max(1, clipEndMs - clampedPlayheadMs));
+    return true;
+}
+
+bool PlayerController::setSelectedTrackAudioGainDb(const float gainDb)
+{
+    if (!hasVideoLoaded() || m_selectedTrackId.isNull())
+    {
+        return false;
+    }
+
+    const auto clampedGainDb = clampMixGainDb(gainDb);
+    const auto trackIt = std::find_if(
+        m_tracker.tracks().begin(),
+        m_tracker.tracks().end(),
+        [this](const TrackPoint& track)
+        {
+            return track.id == m_selectedTrackId;
+        });
+    if (trackIt == m_tracker.tracks().end() || !trackIt->attachedAudio.has_value())
+    {
+        return false;
+    }
+
+    if (std::abs(trackIt->attachedAudio->gainDb - clampedGainDb) < 0.001F)
+    {
+        return false;
+    }
+
+    if (!m_tracker.setTrackAudioGainDb(m_selectedTrackId, clampedGainDb))
+    {
+        return false;
+    }
+
+    if (m_clipEditorPreviewSourceTrackId == m_selectedTrackId
+        && m_audioEngine->isTrackPlaying(m_clipEditorPreviewTrackId))
+    {
+        m_audioEngine->setTrackGain(m_clipEditorPreviewTrackId, clampedGainDb);
+    }
+
+    if (m_transport.isPlaying())
+    {
+        applyLiveMixStateToCurrentPlayback();
+    }
+
+    emit editStateChanged();
+    return true;
+}
+
+bool PlayerController::setSelectedTrackLoopEnabled(const bool enabled)
+{
+    if (!hasVideoLoaded() || m_selectedTrackId.isNull())
+    {
+        return false;
+    }
+
+    const auto trackIt = std::find_if(
+        m_tracker.tracks().begin(),
+        m_tracker.tracks().end(),
+        [this](const TrackPoint& track)
+        {
+            return track.id == m_selectedTrackId;
+        });
+    if (trackIt == m_tracker.tracks().end() || !trackIt->attachedAudio.has_value())
+    {
+        return false;
+    }
+
+    if (trackIt->attachedAudio->loopEnabled == enabled)
+    {
+        return false;
+    }
+
+    if (!m_tracker.setTrackAudioLoopEnabled(m_selectedTrackId, enabled))
+    {
+        return false;
+    }
+
+    if (m_transport.isPlaying())
+    {
+        syncAttachedAudioForCurrentFrame();
+    }
+
+    emit editStateChanged();
     return true;
 }
 
@@ -267,22 +430,99 @@ bool PlayerController::startSelectedTrackClipPreview()
     stopSelectedTrackClipPreview();
 
     const auto clipStartMs = audioClipStartMs(*trackIt->attachedAudio);
-    const auto clipDurationMs = audioClipDurationMs(*trackIt->attachedAudio, *sourceDurationMs);
-    if (!m_audioEngine->playTrack(m_clipEditorPreviewTrackId, trackIt->attachedAudio->assetPath, clipStartMs))
+    const auto clipEndMs = audioClipEndMs(*trackIt->attachedAudio, *sourceDurationMs);
+    const auto previewStartMs = std::clamp(
+        m_clipEditorPlayheadMsByTrack.value(trackIt->id, clipStartMs),
+        clipStartMs,
+        std::max(clipStartMs, clipEndMs - 1));
+    const auto clipDurationMs = std::max(1, clipEndMs - previewStartMs);
+    if (!m_audioEngine->playTrack(m_clipEditorPreviewTrackId, trackIt->attachedAudio->assetPath, previewStartMs))
     {
         return false;
     }
 
+    m_clipEditorPlayheadMsByTrack.insert(trackIt->id, previewStartMs);
+    m_clipEditorPreviewSourceTrackId = trackIt->id;
+    m_clipEditorPreviewStartMs = previewStartMs;
+    m_clipEditorPreviewClipStartMs = clipStartMs;
+    m_clipEditorPreviewClipEndMs = clipEndMs;
+    m_clipEditorPreviewElapsedTimer.restart();
     m_audioEngine->setTrackGain(m_clipEditorPreviewTrackId, trackIt->attachedAudio->gainDb);
     m_audioEngine->setTrackPan(m_clipEditorPreviewTrackId, 0.0F);
     m_clipEditorPreviewStopTimer.start(std::max(1, clipDurationMs));
     return true;
 }
 
+void PlayerController::handleClipEditorPreviewTimeout()
+{
+    if (m_clipEditorPreviewSourceTrackId.isNull())
+    {
+        stopSelectedTrackClipPreview();
+        return;
+    }
+
+    const auto trackIt = std::find_if(
+        m_tracker.tracks().begin(),
+        m_tracker.tracks().end(),
+        [this](const TrackPoint& track)
+        {
+            return track.id == m_clipEditorPreviewSourceTrackId;
+        });
+    if (trackIt == m_tracker.tracks().end() || !trackIt->attachedAudio.has_value())
+    {
+        stopSelectedTrackClipPreview();
+        return;
+    }
+
+    const auto sourceDurationMs = audioDurationMs(trackIt->attachedAudio->assetPath);
+    if (!sourceDurationMs.has_value() || *sourceDurationMs <= 0)
+    {
+        stopSelectedTrackClipPreview();
+        return;
+    }
+
+    const auto clipStartMs = audioClipStartMs(*trackIt->attachedAudio);
+    const auto clipEndMs = audioClipEndMs(*trackIt->attachedAudio, *sourceDurationMs);
+    const auto clipDurationMs = std::max(1, clipEndMs - clipStartMs);
+
+    if (!trackIt->attachedAudio->loopEnabled)
+    {
+        stopSelectedTrackClipPreview();
+        return;
+    }
+
+    if (!m_audioEngine->playTrack(m_clipEditorPreviewTrackId, trackIt->attachedAudio->assetPath, clipStartMs))
+    {
+        stopSelectedTrackClipPreview();
+        return;
+    }
+
+    m_clipEditorPlayheadMsByTrack.insert(trackIt->id, clipStartMs);
+    m_clipEditorPreviewStartMs = clipStartMs;
+    m_clipEditorPreviewClipStartMs = clipStartMs;
+    m_clipEditorPreviewClipEndMs = clipEndMs;
+    m_clipEditorPreviewElapsedTimer.restart();
+    m_audioEngine->setTrackGain(m_clipEditorPreviewTrackId, trackIt->attachedAudio->gainDb);
+    m_audioEngine->setTrackPan(m_clipEditorPreviewTrackId, 0.0F);
+    m_clipEditorPreviewStopTimer.start(clipDurationMs);
+}
+
 void PlayerController::stopSelectedTrackClipPreview()
 {
+    if (!m_clipEditorPreviewSourceTrackId.isNull())
+    {
+        if (const auto playheadMs = currentSelectedTrackClipPreviewPlayheadMs(); playheadMs.has_value())
+        {
+            m_clipEditorPlayheadMsByTrack.insert(m_clipEditorPreviewSourceTrackId, *playheadMs);
+        }
+    }
+
     m_clipEditorPreviewStopTimer.stop();
     m_audioEngine->stopTrack(m_clipEditorPreviewTrackId);
+    m_clipEditorPreviewSourceTrackId = {};
+    m_clipEditorPreviewStartMs = 0;
+    m_clipEditorPreviewClipStartMs = 0;
+    m_clipEditorPreviewClipEndMs = 0;
 }
 
 bool PlayerController::setSelectedTrackClipRangeMs(const int clipStartMs, const int clipEndMs)
@@ -1758,6 +1998,11 @@ bool PlayerController::canRedoTrackEdit() const
     return m_redoTrackerState.has_value();
 }
 
+bool PlayerController::isSelectedTrackClipPreviewPlaying() const
+{
+    return m_audioEngine->isTrackPlaying(m_clipEditorPreviewTrackId);
+}
+
 int PlayerController::trackCount() const
 {
     return static_cast<int>(m_tracker.tracks().size());
@@ -1899,6 +2144,26 @@ bool PlayerController::trackHasAttachedAudio(const QUuid& trackId) const
     return trackIt != m_tracker.tracks().end() && trackIt->attachedAudio.has_value();
 }
 
+bool PlayerController::selectedTrackLoopEnabled() const
+{
+    if (!hasVideoLoaded() || m_selectedTrackId.isNull())
+    {
+        return false;
+    }
+
+    const auto trackIt = std::find_if(
+        m_tracker.tracks().begin(),
+        m_tracker.tracks().end(),
+        [this](const TrackPoint& track)
+        {
+            return track.id == m_selectedTrackId;
+        });
+
+    return trackIt != m_tracker.tracks().end()
+        && trackIt->attachedAudio.has_value()
+        && trackIt->attachedAudio->loopEnabled;
+}
+
 bool PlayerController::trackAutoPanEnabled(const QUuid& trackId) const
 {
     return m_tracker.isTrackAutoPanEnabled(trackId);
@@ -1960,15 +2225,59 @@ std::optional<ClipEditorState> PlayerController::selectedClipEditorState() const
     state.sourceDurationMs = *sourceDurationMs;
     state.clipStartMs = audioClipStartMs(*trackIt->attachedAudio);
     state.clipEndMs = audioClipEndMs(*trackIt->attachedAudio, *sourceDurationMs);
-
-    if (m_currentFrame.index >= state.nodeStartFrame && m_currentFrame.index <= state.nodeEndFrame)
+    state.gainDb = trackIt->attachedAudio->gainDb;
+    state.loopEnabled = trackIt->attachedAudio->loopEnabled;
+    if (m_clipEditorPreviewSourceTrackId == trackIt->id
+        && m_audioEngine->isTrackPlaying(m_clipEditorPreviewTrackId))
+    {
+        state.level = m_audioEngine->trackLevel(m_clipEditorPreviewTrackId);
+    }
+    else
+    {
+        state.level = m_audioEngine->trackLevel(trackIt->id);
+    }
+    auto playheadMs = m_clipEditorPlayheadMsByTrack.value(trackIt->id, state.clipStartMs);
+    if (const auto previewPlayheadMs = currentSelectedTrackClipPreviewPlayheadMs();
+        previewPlayheadMs.has_value() && m_clipEditorPreviewSourceTrackId == trackIt->id)
+    {
+        playheadMs = *previewPlayheadMs;
+    }
+    else if (m_transport.isPlaying()
+        && m_currentFrame.index >= state.nodeStartFrame
+        && m_currentFrame.index <= state.nodeEndFrame)
     {
         const auto elapsedSeconds = frameTimestampSeconds(m_currentFrame.index) - frameTimestampSeconds(state.nodeStartFrame);
-        const auto playheadMs = state.clipStartMs + std::max(0, static_cast<int>(std::lround(elapsedSeconds * 1000.0)));
-        state.playheadMs = std::clamp(playheadMs, state.clipStartMs, state.clipEndMs);
+        const auto elapsedWithinNodeMs = std::max(0, static_cast<int>(std::lround(elapsedSeconds * 1000.0)));
+        playheadMs = audioClipPlaybackOffsetMs(*trackIt->attachedAudio, *sourceDurationMs, elapsedWithinNodeMs);
     }
+    else if (!m_clipEditorPlayheadMsByTrack.contains(trackIt->id)
+        && m_currentFrame.index >= state.nodeStartFrame
+        && m_currentFrame.index <= state.nodeEndFrame)
+    {
+        const auto elapsedSeconds = frameTimestampSeconds(m_currentFrame.index) - frameTimestampSeconds(state.nodeStartFrame);
+        playheadMs = state.clipStartMs + std::max(0, static_cast<int>(std::lround(elapsedSeconds * 1000.0)));
+    }
+    state.playheadMs = std::clamp(playheadMs, state.clipStartMs, std::max(state.clipStartMs, state.clipEndMs - 1));
 
     return state;
+}
+
+std::optional<int> PlayerController::currentSelectedTrackClipPreviewPlayheadMs() const
+{
+    if (m_clipEditorPreviewSourceTrackId.isNull()
+        || !m_audioEngine->isTrackPlaying(m_clipEditorPreviewTrackId))
+    {
+        return std::nullopt;
+    }
+
+    const auto clipEndMs = std::max(m_clipEditorPreviewClipStartMs + 1, m_clipEditorPreviewClipEndMs);
+    const auto elapsedMs = m_clipEditorPreviewElapsedTimer.isValid()
+        ? static_cast<int>(m_clipEditorPreviewElapsedTimer.elapsed())
+        : 0;
+    return std::clamp(
+        m_clipEditorPreviewStartMs + std::max(0, elapsedMs),
+        m_clipEditorPreviewClipStartMs,
+        clipEndMs - 1);
 }
 
 bool PlayerController::removeAudioFromPool(const QString& filePath)
@@ -2721,9 +3030,14 @@ void PlayerController::syncAttachedAudioForCurrentFrame()
         }
 
         const auto startTimestampSeconds = frameTimestampSeconds(startFrame);
-        const auto offsetMs = audioClipStartMs(*track.attachedAudio) + std::max(
+        const auto elapsedWithinNodeMs = std::max(
             0,
             static_cast<int>(std::lround((currentTimestampSeconds - startTimestampSeconds) * 1000.0)));
+        const auto sourceDurationMs = audioDurationMs(track.attachedAudio->assetPath).value_or(0);
+        const auto offsetMs = audioClipPlaybackOffsetMs(
+            *track.attachedAudio,
+            sourceDurationMs,
+            elapsedWithinNodeMs);
         m_audioEngine->playTrack(track.id, track.attachedAudio->assetPath, offsetMs);
         const auto laneIndex = laneByTrackId.value(track.id, 0);
         const auto laneAudible = !isMixLaneMuted(laneIndex) && (!anySoloed || isMixLaneSoloed(laneIndex));

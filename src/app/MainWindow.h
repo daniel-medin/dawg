@@ -153,6 +153,7 @@ private:
     QAction* m_moveNodeRightAction = nullptr;
     QAction* m_trimNodeAction = nullptr;
     QAction* m_autoPanAction = nullptr;
+    QAction* m_loopSoundAction = nullptr;
     QAction* m_toggleNodeNameAction = nullptr;
     QAction* m_showAllNodeNamesAction = nullptr;
     QAction* m_importSoundAction = nullptr;
@@ -206,6 +207,7 @@ private:
     QTimer m_clearAllShortcutTimer;
     QTimer m_memoryUsageTimer;
     QTimer m_mixMeterTimer;
+    QTimer m_clipEditorPreviewTimer;
     QTimer m_statusToastTimer;
     QTimer m_canvasTipsTimer;
     QTimer m_nodeNudgeTimer;
