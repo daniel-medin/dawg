@@ -270,18 +270,19 @@ std::vector<TimelineView::TimelineTrackGeometry> TimelineView::trackGeometries()
     }
 
     const auto laneRect = timelineRect();
-    const auto trackCount = static_cast<int>(m_trackSpans.size());
+    const auto trackLaneCount = laneCount();
     const auto verticalPadding = 8.0;
-    const auto rowGap = trackCount > 10 ? 1.0 : 2.0;
+    const auto rowGap = trackLaneCount > 10 ? 1.0 : 2.0;
     const auto availableHeight = std::max(8.0, laneRect.height() - verticalPadding * 2.0);
     const auto rowHeight = std::max(
         3.0,
-        std::min(10.0, (availableHeight - std::max(0, trackCount - 1) * rowGap) / std::max(1, trackCount)));
+        std::min(10.0, (availableHeight - std::max(0, trackLaneCount - 1) * rowGap) / std::max(1, trackLaneCount)));
 
-    for (int index = 0; index < trackCount; ++index)
+    for (int index = 0; index < static_cast<int>(m_trackSpans.size()); ++index)
     {
         const auto& trackSpan = m_trackSpans[static_cast<std::size_t>(index)];
-        const auto y = laneRect.top() + verticalPadding + (rowHeight + rowGap) * index;
+        const auto laneIndex = std::max(0, trackSpan.laneIndex);
+        const auto y = laneRect.top() + verticalPadding + (rowHeight + rowGap) * laneIndex;
         const auto startX = xForFrame(std::max(0, trackSpan.startFrame));
         const auto endX = xForFrame(std::max(trackSpan.startFrame, trackSpan.endFrame));
         const auto left = std::min(startX, endX);
@@ -314,6 +315,17 @@ std::vector<TimelineView::TimelineTrackGeometry> TimelineView::trackGeometries()
     }
 
     return geometries;
+}
+
+int TimelineView::laneCount() const
+{
+    int maxLaneIndex = -1;
+    for (const auto& trackSpan : m_trackSpans)
+    {
+        maxLaneIndex = std::max(maxLaneIndex, trackSpan.laneIndex);
+    }
+
+    return std::max(0, maxLaneIndex + 1);
 }
 
 std::optional<TimelineView::TimelineTrackGeometry> TimelineView::trackAt(const QPointF& position) const
@@ -381,8 +393,10 @@ int TimelineView::preferredHeight() const
         return baseHeight;
     }
 
-    const auto trackCount = static_cast<int>(m_trackSpans.size());
-    return std::max(baseHeight, verticalPadding + trackCount * rowHeight + std::max(0, trackCount - 1) * rowGap + 16);
+    const auto trackLaneCount = laneCount();
+    return std::max(
+        baseHeight,
+        verticalPadding + trackLaneCount * rowHeight + std::max(0, trackLaneCount - 1) * rowGap + 16);
 }
 
 void TimelineView::updatePreferredHeight()

@@ -26,7 +26,8 @@ public:
     bool remove(const QString& filePath);
     [[nodiscard]] std::vector<AudioPoolItem> items(
         const std::vector<TrackPoint>& tracks,
-        const AudioEngine& audioEngine) const;
+        const AudioEngine& audioEngine,
+        const QString& previewAssetPath = {}) const;
 
 private:
     std::vector<QString> m_assetPaths;

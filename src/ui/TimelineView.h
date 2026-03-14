@@ -17,6 +17,7 @@ struct TimelineTrackSpan
     QColor color;
     int startFrame = 0;
     int endFrame = 0;
+    int laneIndex = 0;
     bool isSelected = false;
 };
 
@@ -68,6 +69,7 @@ private:
     [[nodiscard]] QRectF timelineRect() const;
     [[nodiscard]] int frameForPosition(double x) const;
     [[nodiscard]] double xForFrame(int frameIndex) const;
+    [[nodiscard]] int laneCount() const;
     [[nodiscard]] int preferredHeight() const;
     void updatePreferredHeight();
     void requestFrame(int frameIndex);

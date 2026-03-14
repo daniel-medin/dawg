@@ -65,6 +65,7 @@ PlayerController::PlayerController(QObject* parent)
 
 bool PlayerController::openVideo(const QString& filePath)
 {
+    stopAudioPoolPreview();
     pause(false);
     m_audioEngine->stopTrack(m_embeddedVideoAudioTrackId);
     m_videoPlayback.setPresentationScale(1.0);
@@ -143,6 +144,42 @@ bool PlayerController::importAudioToPool(const QString& filePath)
     }
 
     return true;
+}
+
+bool PlayerController::startAudioPoolPreview(const QString& filePath)
+{
+    if (filePath.isEmpty())
+    {
+        return false;
+    }
+
+    const auto wasPreviewing = m_audioEngine->isTrackPlaying(m_audioPoolPreviewTrackId);
+    const auto previousAssetPath = m_audioPoolPreviewAssetPath;
+    if (!m_audioEngine->playTrack(m_audioPoolPreviewTrackId, filePath))
+    {
+        return false;
+    }
+
+    m_audioPoolPreviewAssetPath = filePath;
+    if (!wasPreviewing || previousAssetPath != filePath)
+    {
+        emit audioPoolPlaybackStateChanged();
+    }
+    return true;
+}
+
+void PlayerController::stopAudioPoolPreview()
+{
+    const auto wasPreviewing = m_audioEngine->isTrackPlaying(m_audioPoolPreviewTrackId);
+    m_audioEngine->stopTrack(m_audioPoolPreviewTrackId);
+    if (wasPreviewing || !m_audioPoolPreviewAssetPath.isEmpty())
+    {
+        m_audioPoolPreviewAssetPath.clear();
+        emit audioPoolPlaybackStateChanged();
+        return;
+    }
+
+    m_audioPoolPreviewAssetPath.clear();
 }
 
 void PlayerController::goToStart()
@@ -1474,6 +1511,11 @@ bool PlayerController::removeAudioFromPool(const QString& filePath)
         return false;
     }
 
+    if (m_audioPoolPreviewAssetPath == filePath)
+    {
+        stopAudioPoolPreview();
+    }
+
     const auto detachedCount = m_tracker.detachTrackAudioByPath(filePath);
     m_audioEngine->stopAll();
     if (m_transport.isPlaying())
@@ -1494,6 +1536,11 @@ bool PlayerController::removeAudioAndConnectedNodesFromPool(const QString& fileP
     if (!m_audioPool.remove(filePath))
     {
         return false;
+    }
+
+    if (m_audioPoolPreviewAssetPath == filePath)
+    {
+        stopAudioPoolPreview();
     }
 
     std::vector<QUuid> trackIdsToRemove;
@@ -1538,29 +1585,113 @@ bool PlayerController::removeAudioAndConnectedNodesFromPool(const QString& fileP
 
 std::vector<AudioPoolItem> PlayerController::audioPoolItems() const
 {
-    return m_audioPool.items(m_tracker.tracks(), *m_audioEngine);
+    const auto previewAssetPath = m_audioEngine->isTrackPlaying(m_audioPoolPreviewTrackId)
+        ? m_audioPoolPreviewAssetPath
+        : QString{};
+    return m_audioPool.items(m_tracker.tracks(), *m_audioEngine, previewAssetPath);
 }
 
 std::vector<TimelineTrackSpan> PlayerController::timelineTrackSpans() const
 {
-    std::vector<TimelineTrackSpan> trackSpans;
-    trackSpans.reserve(m_tracker.tracks().size());
+    struct TimelineTrackCandidate
+    {
+        const TrackPoint* track = nullptr;
+        int startFrame = 0;
+        int endFrame = 0;
+    };
+
+    std::vector<TimelineTrackCandidate> candidates;
+    candidates.reserve(m_tracker.tracks().size());
 
     for (const auto& track : m_tracker.tracks())
     {
-        trackSpans.push_back(TimelineTrackSpan{
-            .id = track.id,
-            .label = track.label,
-            .color = track.color,
-            .startFrame = track.startFrame > 0 ? track.startFrame : 0,
-            .endFrame = track.endFrame.has_value()
-                ? (*track.endFrame > track.startFrame ? *track.endFrame : track.startFrame)
-                : ((m_totalFrames > 0 ? m_totalFrames - 1 : track.startFrame) > track.startFrame
-                    ? (m_totalFrames > 0 ? m_totalFrames - 1 : track.startFrame)
-                    : track.startFrame),
-            .isSelected = isTrackSelected(track.id)
+        const auto startFrame = std::max(0, track.startFrame);
+        const auto endFrame = track.endFrame.has_value()
+            ? std::max(startFrame, *track.endFrame)
+            : std::max(startFrame, m_totalFrames > 0 ? (m_totalFrames - 1) : track.startFrame);
+
+        candidates.push_back(TimelineTrackCandidate{
+            .track = &track,
+            .startFrame = startFrame,
+            .endFrame = endFrame
         });
     }
+
+    std::stable_sort(
+        candidates.begin(),
+        candidates.end(),
+        [](const TimelineTrackCandidate& left, const TimelineTrackCandidate& right)
+        {
+            if (left.startFrame != right.startFrame)
+            {
+                return left.startFrame < right.startFrame;
+            }
+
+            if (left.endFrame != right.endFrame)
+            {
+                return left.endFrame < right.endFrame;
+            }
+
+            return left.track && right.track && left.track->label < right.track->label;
+        });
+
+    std::vector<TimelineTrackSpan> trackSpans;
+    trackSpans.reserve(candidates.size());
+    std::vector<int> laneEndFrames;
+
+    for (const auto& candidate : candidates)
+    {
+        int laneIndex = 0;
+        for (; laneIndex < static_cast<int>(laneEndFrames.size()); ++laneIndex)
+        {
+            if (candidate.startFrame > laneEndFrames[static_cast<std::size_t>(laneIndex)])
+            {
+                break;
+            }
+        }
+
+        if (laneIndex == static_cast<int>(laneEndFrames.size()))
+        {
+            laneEndFrames.push_back(candidate.endFrame);
+        }
+        else
+        {
+            laneEndFrames[static_cast<std::size_t>(laneIndex)] = candidate.endFrame;
+        }
+
+        trackSpans.push_back(TimelineTrackSpan{
+            .id = candidate.track->id,
+            .label = candidate.track->label,
+            .color = candidate.track->color,
+            .startFrame = candidate.startFrame,
+            .endFrame = candidate.endFrame,
+            .laneIndex = laneIndex,
+            .isSelected = isTrackSelected(candidate.track->id)
+        });
+    }
+
+    std::stable_sort(
+        trackSpans.begin(),
+        trackSpans.end(),
+        [](const TimelineTrackSpan& left, const TimelineTrackSpan& right)
+        {
+            if (left.laneIndex != right.laneIndex)
+            {
+                return left.laneIndex < right.laneIndex;
+            }
+
+            if (left.startFrame != right.startFrame)
+            {
+                return left.startFrame < right.startFrame;
+            }
+
+            if (left.endFrame != right.endFrame)
+            {
+                return left.endFrame < right.endFrame;
+            }
+
+            return left.label < right.label;
+        });
 
     return trackSpans;
 }

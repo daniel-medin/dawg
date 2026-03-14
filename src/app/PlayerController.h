@@ -76,6 +76,8 @@ public:
     void setInsertionFollowsPlayback(bool enabled);
     void setMotionTrackingEnabled(bool enabled);
     void selectNextVisibleTrack();
+    bool startAudioPoolPreview(const QString& filePath);
+    void stopAudioPoolPreview();
 
     [[nodiscard]] bool hasVideoLoaded() const;
     [[nodiscard]] bool isPlaying() const;
@@ -125,6 +127,7 @@ signals:
     void selectionChanged(bool hasSelection);
     void trackAvailabilityChanged(bool hasTracks);
     void audioPoolChanged();
+    void audioPoolPlaybackStateChanged();
     void editStateChanged();
     void statusChanged(const QString& message);
 
@@ -182,4 +185,6 @@ private:
     PerformanceLogger m_perfLogger;
     std::uint64_t m_lastLoggedQueueStarvationCount = 0;
     const QUuid m_embeddedVideoAudioTrackId = QUuid(QStringLiteral("{eb6fc60f-0781-433f-9f03-ff16531165f7}"));
+    const QUuid m_audioPoolPreviewTrackId = QUuid(QStringLiteral("{8d6166c4-b107-4c55-8f11-f9cbf67d0e0a}"));
+    QString m_audioPoolPreviewAssetPath;
 };

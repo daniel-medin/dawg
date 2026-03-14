@@ -1,11 +1,14 @@
 #include "app/MainWindow.h"
 
 #include <algorithm>
+#include <functional>
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QCursor>
 #include <QDir>
 #include <QDrag>
+#include <QEnterEvent>
 #include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -18,6 +21,9 @@
 #include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
 #include <QScrollArea>
 #include <QScreen>
 #include <QSizePolicy>
@@ -169,23 +175,112 @@ QString currentProcessorUsageText()
     return QStringLiteral("CPU --");
 }
 
+QCursor audioPoolPreviewCursor()
+{
+    static const QCursor cursor = []()
+    {
+        QPixmap pixmap(20, 20);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+
+        QPainterPath triangle;
+        triangle.moveTo(6.0, 4.0);
+        triangle.lineTo(16.0, 10.0);
+        triangle.lineTo(6.0, 16.0);
+        triangle.closeSubpath();
+
+        painter.fillPath(triangle, Qt::white);
+        return QCursor(pixmap, 10, 10);
+    }();
+    return cursor;
+}
+
 class AudioPoolRow final : public QWidget
 {
 public:
-    explicit AudioPoolRow(const QString& assetPath, QWidget* parent = nullptr)
+    explicit AudioPoolRow(
+        const QString& assetPath,
+        std::function<bool(const QString&)> startPreview,
+        std::function<void()> stopPreview,
+        QWidget* parent = nullptr)
         : QWidget(parent)
         , m_assetPath(assetPath)
+        , m_startPreview(std::move(startPreview))
+        , m_stopPreview(std::move(stopPreview))
     {
         setCursor(Qt::OpenHandCursor);
         setMouseTracking(true);
+        qApp->installEventFilter(this);
+    }
+
+    ~AudioPoolRow() override
+    {
+        qApp->removeEventFilter(this);
+        stopPreviewIfNeeded();
     }
 
 protected:
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        Q_UNUSED(watched);
+
+        switch (event->type())
+        {
+        case QEvent::KeyPress:
+        case QEvent::KeyRelease:
+            updateCursorState();
+            break;
+        case QEvent::MouseButtonRelease:
+            if (m_previewHeld)
+            {
+                auto* mouseEvent = static_cast<QMouseEvent*>(event);
+                if (mouseEvent->button() == Qt::LeftButton)
+                {
+                    stopPreviewIfNeeded();
+                    updateCursorState();
+                }
+            }
+            break;
+        default:
+            break;
+        }
+
+        return QWidget::eventFilter(watched, event);
+    }
+
+    void enterEvent(QEnterEvent* event) override
+    {
+        m_hovered = true;
+        updateCursorState();
+        QWidget::enterEvent(event);
+    }
+
+    void leaveEvent(QEvent* event) override
+    {
+        m_hovered = false;
+        updateCursorState();
+        QWidget::leaveEvent(event);
+    }
+
     void mousePressEvent(QMouseEvent* event) override
     {
         if (event->button() == Qt::LeftButton)
         {
             m_dragStartPosition = event->position().toPoint();
+
+            if (previewModifierActive(event->modifiers()))
+            {
+                if (m_startPreview)
+                {
+                    m_previewHeld = m_startPreview(m_assetPath);
+                }
+                updateCursorState();
+                event->accept();
+                return;
+            }
+
             setCursor(Qt::ClosedHandCursor);
         }
 
@@ -194,9 +289,22 @@ protected:
 
     void mouseMoveEvent(QMouseEvent* event) override
     {
+        if (m_previewHeld)
+        {
+            event->accept();
+            return;
+        }
+
         if (!(event->buttons() & Qt::LeftButton))
         {
+            updateCursorState();
             QWidget::mouseMoveEvent(event);
+            return;
+        }
+
+        if (previewModifierActive(event->modifiers()))
+        {
+            event->accept();
             return;
         }
 
@@ -214,18 +322,66 @@ protected:
         auto* drag = new QDrag(this);
         drag->setMimeData(mimeData);
         drag->exec(Qt::CopyAction, Qt::CopyAction);
-        setCursor(Qt::OpenHandCursor);
+        updateCursorState();
     }
 
     void mouseReleaseEvent(QMouseEvent* event) override
     {
-        setCursor(Qt::OpenHandCursor);
+        if (event->button() == Qt::LeftButton && m_previewHeld)
+        {
+            stopPreviewIfNeeded();
+            updateCursorState();
+            event->accept();
+            return;
+        }
+
+        updateCursorState();
         QWidget::mouseReleaseEvent(event);
     }
 
 private:
+    [[nodiscard]] bool previewModifierActive(const Qt::KeyboardModifiers modifiers) const
+    {
+        return modifiers & Qt::ControlModifier;
+    }
+
+    void stopPreviewIfNeeded()
+    {
+        if (!m_previewHeld)
+        {
+            return;
+        }
+
+        m_previewHeld = false;
+        if (m_stopPreview)
+        {
+            m_stopPreview();
+        }
+    }
+
+    void updateCursorState()
+    {
+        if (m_previewHeld || (m_hovered && previewModifierActive(QGuiApplication::keyboardModifiers())))
+        {
+            setCursor(audioPoolPreviewCursor());
+            return;
+        }
+
+        if (QApplication::mouseButtons() & Qt::LeftButton)
+        {
+            setCursor(Qt::ClosedHandCursor);
+            return;
+        }
+
+        setCursor(Qt::OpenHandCursor);
+    }
+
     QString m_assetPath;
+    std::function<bool(const QString&)> m_startPreview;
+    std::function<void()> m_stopPreview;
     QPoint m_dragStartPosition;
+    bool m_hovered = false;
+    bool m_previewHeld = false;
 };
 }
 
@@ -419,6 +575,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_controller, &PlayerController::trackAvailabilityChanged, this, &MainWindow::updateTrackAvailabilityState);
     connect(m_controller, &PlayerController::editStateChanged, this, &MainWindow::updateEditActionState);
     connect(m_controller, &PlayerController::audioPoolChanged, this, &MainWindow::refreshAudioPool);
+    connect(m_controller, &PlayerController::audioPoolPlaybackStateChanged, this, &MainWindow::updateAudioPoolPlaybackIndicators);
     connect(m_controller, &PlayerController::videoLoaded, this, &MainWindow::handleVideoLoaded);
     connect(m_controller, &PlayerController::videoAudioStateChanged, this, &MainWindow::updateVideoAudioRow);
     connect(m_controller, &PlayerController::statusChanged, this, &MainWindow::showStatus);
@@ -1015,7 +1172,17 @@ void MainWindow::refreshAudioPool()
 
     for (const auto& item : items)
     {
-        auto* row = new AudioPoolRow(item.assetPath, m_audioPoolListContainer);
+        auto* row = new AudioPoolRow(
+            item.assetPath,
+            [this](const QString& assetPath)
+            {
+                return m_controller->startAudioPoolPreview(assetPath);
+            },
+            [this]()
+            {
+                m_controller->stopAudioPoolPreview();
+            },
+            m_audioPoolListContainer);
         row->setProperty("audioPoolItemKey", item.key);
         row->setProperty("assetPath", item.assetPath);
         row->setToolTip(item.connectionSummary);
