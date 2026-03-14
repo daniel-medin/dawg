@@ -554,6 +554,14 @@ bool PlayerController::setSelectedTrackClipRangeMs(const int clipStartMs, const 
     const auto clampedClipEndMs = std::clamp(clipEndMs, clampedClipStartMs + 1, *sourceDurationMs);
     const auto currentClipStartMs = audioClipStartMs(*trackIt->attachedAudio);
     const auto currentClipEndMs = audioClipEndMs(*trackIt->attachedAudio, *sourceDurationMs);
+    const auto previewWasPlaying =
+        m_clipEditorPreviewSourceTrackId == m_selectedTrackId
+        && m_audioEngine->isTrackPlaying(m_clipEditorPreviewTrackId);
+    const auto playheadBeforeChange =
+        previewWasPlaying
+            ? currentSelectedTrackClipPreviewPlayheadMs().value_or(
+                m_clipEditorPlayheadMsByTrack.value(m_selectedTrackId, currentClipStartMs))
+            : m_clipEditorPlayheadMsByTrack.value(m_selectedTrackId, currentClipStartMs);
     if (clampedClipStartMs == currentClipStartMs && clampedClipEndMs == currentClipEndMs)
     {
         return false;
@@ -579,7 +587,18 @@ bool PlayerController::setSelectedTrackClipRangeMs(const int clipStartMs, const 
         }
     }
 
-    stopSelectedTrackClipPreview();
+    const auto clampedPlayheadMs = std::clamp(
+        playheadBeforeChange,
+        clampedClipStartMs,
+        std::max(clampedClipStartMs, clampedClipEndMs - 1));
+    if (previewWasPlaying)
+    {
+        static_cast<void>(setSelectedTrackClipPlayheadMs(clampedPlayheadMs));
+    }
+    else
+    {
+        m_clipEditorPlayheadMsByTrack.insert(m_selectedTrackId, clampedPlayheadMs);
+    }
     refreshOverlays();
     emit editStateChanged();
 
