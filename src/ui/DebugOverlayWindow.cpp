@@ -18,6 +18,38 @@ DebugOverlayWindow::DebugOverlayWindow(QWidget* parent)
     setAutoFillBackground(true);
     setFixedWidth(300);
     setMinimumHeight(120);
+    setStyleSheet(QStringLiteral(
+        "QFrame#debugOverlay {"
+        "  background: transparent;"
+        "  border: none;"
+        "}"
+        "QWidget#debugOverlayTitleBar {"
+        "  background: rgba(17, 24, 33, 80);"
+        "  border: 1px solid #253142;"
+        "  border-radius: 8px;"
+        "}"
+        "QLabel#debugOverlayTitle {"
+        "  color: #f3f5f7;"
+        "  font-weight: 600;"
+        "}"
+        "QLabel#debugOverlayText {"
+        "  color: #d8dde4;"
+        "  font-size: 9pt;"
+        "  padding: 10px;"
+        "  background: rgba(11, 15, 20, 80);"
+        "  border: 1px solid #253142;"
+        "  border-radius: 8px;"
+        "}"
+        "QPushButton#debugOverlayCloseButton {"
+        "  background: #18202b;"
+        "  color: #ecf1f6;"
+        "  border: 1px solid #324155;"
+        "  border-radius: 4px;"
+        "  padding: 0px;"
+        "}"
+        "QPushButton#debugOverlayCloseButton:hover {"
+        "  background: #223146;"
+        "}"));
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 8, 8, 8);

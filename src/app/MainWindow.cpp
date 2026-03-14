@@ -659,22 +659,22 @@ void MainWindow::selectNextVisibleNode()
 
 void MainWindow::moveSelectedNodeUp()
 {
-    nudgeSelectedNode(QPointF{0.0, -4.0});
+    nudgeSelectedNode(QPointF{0.0, -8.0});
 }
 
 void MainWindow::moveSelectedNodeDown()
 {
-    nudgeSelectedNode(QPointF{0.0, 4.0});
+    nudgeSelectedNode(QPointF{0.0, 8.0});
 }
 
 void MainWindow::moveSelectedNodeLeft()
 {
-    nudgeSelectedNode(QPointF{-4.0, 0.0});
+    nudgeSelectedNode(QPointF{-8.0, 0.0});
 }
 
 void MainWindow::moveSelectedNodeRight()
 {
-    nudgeSelectedNode(QPointF{4.0, 0.0});
+    nudgeSelectedNode(QPointF{8.0, 0.0});
 }
 
 void MainWindow::updateFrame(const QImage& image, const int frameIndex, const double timestampSeconds)
@@ -1140,16 +1140,16 @@ void MainWindow::beginHeldNodeNudge(const int key)
     switch (key)
     {
     case Qt::Key_Up:
-        delta = QPointF{0.0, -4.0};
+        delta = QPointF{0.0, -8.0};
         break;
     case Qt::Key_Left:
-        delta = QPointF{-4.0, 0.0};
+        delta = QPointF{-8.0, 0.0};
         break;
     case Qt::Key_Down:
-        delta = QPointF{0.0, 4.0};
+        delta = QPointF{0.0, 8.0};
         break;
     case Qt::Key_Right:
-        delta = QPointF{4.0, 0.0};
+        delta = QPointF{8.0, 0.0};
         break;
     default:
         return;
