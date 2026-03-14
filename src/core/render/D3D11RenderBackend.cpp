@@ -5,7 +5,13 @@
 #include <cstring>
 #include <memory>
 
+#include <QCoreApplication>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QImage>
+#include <QTextStream>
 
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -116,6 +122,47 @@ void setQuadVertices(
         {right, bottom, 0.0F, 1.0F, 1.0F},
     }};
 }
+
+QString findRepositoryLogPath()
+{
+    QDir dir{QCoreApplication::applicationDirPath()};
+    while (dir.exists() && !dir.isRoot())
+    {
+        if (dir.exists(QStringLiteral(".git")))
+        {
+            return dir.absoluteFilePath(QStringLiteral(".watch-out.log"));
+        }
+
+        if (!dir.cdUp())
+        {
+            break;
+        }
+    }
+
+    return QDir::current().absoluteFilePath(QStringLiteral(".watch-out.log"));
+}
+
+void logD3dEvent(const QString& category, const QString& message)
+{
+    QFile file(findRepositoryLogPath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    {
+        return;
+    }
+
+    QTextStream stream(&file);
+    stream << QDateTime::currentDateTime().toString(Qt::ISODateWithMs)
+           << " [" << category << "] "
+           << message
+           << '\n';
+}
+
+QString hresultToString(const HRESULT result)
+{
+    return QStringLiteral("0x%1")
+        .arg(static_cast<quint32>(result), 8, 16, QLatin1Char('0'))
+        .toUpper();
+}
 #endif
 }
 
@@ -137,6 +184,8 @@ struct D3D11RenderBackend::Impl
     TextureResource overlayTexture;
     HWND hwnd = nullptr;
     QSize swapChainSize;
+    QString lastDiagnostic;
+    int successfulPresentCount = 0;
 
     ~Impl()
     {
@@ -152,6 +201,18 @@ struct D3D11RenderBackend::Impl
         releaseTyped(vertexShader);
         releaseTyped(deviceContext);
         releaseTyped(device);
+    }
+
+    void logDiagnostic(const QString& category, const QString& message, const bool force = false)
+    {
+        const auto diagnostic = category + QLatin1Char('|') + message;
+        if (!force && diagnostic == lastDiagnostic)
+        {
+            return;
+        }
+
+        lastDiagnostic = diagnostic;
+        logD3dEvent(category, message);
     }
 
     bool initializeDevice()
@@ -178,7 +239,21 @@ struct D3D11RenderBackend::Impl
             &device,
             &featureLevel,
             &deviceContext);
-        return SUCCEEDED(result) && device && deviceContext;
+        if (FAILED(result) || !device || !deviceContext)
+        {
+            logDiagnostic(
+                QStringLiteral("d3d_init_fail"),
+                QStringLiteral("createDevice hr=%1").arg(hresultToString(result)),
+                true);
+            return false;
+        }
+
+        logDiagnostic(
+            QStringLiteral("d3d_init_ok"),
+            QStringLiteral("featureLevel=0x%1")
+                .arg(static_cast<quint32>(featureLevel), 0, 16)
+                .toUpper());
+        return true;
     }
 
     void releaseSwapChainResources()
@@ -342,8 +417,16 @@ struct D3D11RenderBackend::Impl
 
     bool ensureSwapChain(HWND targetWindow, const QSize& size)
     {
-        if (!ensurePipeline() || !targetWindow || !size.isValid())
+        const auto pipelineReady = ensurePipeline();
+        if (!pipelineReady || !targetWindow || !size.isValid())
         {
+            logDiagnostic(
+                QStringLiteral("d3d_swapchain_skip"),
+                QStringLiteral("pipeline=%1 hwnd=%2 size=%3x%4")
+                    .arg(pipelineReady ? QStringLiteral("ok") : QStringLiteral("fail"))
+                    .arg(targetWindow != nullptr ? QStringLiteral("yes") : QStringLiteral("no"))
+                    .arg(size.width())
+                    .arg(size.height()));
             return false;
         }
 
@@ -362,6 +445,10 @@ struct D3D11RenderBackend::Impl
                     DXGI_FORMAT_B8G8R8A8_UNORM,
                     0)))
             {
+                logDiagnostic(
+                    QStringLiteral("d3d_resize_fail"),
+                    QStringLiteral("size=%1x%2").arg(size.width()).arg(size.height()),
+                    true);
                 releaseSwapChainResources();
                 return false;
             }
@@ -377,6 +464,7 @@ struct D3D11RenderBackend::Impl
         IDXGIFactory* factory = nullptr;
         if (FAILED(device->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void**>(&dxgiDevice))))
         {
+            logDiagnostic(QStringLiteral("d3d_swapchain_fail"), QStringLiteral("QueryInterface IDXGIDevice failed"), true);
             return false;
         }
 
@@ -390,6 +478,7 @@ struct D3D11RenderBackend::Impl
         if (FAILED(dxgiDevice->GetAdapter(&adapter))
             || FAILED(adapter->GetParent(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&factory))))
         {
+            logDiagnostic(QStringLiteral("d3d_swapchain_fail"), QStringLiteral("GetAdapter/GetParent failed"), true);
             releaseDxgi();
             return false;
         }
@@ -409,12 +498,26 @@ struct D3D11RenderBackend::Impl
         releaseDxgi();
         if (FAILED(result) || !swapChain)
         {
+            logDiagnostic(
+                QStringLiteral("d3d_swapchain_fail"),
+                QStringLiteral("CreateSwapChain hr=%1 size=%2x%3")
+                    .arg(hresultToString(result))
+                    .arg(size.width())
+                    .arg(size.height()),
+                true);
             releaseSwapChainResources();
             return false;
         }
 
         hwnd = targetWindow;
         swapChainSize = size;
+        logDiagnostic(
+            QStringLiteral("d3d_swapchain_ok"),
+            QStringLiteral("size=%1x%2 hwnd=0x%3")
+                .arg(size.width())
+                .arg(size.height())
+                .arg(reinterpret_cast<quintptr>(targetWindow), 0, 16)
+                .toUpper());
         return ensureRenderTargetView();
     }
 
@@ -434,13 +537,27 @@ struct D3D11RenderBackend::Impl
         const auto result = swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer));
         if (FAILED(result) || !backBuffer)
         {
+            logDiagnostic(
+                QStringLiteral("d3d_rtv_fail"),
+                QStringLiteral("GetBuffer hr=%1").arg(hresultToString(result)),
+                true);
             releaseTyped(backBuffer);
             return false;
         }
 
         const auto createResult = device->CreateRenderTargetView(backBuffer, nullptr, &renderTargetView);
         releaseTyped(backBuffer);
-        return SUCCEEDED(createResult) && renderTargetView;
+        if (FAILED(createResult) || !renderTargetView)
+        {
+            logDiagnostic(
+                QStringLiteral("d3d_rtv_fail"),
+                QStringLiteral("CreateRenderTargetView hr=%1").arg(hresultToString(createResult)),
+                true);
+            return false;
+        }
+
+        logDiagnostic(QStringLiteral("d3d_rtv_ok"), QStringLiteral("ready"));
+        return true;
     }
 
     bool ensureTexture(TextureResource& resource, const QSize& imageSize)
@@ -472,6 +589,10 @@ struct D3D11RenderBackend::Impl
 
         if (FAILED(device->CreateTexture2D(&description, nullptr, &resource.texture)))
         {
+            logDiagnostic(
+                QStringLiteral("d3d_texture_fail"),
+                QStringLiteral("CreateTexture2D size=%1x%2").arg(imageSize.width()).arg(imageSize.height()),
+                true);
             resource.reset();
             return false;
         }
@@ -482,6 +603,10 @@ struct D3D11RenderBackend::Impl
         srvDescription.Texture2D.MipLevels = 1;
         if (FAILED(device->CreateShaderResourceView(resource.texture, &srvDescription, &resource.shaderResourceView)))
         {
+            logDiagnostic(
+                QStringLiteral("d3d_texture_fail"),
+                QStringLiteral("CreateShaderResourceView size=%1x%2").arg(imageSize.width()).arg(imageSize.height()),
+                true);
             resource.reset();
             return false;
         }
@@ -501,6 +626,10 @@ struct D3D11RenderBackend::Impl
         D3D11_MAPPED_SUBRESOURCE mapped{};
         if (FAILED(deviceContext->Map(resource.texture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
         {
+            logDiagnostic(
+                QStringLiteral("d3d_upload_fail"),
+                QStringLiteral("Map texture size=%1x%2").arg(uploadImage.width()).arg(uploadImage.height()),
+                true);
             return false;
         }
 
@@ -526,6 +655,7 @@ struct D3D11RenderBackend::Impl
         D3D11_MAPPED_SUBRESOURCE mapped{};
         if (FAILED(deviceContext->Map(vertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
         {
+            logDiagnostic(QStringLiteral("d3d_vertex_fail"), QStringLiteral("Map vertex buffer failed"), true);
             return false;
         }
 
@@ -581,11 +711,27 @@ struct D3D11RenderBackend::Impl
     {
         if (!widget || !ensureSwapChain(reinterpret_cast<HWND>(widget->winId()), surfaceSize))
         {
+            logDiagnostic(
+                QStringLiteral("d3d_present_fail"),
+                QStringLiteral("precheck widget=%1 surface=%2x%3 frame=%4x%5")
+                    .arg(widget != nullptr ? QStringLiteral("yes") : QStringLiteral("no"))
+                    .arg(surfaceSize.width())
+                    .arg(surfaceSize.height())
+                    .arg(frame.cpuImage.width())
+                    .arg(frame.cpuImage.height()),
+                true);
             return false;
         }
 
         if (!uploadImage(videoTexture, frame.cpuImage))
         {
+            logDiagnostic(
+                QStringLiteral("d3d_present_fail"),
+                QStringLiteral("videoUpload frame=%1 size=%2x%3")
+                    .arg(frame.index)
+                    .arg(frame.cpuImage.width())
+                    .arg(frame.cpuImage.height()),
+                true);
             return false;
         }
 
@@ -594,6 +740,12 @@ struct D3D11RenderBackend::Impl
             : overlayImage;
         if (preparedOverlayImage.isNull() || !uploadImage(overlayTexture, preparedOverlayImage))
         {
+            logDiagnostic(
+                QStringLiteral("d3d_present_fail"),
+                QStringLiteral("overlayUpload size=%1x%2")
+                    .arg(preparedOverlayImage.width())
+                    .arg(preparedOverlayImage.height()),
+                true);
             return false;
         }
 
@@ -610,16 +762,46 @@ struct D3D11RenderBackend::Impl
 
         if (!drawTexturedQuad(videoTexture.shaderResourceView, targetRect, surfaceSize, false))
         {
+            logDiagnostic(QStringLiteral("d3d_present_fail"), QStringLiteral("draw video quad failed"), true);
             return false;
         }
 
         const QRectF fullRect{0.0, 0.0, static_cast<double>(surfaceSize.width()), static_cast<double>(surfaceSize.height())};
         if (!drawTexturedQuad(overlayTexture.shaderResourceView, fullRect, surfaceSize, true))
         {
+            logDiagnostic(QStringLiteral("d3d_present_fail"), QStringLiteral("draw overlay quad failed"), true);
             return false;
         }
 
-        return SUCCEEDED(swapChain->Present(1, 0));
+        const auto presentResult = swapChain->Present(1, 0);
+        if (FAILED(presentResult))
+        {
+            successfulPresentCount = 0;
+            logDiagnostic(
+                QStringLiteral("d3d_present_fail"),
+                QStringLiteral("Present hr=%1").arg(hresultToString(presentResult)),
+                true);
+            return false;
+        }
+
+        if (successfulPresentCount == 0 || (successfulPresentCount % 120) == 0)
+        {
+            logDiagnostic(
+                QStringLiteral("d3d_present_ok"),
+                QStringLiteral("frame=%1 surface=%2x%3 target=%4,%5 %6x%7 successCount=%8")
+                    .arg(frame.index)
+                    .arg(surfaceSize.width())
+                    .arg(surfaceSize.height())
+                    .arg(targetRect.x(), 0, 'f', 1)
+                    .arg(targetRect.y(), 0, 'f', 1)
+                    .arg(targetRect.width(), 0, 'f', 1)
+                    .arg(targetRect.height(), 0, 'f', 1)
+                    .arg(successfulPresentCount + 1),
+                true);
+        }
+
+        ++successfulPresentCount;
+        return true;
     }
 #endif
 };

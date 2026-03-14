@@ -60,12 +60,14 @@ public:
     void setFrame(const QImage& frame)
     {
         m_frame = frame;
+        scheduleNativeProbe();
         update();
     }
 
     void setVideoFrame(const VideoFrame& frame)
     {
         m_videoFrame = frame;
+        scheduleNativeProbe();
         update();
     }
 
@@ -77,12 +79,14 @@ public:
         }
 
         m_sourceFrameSize = sourceSize;
+        scheduleNativeProbe();
         update();
     }
 
     void setRenderService(RenderService* renderService)
     {
         m_renderService = renderService;
+        scheduleNativeProbe();
         update();
     }
 
@@ -117,6 +121,7 @@ protected:
         Q_UNUSED(event);
 
         const auto frameRect = imageRenderRect();
+        runNativeProbe(frameRect);
         QPainter painter(this);
         painter.fillRect(rect(), QColor{12, 14, 18});
         painter.fillRect(frameRect, QColor{24, 27, 32});
@@ -127,10 +132,32 @@ protected:
     }
 
 private:
+    void scheduleNativeProbe()
+    {
+        m_nativeProbePending = true;
+    }
+
+    void runNativeProbe(const QRectF& frameRect)
+    {
+        if (!m_nativeProbePending || !m_renderService || !m_renderService->canPresentToNativeWindow())
+        {
+            return;
+        }
+
+        m_nativeProbePending = false;
+        if (!m_videoFrame.isValid())
+        {
+            return;
+        }
+
+        m_renderService->presentToNativeWindow(this, size(), m_videoFrame, frameRect, QImage{});
+    }
+
     QImage m_frame;
     QSize m_sourceFrameSize;
     VideoFrame m_videoFrame;
     RenderService* m_renderService = nullptr;
+    bool m_nativeProbePending = true;
 };
 
 class VideoOverlayLayer final : public QWidget
