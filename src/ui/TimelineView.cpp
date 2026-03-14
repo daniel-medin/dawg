@@ -11,7 +11,7 @@ TimelineView::TimelineView(QWidget* parent)
     : QWidget(parent)
 {
     setMinimumHeight(84);
-    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
     updatePreferredHeight();
@@ -382,7 +382,7 @@ void TimelineView::updatePreferredHeight()
 {
     const auto height = preferredHeight();
     setMinimumHeight(height);
-    setMaximumHeight(height);
+    setMaximumHeight(QWIDGETSIZE_MAX);
     updateGeometry();
 }
 

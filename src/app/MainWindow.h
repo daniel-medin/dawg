@@ -112,6 +112,7 @@ private:
     QShortcut* m_selectAllShortcut = nullptr;
     QShortcut* m_nodeStartShortcut = nullptr;
     QShortcut* m_nodeEndShortcut = nullptr;
+    QShortcut* m_showTimelineShortcut = nullptr;
     QShortcut* m_trimNodeShortcut = nullptr;
     QShortcut* m_autoPanShortcut = nullptr;
     QShortcut* m_audioPoolShortcut = nullptr;

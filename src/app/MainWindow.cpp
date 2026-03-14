@@ -346,6 +346,7 @@ MainWindow::MainWindow(QWidget* parent)
         &QShortcut::activated,
         this,
         &MainWindow::handleNodeEndShortcut);
+    connect(m_showTimelineShortcut, &QShortcut::activated, m_showTimelineAction, &QAction::trigger);
     connect(m_trimNodeShortcut, &QShortcut::activated, this, &MainWindow::trimSelectedNodeToSound);
     connect(m_autoPanShortcut, &QShortcut::activated, this, &MainWindow::toggleSelectedNodeAutoPan);
     connect(m_audioPoolShortcut, &QShortcut::activated, m_audioPoolAction, &QAction::trigger);
@@ -994,7 +995,7 @@ void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalP
     QAction* autoPanAction = nullptr;
     if (hasAttachedAudio)
     {
-        trimAction = menu.addAction(QStringLiteral("Trim Node (T)"));
+        trimAction = menu.addAction(QStringLiteral("Trim Node (Shift+T)"));
     }
     if (includeSoundActions)
     {
@@ -1072,12 +1073,12 @@ void MainWindow::buildMenus()
 
     m_setNodeStartAction = new QAction(QStringLiteral("Set Start (A)"), this);
     m_setNodeEndAction = new QAction(QStringLiteral("Set End (S)"), this);
-    m_trimNodeAction = new QAction(QStringLiteral("Trim Node (T)"), this);
+    m_trimNodeAction = new QAction(QStringLiteral("Trim Node (Shift+T)"), this);
     m_autoPanAction = new QAction(QStringLiteral("Auto Pan (R)"), this);
     m_toggleNodeNameAction = new QAction(QStringLiteral("Toggle Node Name (E)"), this);
     m_showAllNodeNamesAction = new QAction(QStringLiteral("Node Name Always On"), this);
     m_importSoundAction = new QAction(QStringLiteral("Import Sound"), this);
-    m_showTimelineAction = new QAction(QStringLiteral("Show Timeline"), this);
+    m_showTimelineAction = new QAction(QStringLiteral("Show Timeline (T)"), this);
     m_timelineClickSeeksAction = new QAction(QStringLiteral("Click Seeks Playhead"), this);
     m_audioPoolAction = new QAction(QStringLiteral("Audio Pool (P)"), this);
     m_deleteNodeAction = new QAction(QStringLiteral("Delete (Backspace)"), this);
@@ -1181,7 +1182,8 @@ void MainWindow::buildUi()
     m_selectAllShortcut = new QShortcut(QKeySequence::SelectAll, this);
     m_nodeStartShortcut = new QShortcut(QKeySequence(Qt::Key_A), this);
     m_nodeEndShortcut = new QShortcut(QKeySequence(Qt::Key_S), this);
-    m_trimNodeShortcut = new QShortcut(QKeySequence(Qt::Key_T), this);
+    m_showTimelineShortcut = new QShortcut(QKeySequence(Qt::Key_T), this);
+    m_trimNodeShortcut = new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_T), this);
     m_autoPanShortcut = new QShortcut(QKeySequence(Qt::Key_R), this);
     m_audioPoolShortcut = new QShortcut(QKeySequence(Qt::Key_P), this);
     m_toggleNodeNameShortcut = new QShortcut(QKeySequence(Qt::Key_E), this);
@@ -1196,6 +1198,7 @@ void MainWindow::buildUi()
     m_selectAllShortcut->setContext(Qt::ApplicationShortcut);
     m_nodeStartShortcut->setContext(Qt::ApplicationShortcut);
     m_nodeEndShortcut->setContext(Qt::ApplicationShortcut);
+    m_showTimelineShortcut->setContext(Qt::ApplicationShortcut);
     m_trimNodeShortcut->setContext(Qt::ApplicationShortcut);
     m_autoPanShortcut->setContext(Qt::ApplicationShortcut);
     m_audioPoolShortcut->setContext(Qt::ApplicationShortcut);
@@ -1321,9 +1324,10 @@ void MainWindow::buildUi()
 
     setCentralWidget(root);
 
-    auto* debugOverlay = new DebugOverlayWindow(this);
+    auto* debugOverlay = new DebugOverlayWindow(root);
     m_debugOverlay = debugOverlay;
-    m_debugOverlay->move(16, menuBar()->height() + 16);
+    m_debugOverlay->move(16, 16);
+    m_debugOverlay->setVisible(m_debugVisible);
     m_debugOverlay->raise();
     connect(debugOverlay, &DebugOverlayWindow::closeRequested, this, [this]()
     {

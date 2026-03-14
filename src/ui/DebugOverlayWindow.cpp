@@ -15,6 +15,7 @@ DebugOverlayWindow::DebugOverlayWindow(QWidget* parent)
     setAttribute(Qt::WA_ShowWithoutActivating);
     setAutoFillBackground(true);
     setFixedWidth(300);
+    setMinimumHeight(120);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -54,6 +55,7 @@ void DebugOverlayWindow::setListText(const QString& text)
     if (m_textLabel)
     {
         m_textLabel->setText(text);
+        adjustSize();
     }
 }
 
