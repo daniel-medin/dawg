@@ -19,6 +19,9 @@ namespace
 constexpr int kMixFaderMinValue = -1000;
 constexpr int kMixFaderMaxValue = 120;
 constexpr float kMixSilentGainDb = static_cast<float>(kMixFaderMinValue) / 10.0F;
+constexpr float kMeterFloorDb = -60.0F;
+constexpr float kMeterYellowThresholdDb = -18.0F;
+constexpr float kMeterOrangeThresholdDb = -6.0F;
 
 float sliderValueToGainDb(const int sliderValue)
 {
@@ -43,6 +46,46 @@ QString gainLabelText(const float gainDb)
     }
 
     return QStringLiteral("%1 dB").arg(gainDb, 0, 'f', 1);
+}
+
+float meterLevelToDb(const float level)
+{
+    if (level <= 0.0F)
+    {
+        return kMeterFloorDb;
+    }
+
+    return std::clamp(20.0F * std::log10(level), kMeterFloorDb, 0.0F);
+}
+
+int meterValueForLevel(const float level)
+{
+    const auto meterDb = meterLevelToDb(level);
+    const auto normalized = (meterDb - kMeterFloorDb) / std::abs(kMeterFloorDb);
+    return static_cast<int>(std::lround(std::clamp(normalized, 0.0F, 1.0F) * 1000.0F));
+}
+
+QString meterStyleSheet()
+{
+    const auto yellowStop = (kMeterYellowThresholdDb - kMeterFloorDb) / std::abs(kMeterFloorDb);
+    const auto orangeStop = (kMeterOrangeThresholdDb - kMeterFloorDb) / std::abs(kMeterFloorDb);
+
+    return QStringLiteral(
+        "QProgressBar {"
+        "  background: #0b1016;"
+        "  border: 1px solid #1d2733;"
+        "  border-radius: 4px;"
+        "}"
+        "QProgressBar::chunk {"
+        "  background: qlineargradient(x1:0, y1:1, x2:0, y2:0,"
+        "    stop:0 #2fe06d,"
+        "    stop:%1 #2fe06d,"
+        "    stop:%2 #ffb33b,"
+        "    stop:1 #ff5b4d);"
+        "  border-radius: 3px;"
+        "}")
+        .arg(yellowStop, 0, 'f', 3)
+        .arg(orangeStop, 0, 'f', 3);
 }
 
 void applyMixButtonStyle(QToolButton* button, const bool checked, const bool soloButton, const bool enabled)
@@ -214,6 +257,11 @@ public:
         detailLabel->setWordWrap(true);
         contentLayout->addWidget(detailLabel);
 
+        auto* faderRow = new QHBoxLayout();
+        faderRow->setContentsMargins(0, 0, 0, 0);
+        faderRow->setSpacing(8);
+        faderRow->addStretch(1);
+
         m_slider = new MixFaderSlider(this);
         m_slider->setRange(kMixFaderMinValue, kMixFaderMaxValue);
         m_slider->setValue(gainDbToSliderValue(gainDb));
@@ -226,7 +274,7 @@ public:
             "QSlider::sub-page:vertical { background: #11161d; border-radius: 3px; }"
             "QSlider::add-page:vertical { background: #2d3948; border-radius: 3px; }"
             "QSlider::handle:vertical { background: #f2f5f8; border: 1px solid #3e4d61; height: 16px; margin: -3px -7px; border-radius: 7px; }"));
-        contentLayout->addWidget(m_slider, 1, Qt::AlignHCenter);
+        faderRow->addWidget(m_slider, 0);
 
         m_meter = new QProgressBar(this);
         m_meter->setRange(0, 1000);
@@ -235,22 +283,12 @@ public:
         m_meter->setOrientation(Qt::Vertical);
         m_meter->setFixedWidth(12);
         m_meter->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-        m_meter->setStyleSheet(QStringLiteral(
-            "QProgressBar {"
-            "  background: #0b1016;"
-            "  border: 1px solid #1d2733;"
-            "  border-radius: 4px;"
-            "}"
-            "QProgressBar::chunk {"
-            "  background: qlineargradient(x1:0, y1:1, x2:0, y2:0,"
-            "    stop:0 #2fe06d,"
-            "    stop:0.72 #95ef36,"
-            "    stop:0.88 #ffb33b,"
-            "    stop:1 #ff5b4d);"
-            "  border-radius: 3px;"
-            "}"));
+        m_meter->setStyleSheet(meterStyleSheet());
+        faderRow->addWidget(m_meter, 0);
+        faderRow->addStretch(1);
+
         layout->addLayout(contentLayout, 1);
-        layout->addWidget(m_meter, 0);
+        contentLayout->addLayout(faderRow, 1);
 
         m_gainLabel = new QLabel(gainLabelText(gainDb), this);
         m_gainLabel->setAlignment(Qt::AlignCenter);
@@ -354,7 +392,7 @@ public:
             return;
         }
 
-        m_meter->setValue(static_cast<int>(std::lround(std::clamp(level, 0.0F, 1.0F) * 1000.0F)));
+        m_meter->setValue(meterValueForLevel(level));
     }
 
     [[nodiscard]] QProgressBar* meter() const
@@ -406,7 +444,7 @@ void MixView::setMeterLevels(const float masterMeterLevel, const std::vector<Mix
 {
     if (m_masterMeter)
     {
-        m_masterMeter->setValue(static_cast<int>(std::lround(std::clamp(masterMeterLevel, 0.0F, 1.0F) * 1000.0F)));
+        m_masterMeter->setValue(meterValueForLevel(masterMeterLevel));
     }
 
     for (const auto& strip : laneStrips)
@@ -417,8 +455,7 @@ void MixView::setMeterLevels(const float masterMeterLevel, const std::vector<Mix
             continue;
         }
 
-        meterIt->second->setValue(
-            static_cast<int>(std::lround(std::clamp(strip.meterLevel, 0.0F, 1.0F) * 1000.0F)));
+        meterIt->second->setValue(meterValueForLevel(strip.meterLevel));
     }
 }
 

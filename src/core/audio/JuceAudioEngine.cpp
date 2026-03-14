@@ -139,11 +139,15 @@ public:
     void prepareToPlay(const int samplesPerBlockExpected, const double sampleRate) override
     {
         m_inputSource.prepareToPlay(samplesPerBlockExpected, sampleRate);
+        m_sampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+        m_smoothedMeanSquare = 0.0F;
+        m_level.store(0.0F);
     }
 
     void releaseResources() override
     {
         m_inputSource.releaseResources();
+        m_smoothedMeanSquare = 0.0F;
         m_level.store(0.0F);
     }
 
@@ -152,30 +156,38 @@ public:
         m_inputSource.getNextAudioBlock(bufferToFill);
 
         const auto* buffer = bufferToFill.buffer;
-        if (!buffer)
+        if (!buffer || bufferToFill.numSamples <= 0 || buffer->getNumChannels() <= 0)
         {
             m_level.store(0.0F);
             return;
         }
 
-        float peak = 0.0F;
+        double sumSquares = 0.0;
         for (int channel = 0; channel < buffer->getNumChannels(); ++channel)
         {
             const auto* channelData = buffer->getReadPointer(channel, bufferToFill.startSample);
             for (int sampleIndex = 0; sampleIndex < bufferToFill.numSamples; ++sampleIndex)
             {
-                peak = std::max(peak, std::abs(channelData[sampleIndex]));
+                const auto sample = static_cast<double>(channelData[sampleIndex]);
+                sumSquares += sample * sample;
             }
         }
 
-        const auto previous = m_level.load();
-        const auto smoothed = peak > previous ? peak : (previous * 0.90F);
-        m_level.store(std::clamp(smoothed, 0.0F, 1.0F));
+        const auto sampleCount = static_cast<double>(buffer->getNumChannels() * bufferToFill.numSamples);
+        const auto meanSquare = sampleCount > 0.0 ? static_cast<float>(sumSquares / sampleCount) : 0.0F;
+        const auto targetIsRising = meanSquare > m_smoothedMeanSquare;
+        const auto smoothingSeconds = targetIsRising ? 0.035 : 0.180;
+        const auto coefficient = static_cast<float>(std::exp(
+            -static_cast<double>(bufferToFill.numSamples) / (m_sampleRate * smoothingSeconds)));
+        m_smoothedMeanSquare = (m_smoothedMeanSquare * coefficient) + (meanSquare * (1.0F - coefficient));
+        m_level.store(std::clamp(std::sqrt(m_smoothedMeanSquare), 0.0F, 1.0F));
     }
 
 private:
     juce::AudioSource& m_inputSource;
     std::atomic<float> m_level{0.0F};
+    double m_sampleRate = 44100.0;
+    float m_smoothedMeanSquare = 0.0F;
 };
 }
 

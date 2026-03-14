@@ -54,6 +54,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
     void leaveEvent(QEvent* event) override;
 
 private:
@@ -85,6 +86,12 @@ private:
     [[nodiscard]] QRectF timelineRect() const;
     [[nodiscard]] QRectF loopBarRect() const;
     [[nodiscard]] QRectF trackAreaRect() const;
+    [[nodiscard]] double visibleFrameSpan() const;
+    [[nodiscard]] double visibleFrameSpanForZoom(double zoomScale) const;
+    [[nodiscard]] double maxZoomScale() const;
+    [[nodiscard]] int gridStepFrames() const;
+    void clampViewWindow();
+    void ensureFrameVisible(int frameIndex);
     [[nodiscard]] int frameForPosition(double x) const;
     [[nodiscard]] double xForFrame(int frameIndex) const;
     [[nodiscard]] int laneCount() const;
@@ -108,6 +115,7 @@ private:
     std::optional<int> m_loopEndFrame;
     std::optional<int> m_loopEditFrame;
     std::optional<int> m_hoveredLoopFrame;
+    std::optional<double> m_hoveredTimelineX;
     bool m_trimmingStart = false;
     LoopHandleDragMode m_loopHandleDragMode = LoopHandleDragMode::None;
     int m_dragAnchorFrame = 0;
@@ -115,6 +123,8 @@ private:
     int m_totalFrames = 0;
     int m_currentFrame = 0;
     double m_fps = 0.0;
+    double m_horizontalZoom = 1.0;
+    double m_viewStartFrame = 0.0;
     std::vector<TimelineTrackSpan> m_trackSpans;
     bool m_dragging = false;
     bool m_seekOnClickEnabled = true;

@@ -6,6 +6,25 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QToolTip>
+#include <QWheelEvent>
+
+namespace
+{
+constexpr double kMinVisibleFrameSpan = 12.0;
+constexpr double kZoomStepFactor = 1.2;
+
+double clampedVisibleFrameSpan(const int totalFrames, const double requestedSpan)
+{
+    const auto maxFrameIndex = std::max(0, totalFrames - 1);
+    const auto fullSpan = std::max(1.0, static_cast<double>(maxFrameIndex));
+    return std::clamp(requestedSpan, std::min(kMinVisibleFrameSpan, fullSpan), fullSpan);
+}
+
+int roundedFpsFrames(const double fps)
+{
+    return std::max(1, static_cast<int>(std::lround(fps > 0.0 ? fps : 30.0)));
+}
+}
 
 TimelineView::TimelineView(QWidget* parent)
     : QWidget(parent)
@@ -28,6 +47,7 @@ void TimelineView::clear()
     m_loopEndFrame.reset();
     m_loopEditFrame.reset();
     m_hoveredLoopFrame.reset();
+    m_hoveredTimelineX.reset();
     m_trimmingStart = false;
     m_loopHandleDragMode = LoopHandleDragMode::None;
     m_dragAnchorFrame = 0;
@@ -35,6 +55,8 @@ void TimelineView::clear()
     m_totalFrames = 0;
     m_currentFrame = 0;
     m_fps = 0.0;
+    m_horizontalZoom = 1.0;
+    m_viewStartFrame = 0.0;
     m_trackSpans.clear();
     m_dragging = false;
     m_lastRequestedFrame = -1;
@@ -49,12 +71,15 @@ void TimelineView::setTimeline(const int totalFrames, const double fps)
     m_totalFrames = std::max(0, totalFrames);
     m_fps = fps > 0.0 ? fps : 30.0;
     m_currentFrame = std::clamp(m_currentFrame, 0, std::max(0, m_totalFrames - 1));
+    m_horizontalZoom = 1.0;
+    m_viewStartFrame = 0.0;
     if (m_totalFrames <= 0)
     {
         m_loopStartFrame.reset();
         m_loopEndFrame.reset();
         m_loopEditFrame.reset();
         m_hoveredLoopFrame.reset();
+        m_hoveredTimelineX.reset();
     }
     else
     {
@@ -76,6 +101,7 @@ void TimelineView::setTimeline(const int totalFrames, const double fps)
             m_hoveredLoopFrame = std::clamp(*m_hoveredLoopFrame, 0, maxFrameIndex);
         }
     }
+    clampViewWindow();
     update();
 }
 
@@ -84,6 +110,7 @@ void TimelineView::setCurrentFrame(const int frameIndex)
     m_currentFrame = std::clamp(frameIndex, 0, std::max(0, m_totalFrames - 1));
     m_lastRequestedFrame = m_currentFrame;
     m_pendingRequestedFrame = -1;
+    ensureFrameVisible(m_currentFrame);
     update();
 }
 
@@ -161,6 +188,25 @@ void TimelineView::paintEvent(QPaintEvent* event)
         return;
     }
 
+    painter.save();
+    painter.setClipRect(QRectF{loopRect.left(), loopRect.top(), loopRect.width(), laneRect.bottom() - loopRect.top()});
+    {
+        const auto stepFrames = gridStepFrames();
+        const auto secondFrames = roundedFpsFrames(m_fps);
+        const auto visibleEndFrame = m_viewStartFrame + visibleFrameSpan();
+        const auto firstGridFrame =
+            std::max(0, (static_cast<int>(std::floor(m_viewStartFrame)) / stepFrames) * stepFrames);
+
+        for (int frame = firstGridFrame; frame <= static_cast<int>(std::ceil(visibleEndFrame)); frame += stepFrames)
+        {
+            const auto x = xForFrame(frame);
+            const auto isSecondMark = (frame % secondFrames) == 0;
+            painter.setPen(QPen(isSecondMark ? QColor{40, 44, 50} : QColor{26, 29, 34}, 1.0));
+            painter.drawLine(QPointF{x, loopRect.top()}, QPointF{x, laneRect.bottom()});
+        }
+    }
+    painter.restore();
+
     if (const auto loopGeometry = loopRangeGeometry(); loopGeometry.has_value())
     {
         if (loopGeometry->selectionRect.width() > 0.0)
@@ -216,6 +262,13 @@ void TimelineView::paintEvent(QPaintEvent* event)
         }
     }
 
+    if (m_hoveredTimelineX.has_value())
+    {
+        const auto hoverX = std::clamp(*m_hoveredTimelineX, loopRect.left(), loopRect.right());
+        painter.setPen(QPen(QColor{214, 220, 228, 132}, 1.0));
+        painter.drawLine(QPointF{hoverX, loopRect.top()}, QPointF{hoverX, laneRect.bottom()});
+    }
+
     const auto markerX = xForFrame(m_currentFrame);
     painter.setPen(QPen(QColor{225, 229, 234}, 2.0));
     painter.drawLine(QPointF{markerX, loopRect.top()}, QPointF{markerX, laneRect.bottom()});
@@ -253,6 +306,7 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
         m_dragging = false;
         m_loopEditFrame = frameForPosition(event->position().x());
         m_hoveredLoopFrame = m_loopEditFrame;
+        m_hoveredTimelineX = event->position().x();
         m_loopHandleDragMode = LoopHandleDragMode::None;
         if (const auto loopGeometry = loopRangeGeometry(); loopGeometry.has_value())
         {
@@ -285,6 +339,14 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
         update();
     }
     m_hoveredLoopFrame.reset();
+    if (trackAreaRect().contains(event->position()))
+    {
+        m_hoveredTimelineX = event->position().x();
+    }
+    else
+    {
+        m_hoveredTimelineX.reset();
+    }
 
     if (const auto track = trackAt(event->position()); track.has_value())
     {
@@ -341,13 +403,21 @@ void TimelineView::mouseMoveEvent(QMouseEvent* event)
     QWidget::mouseMoveEvent(event);
 
     std::optional<int> nextHoveredLoopFrame;
+    std::optional<double> nextHoveredTimelineX;
     if (loopBarRect().contains(event->position()))
     {
         nextHoveredLoopFrame = frameForPosition(event->position().x());
+        nextHoveredTimelineX = event->position().x();
     }
-    if (m_hoveredLoopFrame != nextHoveredLoopFrame)
+    else if (trackAreaRect().contains(event->position()))
+    {
+        nextHoveredTimelineX = event->position().x();
+    }
+    if (m_hoveredLoopFrame != nextHoveredLoopFrame
+        || m_hoveredTimelineX != nextHoveredTimelineX)
     {
         m_hoveredLoopFrame = nextHoveredLoopFrame;
+        m_hoveredTimelineX = nextHoveredTimelineX;
         update();
     }
 
@@ -423,13 +493,54 @@ void TimelineView::mouseReleaseEvent(QMouseEvent* event)
     }
 }
 
+void TimelineView::wheelEvent(QWheelEvent* event)
+{
+    if (m_totalFrames <= 1)
+    {
+        QWidget::wheelEvent(event);
+        return;
+    }
+
+    const auto deltaY = event->angleDelta().y();
+    if (deltaY == 0)
+    {
+        QWidget::wheelEvent(event);
+        return;
+    }
+
+    const auto anchorRect = loopBarRect();
+    const auto anchorRatio = std::clamp(
+        (event->position().x() - anchorRect.left()) / std::max(1.0, anchorRect.width()),
+        0.0,
+        1.0);
+    const auto anchorFrame = m_viewStartFrame + visibleFrameSpan() * anchorRatio;
+    const auto steps = static_cast<double>(deltaY) / 120.0;
+    const auto nextZoom = std::clamp(
+        m_horizontalZoom * std::pow(kZoomStepFactor, steps),
+        1.0,
+        maxZoomScale());
+    if (std::abs(nextZoom - m_horizontalZoom) < 0.001)
+    {
+        event->accept();
+        return;
+    }
+
+    m_horizontalZoom = nextZoom;
+    const auto nextSpan = visibleFrameSpan();
+    m_viewStartFrame = anchorFrame - nextSpan * anchorRatio;
+    clampViewWindow();
+    update();
+    event->accept();
+}
+
 void TimelineView::leaveEvent(QEvent* event)
 {
     QWidget::leaveEvent(event);
 
-    if (m_hoveredLoopFrame.has_value())
+    if (m_hoveredLoopFrame.has_value() || m_hoveredTimelineX.has_value())
     {
         m_hoveredLoopFrame.reset();
+        m_hoveredTimelineX.reset();
         update();
     }
 }
@@ -581,6 +692,102 @@ QRectF TimelineView::trackAreaRect() const
     };
 }
 
+double TimelineView::visibleFrameSpan() const
+{
+    return visibleFrameSpanForZoom(m_horizontalZoom);
+}
+
+double TimelineView::visibleFrameSpanForZoom(const double zoomScale) const
+{
+    if (m_totalFrames <= 1)
+    {
+        return 1.0;
+    }
+
+    const auto maxFrameIndex = std::max(1, m_totalFrames - 1);
+    const auto fullSpan = static_cast<double>(maxFrameIndex);
+    return clampedVisibleFrameSpan(m_totalFrames, fullSpan / std::max(1.0, zoomScale));
+}
+
+double TimelineView::maxZoomScale() const
+{
+    if (m_totalFrames <= 1)
+    {
+        return 1.0;
+    }
+
+    const auto maxFrameIndex = std::max(1, m_totalFrames - 1);
+    const auto fullSpan = static_cast<double>(maxFrameIndex);
+    return std::max(1.0, fullSpan / std::min(kMinVisibleFrameSpan, fullSpan));
+}
+
+int TimelineView::gridStepFrames() const
+{
+    const auto secondFrames = roundedFpsFrames(m_fps);
+    if (m_horizontalZoom <= 1.001)
+    {
+        return secondFrames;
+    }
+
+    const auto pixelsPerFrame = loopBarRect().width() / std::max(1.0, visibleFrameSpan());
+    if (pixelsPerFrame >= 10.0)
+    {
+        return 1;
+    }
+    if (pixelsPerFrame >= 5.0)
+    {
+        return std::max(1, secondFrames / 4);
+    }
+    if (pixelsPerFrame >= 2.5)
+    {
+        return std::max(1, secondFrames / 2);
+    }
+
+    return secondFrames;
+}
+
+void TimelineView::clampViewWindow()
+{
+    if (m_totalFrames <= 1)
+    {
+        m_viewStartFrame = 0.0;
+        m_horizontalZoom = 1.0;
+        return;
+    }
+
+    const auto maxFrameIndex = std::max(1, m_totalFrames - 1);
+    const auto visibleSpan = visibleFrameSpan();
+    const auto maxStart = std::max(0.0, static_cast<double>(maxFrameIndex) - visibleSpan);
+    m_viewStartFrame = std::clamp(m_viewStartFrame, 0.0, maxStart);
+}
+
+void TimelineView::ensureFrameVisible(const int frameIndex)
+{
+    if (m_totalFrames <= 1 || m_horizontalZoom <= 1.001)
+    {
+        clampViewWindow();
+        return;
+    }
+
+    const auto visibleSpan = visibleFrameSpan();
+    const auto leftMargin = std::max(1.0, visibleSpan * 0.15);
+    const auto rightMargin = std::max(1.0, visibleSpan * 0.15);
+    const auto frame = static_cast<double>(std::clamp(frameIndex, 0, std::max(0, m_totalFrames - 1)));
+    if (frame < m_viewStartFrame + leftMargin)
+    {
+        m_viewStartFrame = frame - leftMargin;
+        clampViewWindow();
+        return;
+    }
+
+    const auto visibleEnd = m_viewStartFrame + visibleSpan;
+    if (frame > visibleEnd - rightMargin)
+    {
+        m_viewStartFrame = frame - visibleSpan + rightMargin;
+        clampViewWindow();
+    }
+}
+
 int TimelineView::frameForPosition(const double x) const
 {
     if (m_totalFrames <= 1)
@@ -590,7 +797,7 @@ int TimelineView::frameForPosition(const double x) const
 
     const auto rect = loopBarRect();
     const auto ratio = std::clamp((x - rect.left()) / rect.width(), 0.0, 1.0);
-    return static_cast<int>(std::lround(ratio * static_cast<double>(m_totalFrames - 1)));
+    return static_cast<int>(std::lround(m_viewStartFrame + ratio * visibleFrameSpan()));
 }
 
 double TimelineView::xForFrame(const int frameIndex) const
@@ -601,7 +808,9 @@ double TimelineView::xForFrame(const int frameIndex) const
         return rect.left();
     }
 
-    const auto ratio = static_cast<double>(std::clamp(frameIndex, 0, m_totalFrames - 1)) / static_cast<double>(m_totalFrames - 1);
+    const auto ratio =
+        (static_cast<double>(std::clamp(frameIndex, 0, m_totalFrames - 1)) - m_viewStartFrame)
+        / std::max(1.0, visibleFrameSpan());
     return rect.left() + rect.width() * ratio;
 }
 

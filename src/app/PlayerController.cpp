@@ -317,7 +317,7 @@ void PlayerController::setMixLaneGainDb(const int laneIndex, const float gainDb)
 
     if (m_transport.isPlaying())
     {
-        syncAttachedAudioForCurrentFrame();
+        applyLiveMixStateToCurrentPlayback();
     }
 }
 
@@ -345,7 +345,7 @@ void PlayerController::setMixLaneMuted(const int laneIndex, const bool muted)
 
     if (m_transport.isPlaying())
     {
-        syncAttachedAudioForCurrentFrame();
+        applyLiveMixStateToCurrentPlayback();
     }
 }
 
@@ -373,7 +373,7 @@ void PlayerController::setMixLaneSoloed(const int laneIndex, const bool soloed)
 
     if (m_transport.isPlaying())
     {
-        syncAttachedAudioForCurrentFrame();
+        applyLiveMixStateToCurrentPlayback();
     }
 }
 
@@ -602,6 +602,14 @@ void PlayerController::seedTrack(const QPointF& imagePoint)
     }
 
     auto& track = m_tracker.seedTrack(m_currentFrame.index, imagePoint, m_motionTrackingEnabled);
+    const auto safeFps = m_fps > 0.0 ? m_fps : 30.0;
+    const auto placeholderFrameCount = std::max(1, static_cast<int>(std::lround(safeFps)));
+    const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
+    const auto defaultEndFrame = std::clamp(
+        track.startFrame + placeholderFrameCount - 1,
+        track.startFrame,
+        maxFrameIndex);
+    m_tracker.setTrackEndFrame(track.id, defaultEndFrame);
     setSelectedTrackId(track.id);
     refreshOverlays();
 
@@ -691,6 +699,21 @@ bool PlayerController::importSoundForSelectedTrack(const QString& filePath)
     {
         emit statusChanged(QStringLiteral("Failed to attach sound to the selected node."));
         return false;
+    }
+
+    const auto trackIt = std::find_if(
+        m_tracker.tracks().begin(),
+        m_tracker.tracks().end(),
+        [this](const TrackPoint& track)
+        {
+            return track.id == m_selectedTrackId;
+        });
+    if (trackIt != m_tracker.tracks().end())
+    {
+        if (const auto endFrame = trimmedEndFrameForTrack(*trackIt); endFrame.has_value())
+        {
+            m_tracker.setTrackEndFrame(m_selectedTrackId, *endFrame);
+        }
     }
 
     refreshOverlays();
@@ -1869,11 +1892,6 @@ std::vector<MixLaneStrip> PlayerController::mixLaneStrips() const
         float laneLevel = 0.0F;
         for (const auto& track : m_tracker.tracks())
         {
-            if (!track.attachedAudio.has_value())
-            {
-                continue;
-            }
-
             const auto spanIt = std::find_if(
                 spans.begin(),
                 spans.end(),
@@ -1886,6 +1904,12 @@ std::vector<MixLaneStrip> PlayerController::mixLaneStrips() const
                 continue;
             }
 
+            if (!track.attachedAudio.has_value())
+            {
+                continue;
+            }
+
+            strip.color = track.color;
             laneLevel = std::max(laneLevel, m_audioEngine->trackLevel(track.id));
         }
         strip.meterLevel = laneLevel;
@@ -1965,7 +1989,7 @@ std::vector<TimelineTrackSpan> PlayerController::timelineTrackSpans() const
         trackSpans.push_back(TimelineTrackSpan{
             .id = candidate.track->id,
             .label = candidate.track->label,
-            .color = candidate.track->color,
+            .color = trackDisplayColor(*candidate.track),
             .startFrame = candidate.startFrame,
             .endFrame = candidate.endFrame,
             .laneIndex = laneIndex,
@@ -2366,6 +2390,54 @@ std::optional<std::pair<int, int>> PlayerController::activeLoopRange() const
     }
 
     return std::pair<int, int>{startFrame, endFrame};
+}
+
+void PlayerController::applyLiveMixStateToCurrentPlayback()
+{
+    if (!hasVideoLoaded() || !m_transport.isPlaying())
+    {
+        return;
+    }
+
+    m_audioEngine->setMasterGain(m_masterMixMuted ? kSilentMixGainDb : m_masterMixGainDb);
+
+    QHash<QUuid, int> laneByTrackId;
+    const auto spans = timelineTrackSpans();
+    laneByTrackId.reserve(static_cast<int>(spans.size()));
+    for (const auto& span : spans)
+    {
+        laneByTrackId.insert(span.id, span.laneIndex);
+    }
+
+    const auto anySoloed = anyMixLaneSoloed();
+    if (hasEmbeddedVideoAudio() && !m_embeddedVideoAudioMuted)
+    {
+        m_audioEngine->setTrackGain(m_embeddedVideoAudioTrackId, anySoloed ? kSilentMixGainDb : 0.0F);
+    }
+
+    for (const auto& track : m_tracker.tracks())
+    {
+        if (!track.attachedAudio.has_value())
+        {
+            continue;
+        }
+
+        const auto startFrame = std::max(0, track.startFrame);
+        const auto endFrame = track.endFrame.has_value()
+            ? std::max(startFrame, *track.endFrame)
+            : std::max(startFrame, m_totalFrames > 0 ? (m_totalFrames - 1) : startFrame);
+        if (m_currentFrame.index < startFrame || m_currentFrame.index > endFrame)
+        {
+            continue;
+        }
+
+        const auto laneIndex = laneByTrackId.value(track.id, 0);
+        const auto laneAudible = !isMixLaneMuted(laneIndex) && (!anySoloed || isMixLaneSoloed(laneIndex));
+        const auto trackGainDb = laneAudible
+            ? (track.attachedAudio->gainDb + mixLaneGainDb(laneIndex))
+            : kSilentMixGainDb;
+        m_audioEngine->setTrackGain(track.id, trackGainDb);
+    }
 }
 
 void PlayerController::syncAttachedAudioForCurrentFrame()

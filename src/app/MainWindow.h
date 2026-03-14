@@ -189,7 +189,7 @@ private:
     bool m_debugVisible = true;
     int m_audioPoolPreferredWidth = 320;
     int m_timelinePreferredHeight = 148;
-    int m_mixPreferredHeight = 184;
+    int m_mixPreferredHeight = 368;
     QString m_clipName;
     QString m_memoryUsageText;
     QString m_processorUsageText;

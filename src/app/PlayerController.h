@@ -174,6 +174,7 @@ private:
     [[nodiscard]] bool isMixLaneSoloed(int laneIndex) const;
     [[nodiscard]] bool anyMixLaneSoloed() const;
     [[nodiscard]] std::optional<std::pair<int, int>> activeLoopRange() const;
+    void applyLiveMixStateToCurrentPlayback();
     void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
     void logPlaybackHitchIfNeeded(int targetFrameIndex, int previousFrameIndex, int advancedFrames);
 

@@ -88,6 +88,16 @@ struct TrackPoint
     }
 };
 
+[[nodiscard]] inline QColor inactiveTrackDisplayColor()
+{
+    return QColor{122, 128, 136};
+}
+
+[[nodiscard]] inline QColor trackDisplayColor(const TrackPoint& track)
+{
+    return track.attachedAudio.has_value() ? track.color : inactiveTrackDisplayColor();
+}
+
 struct TrackOverlay
 {
     QUuid id;

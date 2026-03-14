@@ -2082,7 +2082,7 @@ void MainWindow::buildUi()
     m_mixPanel->setObjectName(QStringLiteral("mixPanel"));
     m_mixPanel->setVisible(false);
     m_mixPanel->setFrameShape(QFrame::NoFrame);
-    m_mixPanel->setMinimumHeight(120);
+    m_mixPanel->setMinimumHeight(220);
     auto* mixPanelLayout = new QVBoxLayout(m_mixPanel);
     mixPanelLayout->setContentsMargins(0, 0, 0, 0);
     mixPanelLayout->setSpacing(0);

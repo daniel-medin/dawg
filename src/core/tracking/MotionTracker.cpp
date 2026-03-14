@@ -495,7 +495,7 @@ std::vector<TrackOverlay> MotionTracker::overlaysForFrame(
         overlays.push_back(TrackOverlay{
             .id = track.id,
             .label = track.label,
-            .color = track.color,
+            .color = trackDisplayColor(track),
             .imagePoint = *imagePoint,
             .isSelected = std::find(selectedTrackIds.begin(), selectedTrackIds.end(), track.id) != selectedTrackIds.end(),
             .highlightOpacity = (std::find(selectedTrackIds.begin(), selectedTrackIds.end(), track.id) != selectedTrackIds.end()) ? 1.0F
