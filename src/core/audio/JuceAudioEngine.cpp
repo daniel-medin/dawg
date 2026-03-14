@@ -35,6 +35,121 @@ juce::File toJuceFile(const QString& filePath)
     return juce::File(juce::String(widePath.c_str()));
 }
 
+struct ResolvedTrackPlaybackOptions
+{
+    int offsetMs = 0;
+    int clipStartMs = 0;
+    int clipEndMs = 0;
+    int clipLengthMs = 0;
+    int transportOffsetMs = 0;
+    int64_t clipStartSample = 0;
+    int64_t clipLengthSamples = 0;
+    bool loopEnabled = false;
+    bool usesClipSubsection = false;
+};
+
+int millisecondsFromSamples(const int64_t samples, const double sampleRate)
+{
+    if (sampleRate <= 0.0 || samples <= 0)
+    {
+        return 0;
+    }
+
+    return static_cast<int>(std::lround((static_cast<double>(samples) * 1000.0) / sampleRate));
+}
+
+int64_t samplesFromMilliseconds(const int milliseconds, const double sampleRate)
+{
+    if (sampleRate <= 0.0 || milliseconds <= 0)
+    {
+        return 0;
+    }
+
+    return static_cast<int64_t>(std::llround((static_cast<double>(milliseconds) * sampleRate) / 1000.0));
+}
+
+ResolvedTrackPlaybackOptions resolveTrackPlaybackOptions(
+    const AudioEngine::TrackPlaybackOptions& options,
+    const double sampleRate,
+    const int64_t sourceLengthSamples)
+{
+    ResolvedTrackPlaybackOptions resolved;
+    resolved.loopEnabled = options.loopEnabled;
+    resolved.usesClipSubsection = options.clipStartMs > 0 || options.clipEndMs.has_value();
+
+    const auto sourceDurationMs = millisecondsFromSamples(sourceLengthSamples, sampleRate);
+    resolved.offsetMs = std::clamp(options.offsetMs, 0, sourceDurationMs);
+
+    if (sourceDurationMs <= 0 || sampleRate <= 0.0 || sourceLengthSamples <= 0)
+    {
+        return resolved;
+    }
+
+    if (resolved.usesClipSubsection)
+    {
+        resolved.clipStartMs = std::clamp(options.clipStartMs, 0, sourceDurationMs);
+        const auto requestedClipEndMs = options.clipEndMs.value_or(sourceDurationMs);
+        resolved.clipEndMs = std::clamp(requestedClipEndMs, resolved.clipStartMs + 1, sourceDurationMs);
+    }
+    else
+    {
+        resolved.clipStartMs = 0;
+        resolved.clipEndMs = sourceDurationMs;
+    }
+
+    resolved.clipLengthMs = std::max(1, resolved.clipEndMs - resolved.clipStartMs);
+    const auto relativeOffsetMs = std::max(0, resolved.offsetMs - resolved.clipStartMs);
+    resolved.transportOffsetMs = resolved.loopEnabled
+        ? (relativeOffsetMs % resolved.clipLengthMs)
+        : std::clamp(relativeOffsetMs, 0, resolved.clipLengthMs);
+
+    resolved.clipStartSample = std::clamp(samplesFromMilliseconds(resolved.clipStartMs, sampleRate), int64_t{0}, sourceLengthSamples);
+    const auto clipEndSample = std::clamp(
+        samplesFromMilliseconds(resolved.clipEndMs, sampleRate),
+        resolved.clipStartSample + 1,
+        sourceLengthSamples);
+    resolved.clipLengthSamples = std::max<int64_t>(1, clipEndSample - resolved.clipStartSample);
+    return resolved;
+}
+
+bool matchesRequestedPlaybackConfiguration(
+    const ResolvedTrackPlaybackOptions& existing,
+    const AudioEngine::TrackPlaybackOptions& requested)
+{
+    const auto requestedUsesClipSubsection = requested.clipStartMs > 0 || requested.clipEndMs.has_value();
+    if (existing.usesClipSubsection != requestedUsesClipSubsection)
+    {
+        return false;
+    }
+
+    if (existing.loopEnabled != requested.loopEnabled
+        || existing.clipStartMs != std::max(0, requested.clipStartMs))
+    {
+        return false;
+    }
+
+    if (!requestedUsesClipSubsection)
+    {
+        return existing.clipStartMs == 0;
+    }
+
+    return requested.clipEndMs.has_value() && existing.clipEndMs == *requested.clipEndMs;
+}
+
+int transportOffsetMsForRequest(
+    const ResolvedTrackPlaybackOptions& existing,
+    const int requestedOffsetMs)
+{
+    const auto clampedOffsetMs = std::clamp(requestedOffsetMs, 0, existing.clipEndMs);
+    const auto relativeOffsetMs = std::max(0, clampedOffsetMs - existing.clipStartMs);
+    if (existing.loopEnabled)
+    {
+        return relativeOffsetMs % existing.clipLengthMs;
+    }
+
+    return std::clamp(relativeOffsetMs, 0, existing.clipLengthMs);
+}
+
 class PanAudioSource final : public juce::AudioSource
 {
 public:
@@ -201,6 +316,7 @@ struct JuceAudioEngine::Impl
         std::unique_ptr<PanAudioSource> panSource;
         std::unique_ptr<MeterAudioSource> meterSource;
         QString filePath;
+        ResolvedTrackPlaybackOptions playbackOptions;
     };
 
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
@@ -251,24 +367,43 @@ bool JuceAudioEngine::isReady() const
 
 bool JuceAudioEngine::playTrack(const QUuid& trackId, const QString& filePath, const int offsetMs)
 {
+    TrackPlaybackOptions options;
+    options.offsetMs = offsetMs;
+    return playTrack(trackId, filePath, options);
+}
+
+bool JuceAudioEngine::playTrack(const QUuid& trackId, const QString& filePath, const TrackPlaybackOptions& options)
+{
     if (!isReady())
     {
         emit statusChanged(QStringLiteral("JUCE audio backend is not ready."));
         return false;
     }
 
-    const auto clampedOffsetMs = std::max(0, offsetMs);
     const auto activeIt = m_impl->activeTracks.find(trackId);
-    if (activeIt != m_impl->activeTracks.end() && activeIt->second->filePath == filePath)
+    if (activeIt != m_impl->activeTracks.end()
+        && activeIt->second->filePath == filePath
+        && matchesRequestedPlaybackConfiguration(activeIt->second->playbackOptions, options))
     {
+        const auto requestedTransportOffsetMs =
+            transportOffsetMsForRequest(activeIt->second->playbackOptions, options.offsetMs);
         auto& transport = activeIt->second->transport;
         const auto currentOffsetMs = static_cast<int>(std::lround(transport.getCurrentPosition() * 1000.0));
-        const auto driftMs = std::abs(currentOffsetMs - clampedOffsetMs);
+        const auto driftMs = std::abs(currentOffsetMs - requestedTransportOffsetMs);
 
         // Avoid tearing down and recreating the reader on small sync drift.
         if (driftMs > 120)
         {
-            transport.setPosition(static_cast<double>(clampedOffsetMs) / 1000.0);
+            transport.setPosition(static_cast<double>(requestedTransportOffsetMs) / 1000.0);
+        }
+
+        const auto shouldRemainSilent = !activeIt->second->playbackOptions.loopEnabled
+            && requestedTransportOffsetMs >= activeIt->second->playbackOptions.clipLengthMs;
+        if (shouldRemainSilent)
+        {
+            transport.stop();
+            transport.setPosition(static_cast<double>(activeIt->second->playbackOptions.clipLengthMs) / 1000.0);
+            return true;
         }
 
         if (!transport.isPlaying())
@@ -282,8 +417,6 @@ bool JuceAudioEngine::playTrack(const QUuid& trackId, const QString& filePath, c
         }
     }
 
-    stopTrack(trackId);
-
     auto reader = std::unique_ptr<juce::AudioFormatReader>(m_impl->formatManager.createReaderFor(toJuceFile(filePath)));
     if (!reader)
     {
@@ -293,12 +426,43 @@ bool JuceAudioEngine::playTrack(const QUuid& trackId, const QString& filePath, c
         return false;
     }
 
+    const auto sourceSampleRate = reader->sampleRate;
+    const auto resolvedOptions = resolveTrackPlaybackOptions(options, sourceSampleRate, reader->lengthInSamples);
+    if (resolvedOptions.clipLengthSamples <= 0)
+    {
+        return false;
+    }
+
+    stopTrack(trackId);
+
+    const auto shouldRemainSilent = !resolvedOptions.loopEnabled
+        && resolvedOptions.transportOffsetMs >= resolvedOptions.clipLengthMs;
+    if (shouldRemainSilent)
+    {
+        return true;
+    }
+
     auto playback = std::make_unique<Impl::TrackPlayback>();
     playback->filePath = filePath;
-    const auto sourceSampleRate = reader->sampleRate;
-    playback->readerSource = std::make_unique<juce::AudioFormatReaderSource>(reader.release(), true);
+    playback->playbackOptions = resolvedOptions;
+    std::unique_ptr<juce::AudioFormatReader> playbackReader;
+    if (resolvedOptions.usesClipSubsection)
+    {
+        playbackReader = std::make_unique<juce::AudioSubsectionReader>(
+            reader.release(),
+            resolvedOptions.clipStartSample,
+            resolvedOptions.clipLengthSamples,
+            true);
+    }
+    else
+    {
+        playbackReader = std::move(reader);
+    }
+
+    playback->readerSource = std::make_unique<juce::AudioFormatReaderSource>(playbackReader.release(), true);
+    playback->readerSource->setLooping(resolvedOptions.loopEnabled);
     playback->transport.setSource(playback->readerSource.get(), 0, nullptr, sourceSampleRate);
-    playback->transport.setPosition(static_cast<double>(clampedOffsetMs) / 1000.0);
+    playback->transport.setPosition(static_cast<double>(resolvedOptions.transportOffsetMs) / 1000.0);
     playback->gainSource = std::make_unique<GainAudioSource>(playback->transport);
     playback->panSource = std::make_unique<PanAudioSource>(*playback->gainSource);
     playback->meterSource = std::make_unique<MeterAudioSource>(*playback->panSource);

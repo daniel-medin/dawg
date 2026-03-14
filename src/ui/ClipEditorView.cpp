@@ -1,6 +1,7 @@
 #include "ui/ClipEditorView.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <memory>
@@ -140,6 +141,76 @@ QString gainSliderStyleSheet()
         "QSlider::add-page:vertical { background: #2d3948; border-radius: 3px; }"
         "QSlider::handle:vertical { background: #f2f5f8; border: 1px solid #3e4d61; height: 16px; margin: -3px -7px; border-radius: 7px; }");
 }
+
+class ClipGainSlider final : public QSlider
+{
+public:
+    explicit ClipGainSlider(QWidget* parent = nullptr)
+        : QSlider(Qt::Vertical, parent)
+    {
+    }
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        if (event->button() == Qt::LeftButton && (event->modifiers() & Qt::ControlModifier))
+        {
+            setValue(0);
+            event->accept();
+            return;
+        }
+
+        QSlider::mousePressEvent(event);
+    }
+};
+
+class ClipGainScaleWidget final : public QWidget
+{
+public:
+    explicit ClipGainScaleWidget(QWidget* parent = nullptr)
+        : QWidget(parent)
+    {
+        setFixedWidth(28);
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
+
+protected:
+    void paintEvent(QPaintEvent* event) override
+    {
+        Q_UNUSED(event);
+
+        static const std::array<std::pair<float, QString>, 7> markers{{
+            {12.0F, QStringLiteral("+12")},
+            {0.0F, QStringLiteral("0")},
+            {-12.0F, QStringLiteral("-12")},
+            {-24.0F, QStringLiteral("-24")},
+            {-48.0F, QStringLiteral("-48")},
+            {-72.0F, QStringLiteral("-72")},
+            {kClipSilentGainDb, QStringLiteral("-inf")}
+        }};
+
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::TextAntialiasing, true);
+        painter.setPen(QColor{124, 137, 152});
+        auto font = painter.font();
+        font.setPointSizeF(7.0);
+        painter.setFont(font);
+
+        const auto bounds = rect().adjusted(0, 8, 0, -8);
+        for (const auto& [gainDb, label] : markers)
+        {
+            const auto normalized = gainDb <= kClipSilentGainDb + 0.001F
+                ? 1.0
+                : 1.0 - ((std::clamp(gainDb, kClipSilentGainDb, 12.0F) - kClipSilentGainDb)
+                    / (12.0F - kClipSilentGainDb));
+            const auto y = bounds.top() + (normalized * bounds.height());
+            painter.drawText(
+                QRectF{0.0, y - 8.0, static_cast<double>(width()), 16.0},
+                Qt::AlignLeft | Qt::AlignVCenter,
+                label);
+        }
+    }
+};
 }
 
 class ClipEditorView::WaveformView final : public QWidget
@@ -795,12 +866,12 @@ ClipEditorView::ClipEditorView(QWidget* parent)
 
     auto* stripWidget = new QFrame(m_editorContent);
     stripWidget->setObjectName(QStringLiteral("clipEditorStrip"));
-    stripWidget->setFixedWidth(58);
+    stripWidget->setFixedWidth(92);
     stripWidget->setStyleSheet(QStringLiteral(
         "QFrame#clipEditorStrip { background: #0f141b; border: 1px solid #1b2430; border-radius: 8px; }"));
     auto* stripLayout = new QHBoxLayout(stripWidget);
-    stripLayout->setContentsMargins(10, 12, 10, 12);
-    stripLayout->setSpacing(8);
+    stripLayout->setContentsMargins(8, 12, 8, 12);
+    stripLayout->setSpacing(6);
 
     m_levelMeter = new QProgressBar(stripWidget);
     m_levelMeter->setRange(0, 1000);
@@ -812,7 +883,7 @@ ClipEditorView::ClipEditorView(QWidget* parent)
     m_levelMeter->setStyleSheet(meterStyleSheet());
     stripLayout->addWidget(m_levelMeter, 0);
 
-    m_gainSlider = new QSlider(Qt::Vertical, stripWidget);
+    m_gainSlider = new ClipGainSlider(stripWidget);
     m_gainSlider->setRange(kClipGainMinValue, kClipGainMaxValue);
     m_gainSlider->setValue(0);
     m_gainSlider->setTickInterval(60);
@@ -821,6 +892,10 @@ ClipEditorView::ClipEditorView(QWidget* parent)
     m_gainSlider->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
     m_gainSlider->setStyleSheet(gainSliderStyleSheet());
     stripLayout->addWidget(m_gainSlider, 0);
+
+    auto* gainScale = new ClipGainScaleWidget(stripWidget);
+    gainScale->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+    stripLayout->addWidget(gainScale, 0);
 
     editorLayout->addWidget(stripWidget, 0);
 

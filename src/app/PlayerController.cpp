@@ -3053,11 +3053,31 @@ void PlayerController::syncAttachedAudioForCurrentFrame()
             0,
             static_cast<int>(std::lround((currentTimestampSeconds - startTimestampSeconds) * 1000.0)));
         const auto sourceDurationMs = audioDurationMs(track.attachedAudio->assetPath).value_or(0);
+        if (sourceDurationMs <= 0)
+        {
+            m_audioEngine->stopTrack(track.id);
+            continue;
+        }
+
+        const auto clipStartMs = audioClipStartMs(*track.attachedAudio);
+        const auto clipEndMs = audioClipEndMs(*track.attachedAudio, sourceDurationMs);
+        const auto clipDurationMs = std::max(1, clipEndMs - clipStartMs);
+        if (!track.attachedAudio->loopEnabled && elapsedWithinNodeMs >= clipDurationMs)
+        {
+            m_audioEngine->stopTrack(track.id);
+            continue;
+        }
+
         const auto offsetMs = audioClipPlaybackOffsetMs(
             *track.attachedAudio,
             sourceDurationMs,
             elapsedWithinNodeMs);
-        m_audioEngine->playTrack(track.id, track.attachedAudio->assetPath, offsetMs);
+        AudioEngine::TrackPlaybackOptions playbackOptions;
+        playbackOptions.offsetMs = offsetMs;
+        playbackOptions.clipStartMs = clipStartMs;
+        playbackOptions.clipEndMs = clipEndMs;
+        playbackOptions.loopEnabled = track.attachedAudio->loopEnabled;
+        m_audioEngine->playTrack(track.id, track.attachedAudio->assetPath, playbackOptions);
         const auto laneIndex = laneByTrackId.value(track.id, 0);
         const auto laneAudible = !isMixLaneMuted(laneIndex) && (!anySoloed || isMixLaneSoloed(laneIndex));
         const auto trackGainDb = laneAudible

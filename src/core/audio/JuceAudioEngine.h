@@ -19,6 +19,7 @@ public:
     [[nodiscard]] bool isReady() const;
 
     bool playTrack(const QUuid& trackId, const QString& filePath, int offsetMs = 0) override;
+    bool playTrack(const QUuid& trackId, const QString& filePath, const TrackPlaybackOptions& options) override;
     void setTrackGain(const QUuid& trackId, float gainDb) override;
     void setTrackPan(const QUuid& trackId, float pan) override;
     void setMasterGain(float gainDb) override;

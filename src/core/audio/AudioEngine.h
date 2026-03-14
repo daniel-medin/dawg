@@ -12,12 +12,24 @@ class AudioEngine : public QObject
     Q_OBJECT
 
 public:
+    struct TrackPlaybackOptions
+    {
+        int offsetMs = 0;
+        int clipStartMs = 0;
+        std::optional<int> clipEndMs;
+        bool loopEnabled = false;
+    };
+
     explicit AudioEngine(QObject* parent = nullptr);
     ~AudioEngine() override;
 
     [[nodiscard]] static std::unique_ptr<AudioEngine> create(QObject* parent = nullptr);
 
     virtual bool playTrack(const QUuid& trackId, const QString& filePath, int offsetMs = 0) = 0;
+    virtual bool playTrack(const QUuid& trackId, const QString& filePath, const TrackPlaybackOptions& options)
+    {
+        return playTrack(trackId, filePath, options.offsetMs);
+    }
     virtual void setTrackGain(const QUuid& trackId, float gainDb) = 0;
     virtual void setTrackPan(const QUuid& trackId, float pan) = 0;
     virtual void setMasterGain(float gainDb) = 0;
