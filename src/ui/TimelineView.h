@@ -35,6 +35,7 @@ public:
     void setTrackSpans(const std::vector<TimelineTrackSpan>& trackSpans);
     void setSeekOnClickEnabled(bool enabled);
     [[nodiscard]] std::optional<int> loopEditFrame() const;
+    [[nodiscard]] std::optional<int> loopShortcutFrame() const;
     [[nodiscard]] QSize sizeHint() const override;
     [[nodiscard]] QSize minimumSizeHint() const override;
 
@@ -53,6 +54,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private:
     struct LoopRangeGeometry
@@ -105,6 +107,7 @@ private:
     std::optional<int> m_loopStartFrame;
     std::optional<int> m_loopEndFrame;
     std::optional<int> m_loopEditFrame;
+    std::optional<int> m_hoveredLoopFrame;
     bool m_trimmingStart = false;
     LoopHandleDragMode m_loopHandleDragMode = LoopHandleDragMode::None;
     int m_dragAnchorFrame = 0;

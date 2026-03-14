@@ -730,6 +730,15 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 return true;
             }
 
+            if (key == Qt::Key_Backspace
+                && m_timeline
+                && m_timeline->loopShortcutFrame().has_value()
+                && (m_controller->loopStartFrame().has_value() || m_controller->loopEndFrame().has_value()))
+            {
+                clearLoopRange();
+                return true;
+            }
+
             if (m_clearAllShortcutArmed
                 && key != Qt::Key_Control
                 && key != Qt::Key_Shift
@@ -833,7 +842,7 @@ void MainWindow::clearLoopRange()
 
 void MainWindow::handleNodeStartShortcut()
 {
-    if (m_timeline && m_timeline->hasFocus() && m_timeline->loopEditFrame().has_value())
+    if (m_timeline && m_timeline->loopShortcutFrame().has_value())
     {
         handleLoopStartShortcut();
         return;
@@ -850,7 +859,7 @@ void MainWindow::handleNodeStartShortcut()
 
 void MainWindow::handleNodeEndShortcut()
 {
-    if (m_timeline && m_timeline->hasFocus() && m_timeline->loopEditFrame().has_value())
+    if (m_timeline && m_timeline->loopShortcutFrame().has_value())
     {
         handleLoopEndShortcut();
         return;
@@ -1812,9 +1821,9 @@ std::optional<int> MainWindow::timelineLoopTargetFrame() const
         return std::nullopt;
     }
 
-    if (m_timeline && m_timeline->loopEditFrame().has_value())
+    if (m_timeline && m_timeline->loopShortcutFrame().has_value())
     {
-        return m_timeline->loopEditFrame();
+        return m_timeline->loopShortcutFrame();
     }
 
     return m_controller->currentFrameIndex();
