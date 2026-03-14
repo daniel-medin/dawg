@@ -28,6 +28,8 @@ add_executable(dawg WIN32
     src/app/MainWindow.h
     src/app/AudioPoolService.cpp
     src/app/AudioPoolService.h
+    src/app/PerformanceLogger.cpp
+    src/app/PerformanceLogger.h
     src/app/PlayerController.cpp
     src/app/PlayerController.h
     src/app/TransportController.cpp

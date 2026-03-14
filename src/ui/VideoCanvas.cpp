@@ -104,6 +104,9 @@ void VideoCanvas::paintEvent(QPaintEvent* event)
                 label += QStringLiteral(" [snd]");
             }
 
+            auto labelFont = painter.font();
+            labelFont.setPointSizeF(9.0);
+            painter.setFont(labelFont);
             const QFontMetricsF metrics{painter.font()};
             const auto textWidth = metrics.horizontalAdvance(label);
             const auto labelWidth = std::max(34.0, textWidth + 16.0);

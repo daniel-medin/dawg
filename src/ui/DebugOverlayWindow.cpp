@@ -11,15 +11,17 @@ DebugOverlayWindow::DebugOverlayWindow(QWidget* parent)
     : QFrame(parent)
 {
     setObjectName(QStringLiteral("debugOverlay"));
+    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
     setFrameShape(QFrame::NoFrame);
     setAttribute(Qt::WA_ShowWithoutActivating);
+    setAttribute(Qt::WA_TranslucentBackground);
     setAutoFillBackground(true);
     setFixedWidth(300);
     setMinimumHeight(120);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
+    layout->setContentsMargins(8, 8, 8, 8);
+    layout->setSpacing(8);
 
     auto* titleBar = new QWidget(this);
     titleBar->setObjectName(QStringLiteral("debugOverlayTitleBar"));

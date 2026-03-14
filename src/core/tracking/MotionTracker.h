@@ -22,6 +22,8 @@ public:
     bool moveTrackFrameSpan(const QUuid& trackId, int deltaFrames, int maxFrameIndex);
     bool setTrackAudioAttachment(const QUuid& trackId, const QString& assetPath);
     int detachTrackAudioByPath(const QString& assetPath);
+    void addTrack(const TrackPoint& track);
+    void restoreState(const MotionTrackerState& state);
     bool isTrackLabelVisible(const QUuid& trackId) const;
     int setTrackLabelsVisible(const std::vector<QUuid>& trackIds, bool visible);
     int setTrackStartFrames(const std::vector<QUuid>& trackIds, int startFrame);
@@ -32,6 +34,7 @@ public:
     int removeTracks(const std::vector<QUuid>& trackIds);
 
     [[nodiscard]] const std::vector<TrackPoint>& tracks() const;
+    [[nodiscard]] MotionTrackerState snapshotState() const;
     [[nodiscard]] bool hasMotionTrackedTracks() const;
     [[nodiscard]] std::vector<TrackOverlay> overlaysForFrame(
         int frameIndex,

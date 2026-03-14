@@ -6,10 +6,12 @@
 #include <QLabel>
 #include <QMainWindow>
 #include <QPoint>
+#include <QPointF>
 #include <QPushButton>
 #include <QShortcut>
 #include <QSplitter>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 class PlayerController;
@@ -26,6 +28,7 @@ public:
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private slots:
     void openVideo();
@@ -33,6 +36,16 @@ private slots:
     void importAudioToPool();
     void trimSelectedNodeToSound();
     void toggleSelectedNodeAutoPan();
+    void copySelectedNode();
+    void pasteNode();
+    void cutSelectedNode();
+    void undoNodeEdit();
+    void redoNodeEdit();
+    void selectNextVisibleNode();
+    void moveSelectedNodeUp();
+    void moveSelectedNodeDown();
+    void moveSelectedNodeLeft();
+    void moveSelectedNodeRight();
     void handleNodeStartShortcut();
     void handleNodeEndShortcut();
     void updateFrame(const QImage& image, int frameIndex, double timestampSeconds);
@@ -58,6 +71,15 @@ private:
     void buildMenus();
     void buildUi();
     void refreshTimeline();
+    void updateEditActionState();
+    void updateOverlayPositions();
+    void showCanvasTipsOverlay();
+    void hideCanvasTipsOverlay();
+    void nudgeSelectedNode(const QPointF& delta);
+    void beginHeldNodeNudge(int key);
+    void endHeldNodeNudge(int key);
+    void applyHeldNodeNudge();
+    [[nodiscard]] bool shouldIgnoreNodeMovementShortcuts() const;
     [[nodiscard]] bool shouldApplyNodeShortcutToAll() const;
     void syncMotionTrackingUi(bool enabled);
     void tryOpenLocalDevVideo();
@@ -73,6 +95,8 @@ private:
     QWidget* m_mainContent = nullptr;
     QFrame* m_timelinePanel = nullptr;
     QLabel* m_frameLabel = nullptr;
+    QLabel* m_statusToast = nullptr;
+    QLabel* m_canvasTipsOverlay = nullptr;
     DebugOverlayWindow* m_debugOverlay = nullptr;
     QFrame* m_audioPoolPanel = nullptr;
     QWidget* m_videoAudioRow = nullptr;
@@ -80,17 +104,27 @@ private:
     QToolButton* m_videoAudioMuteButton = nullptr;
     QWidget* m_audioPoolListContainer = nullptr;
     QVBoxLayout* m_audioPoolListLayout = nullptr;
-    QPushButton* m_audioPoolCloseButton = nullptr;
+    QToolButton* m_audioPoolMenuButton = nullptr;
     QAction* m_openAction = nullptr;
     QAction* m_goToStartAction = nullptr;
     QAction* m_playAction = nullptr;
     QAction* m_stepForwardAction = nullptr;
     QAction* m_stepBackAction = nullptr;
     QAction* m_insertionFollowsPlaybackAction = nullptr;
+    QAction* m_copyAction = nullptr;
+    QAction* m_pasteAction = nullptr;
+    QAction* m_cutAction = nullptr;
+    QAction* m_undoAction = nullptr;
+    QAction* m_redoAction = nullptr;
     QAction* m_selectAllAction = nullptr;
     QAction* m_unselectAllAction = nullptr;
     QAction* m_setNodeStartAction = nullptr;
     QAction* m_setNodeEndAction = nullptr;
+    QAction* m_selectNextNodeAction = nullptr;
+    QAction* m_moveNodeUpAction = nullptr;
+    QAction* m_moveNodeDownAction = nullptr;
+    QAction* m_moveNodeLeftAction = nullptr;
+    QAction* m_moveNodeRightAction = nullptr;
     QAction* m_trimNodeAction = nullptr;
     QAction* m_autoPanAction = nullptr;
     QAction* m_toggleNodeNameAction = nullptr;
@@ -109,9 +143,15 @@ private:
     QShortcut* m_stepBackShortcut = nullptr;
     QShortcut* m_stepForwardShortcut = nullptr;
     QShortcut* m_insertionFollowsPlaybackShortcut = nullptr;
+    QShortcut* m_copyShortcut = nullptr;
+    QShortcut* m_pasteShortcut = nullptr;
+    QShortcut* m_cutShortcut = nullptr;
+    QShortcut* m_undoShortcut = nullptr;
+    QShortcut* m_redoShortcut = nullptr;
     QShortcut* m_selectAllShortcut = nullptr;
     QShortcut* m_nodeStartShortcut = nullptr;
     QShortcut* m_nodeEndShortcut = nullptr;
+    QShortcut* m_selectNextNodeShortcut = nullptr;
     QShortcut* m_showTimelineShortcut = nullptr;
     QShortcut* m_trimNodeShortcut = nullptr;
     QShortcut* m_autoPanShortcut = nullptr;
@@ -129,4 +169,10 @@ private:
     QString m_videoMemoryUsageText;
     QTimer m_clearAllShortcutTimer;
     QTimer m_memoryUsageTimer;
+    QTimer m_statusToastTimer;
+    QTimer m_canvasTipsTimer;
+    QTimer m_nodeNudgeTimer;
+    int m_activeNodeNudgeKey = 0;
+    QPointF m_activeNodeNudgeDelta;
+    bool m_nodeNudgeFastMode = false;
 };

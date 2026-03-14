@@ -4,8 +4,43 @@
 #include <cmath>
 
 #include <QFileInfo>
+#include <QElapsedTimer>
 
 #include "core/audio/VideoAudioExtractor.h"
+
+namespace
+{
+int trackAnchorFrame(const TrackPoint& track)
+{
+    if (track.seedFrameIndex >= 0)
+    {
+        return track.seedFrameIndex;
+    }
+
+    if (!track.samples.empty())
+    {
+        return track.samples.begin()->first;
+    }
+
+    return std::max(0, track.startFrame);
+}
+
+QPointF trackAnchorPoint(const TrackPoint& track)
+{
+    const auto anchorFrame = trackAnchorFrame(track);
+    if (track.hasSample(anchorFrame))
+    {
+        return track.sampleAt(anchorFrame);
+    }
+
+    if (!track.samples.empty())
+    {
+        return track.samples.begin()->second;
+    }
+
+    return QPointF{};
+}
+}
 
 PlayerController::PlayerController(QObject* parent)
     : QObject(parent)
@@ -47,6 +82,11 @@ bool PlayerController::openVideo(const QString& filePath)
     m_fadingDeselectedTrackOpacity = 0.0F;
     m_selectionFadeTimer.stop();
     m_audioPool.clear();
+    m_copiedTracks.clear();
+    m_undoTrackerState.reset();
+    m_undoSelectedTrackIds.clear();
+    m_redoTrackerState.reset();
+    m_redoSelectedTrackIds.clear();
     m_loadedPath = filePath;
     m_embeddedVideoAudioPath.clear();
     m_embeddedVideoAudioDisplayName.clear();
@@ -72,6 +112,14 @@ bool PlayerController::openVideo(const QString& filePath)
     emit selectionChanged(false);
     emit trackAvailabilityChanged(false);
     emit audioPoolChanged();
+    emit editStateChanged();
+    m_lastLoggedQueueStarvationCount = 0;
+    m_perfLogger.startSession(
+        filePath,
+        m_videoPlayback.decoderBackendName(),
+        m_renderService.backendName(),
+        m_fps,
+        m_totalFrames);
     emit statusChanged(
         QStringLiteral("Loaded %1 via %2 decode and %3 render.")
             .arg(filePath)
@@ -126,12 +174,25 @@ void PlayerController::togglePlayback()
     m_transport.startPlayback(m_currentFrame.index);
     m_playbackStartTimestampSeconds = frameTimestampSeconds(m_currentFrame.index);
     m_playbackElapsedTimer.restart();
+    m_perfPlaybackTickTimer.restart();
+    m_perfLogger.logEvent(
+        QStringLiteral("play"),
+        QStringLiteral("frame=%1 time=%2s queue=%3/%4")
+            .arg(m_currentFrame.index)
+            .arg(m_currentFrame.timestampSeconds, 0, 'f', 3)
+            .arg(m_videoPlayback.runtimeStats().queuedFrames)
+            .arg(m_videoPlayback.runtimeStats().prefetchTargetFrames));
     syncAttachedAudioForCurrentFrame();
 }
 
 void PlayerController::pause(const bool restorePlaybackAnchor)
 {
     m_audioEngine->stopAll();
+    m_perfLogger.logEvent(
+        QStringLiteral("stop"),
+        QStringLiteral("frame=%1 time=%2s")
+            .arg(m_currentFrame.index)
+            .arg(m_currentFrame.timestampSeconds, 0, 'f', 3));
     const auto restoreFrame = m_transport.stopPlayback(m_currentFrame.index, restorePlaybackAnchor);
     if (restoreFrame < 0)
     {
@@ -155,11 +216,26 @@ void PlayerController::seekToFrame(const int frameIndex)
         return;
     }
 
+    QElapsedTimer seekTimer;
+    seekTimer.start();
     if (!loadFrameAt(clampedFrameIndex))
     {
         emit statusChanged(QStringLiteral("Failed to seek to frame %1.").arg(clampedFrameIndex));
+        m_perfLogger.logEvent(
+            QStringLiteral("seek_failed"),
+            QStringLiteral("targetFrame=%1").arg(clampedFrameIndex));
         return;
     }
+
+    const auto stats = m_videoPlayback.runtimeStats();
+    m_perfLogger.logEvent(
+        seekTimer.elapsed() >= 12 ? QStringLiteral("seek_slow") : QStringLiteral("seek"),
+        QStringLiteral("targetFrame=%1 elapsedMs=%2 queue=%3/%4 fallbackStarvations=%5")
+            .arg(clampedFrameIndex)
+            .arg(seekTimer.elapsed())
+            .arg(stats.queuedFrames)
+            .arg(stats.prefetchTargetFrames)
+            .arg(stats.queueStarvationCount));
 
     if (m_transport.isPlaying())
     {
@@ -413,9 +489,244 @@ void PlayerController::selectTrack(const QUuid& trackId)
     setSelectedTrackId(trackId);
 }
 
+void PlayerController::selectNextVisibleTrack()
+{
+    if (!hasVideoLoaded() || m_currentOverlays.empty())
+    {
+        clearSelection();
+        emit statusChanged(QStringLiteral("No nodes are visible on the current frame."));
+        return;
+    }
+
+    auto nextIndex = 0;
+    if (!m_selectedTrackId.isNull())
+    {
+        const auto currentIt = std::find_if(
+            m_currentOverlays.begin(),
+            m_currentOverlays.end(),
+            [this](const TrackOverlay& overlay)
+            {
+                return overlay.id == m_selectedTrackId;
+            });
+        if (currentIt != m_currentOverlays.end())
+        {
+            nextIndex = static_cast<int>(std::distance(m_currentOverlays.begin(), currentIt) + 1)
+                % static_cast<int>(m_currentOverlays.size());
+        }
+    }
+
+    setSelectedTrackId(m_currentOverlays[static_cast<std::size_t>(nextIndex)].id);
+}
+
 void PlayerController::clearSelection()
 {
     setSelectedTrackId({});
+}
+
+bool PlayerController::copySelectedTracks()
+{
+    if (!hasVideoLoaded() || m_selectedTrackIds.empty())
+    {
+        return false;
+    }
+
+    m_copiedTracks.clear();
+    m_copiedTracks.reserve(m_selectedTrackIds.size());
+
+    for (const auto& trackId : m_selectedTrackIds)
+    {
+        const auto trackIt = std::find_if(
+            m_tracker.tracks().begin(),
+            m_tracker.tracks().end(),
+            [&trackId](const TrackPoint& track)
+            {
+                return track.id == trackId;
+            });
+        if (trackIt != m_tracker.tracks().end())
+        {
+            m_copiedTracks.push_back(*trackIt);
+        }
+    }
+
+    if (m_copiedTracks.empty())
+    {
+        return false;
+    }
+
+    emit editStateChanged();
+    emit statusChanged(
+        m_copiedTracks.size() == 1
+            ? QStringLiteral("Copied selected node.")
+            : QStringLiteral("Copied %1 selected nodes.").arg(m_copiedTracks.size()));
+    return true;
+}
+
+bool PlayerController::pasteCopiedTracksAtCurrentFrame()
+{
+    if (!hasVideoLoaded() || m_copiedTracks.empty() || m_currentFrame.cpuBgr.empty())
+    {
+        return false;
+    }
+
+    saveUndoState();
+
+    const auto imageCenter = QPointF{
+        static_cast<double>(m_currentFrame.cpuBgr.cols) * 0.5,
+        static_cast<double>(m_currentFrame.cpuBgr.rows) * 0.5
+    };
+    const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
+
+    std::vector<QUuid> pastedTrackIds;
+    pastedTrackIds.reserve(m_copiedTracks.size());
+
+    for (const auto& copiedTrack : m_copiedTracks)
+    {
+        auto pastedTrack = copiedTrack;
+        pastedTrack.id = QUuid::createUuid();
+
+        const auto anchorFrame = trackAnchorFrame(copiedTrack);
+        const auto anchorPoint = trackAnchorPoint(copiedTrack);
+        const auto deltaFrames = m_currentFrame.index - anchorFrame;
+        const auto deltaPoint = imageCenter - anchorPoint;
+
+        std::map<int, QPointF> shiftedSamples;
+        for (const auto& [frameIndex, point] : copiedTrack.samples)
+        {
+            const auto shiftedFrameIndex = frameIndex + deltaFrames;
+            if (shiftedFrameIndex < 0 || shiftedFrameIndex > maxFrameIndex)
+            {
+                continue;
+            }
+
+            shiftedSamples.insert_or_assign(shiftedFrameIndex, point + deltaPoint);
+        }
+
+        if (shiftedSamples.empty())
+        {
+            shiftedSamples.emplace(m_currentFrame.index, imageCenter);
+        }
+
+        pastedTrack.samples = std::move(shiftedSamples);
+        pastedTrack.seedFrameIndex = std::clamp(copiedTrack.seedFrameIndex + deltaFrames, 0, maxFrameIndex);
+        pastedTrack.startFrame = std::clamp(copiedTrack.startFrame + deltaFrames, 0, maxFrameIndex);
+        if (pastedTrack.endFrame.has_value())
+        {
+            pastedTrack.endFrame = std::clamp(*copiedTrack.endFrame + deltaFrames, pastedTrack.startFrame, maxFrameIndex);
+        }
+
+        m_tracker.addTrack(pastedTrack);
+        pastedTrackIds.push_back(pastedTrack.id);
+    }
+
+    if (pastedTrackIds.empty())
+    {
+        m_undoTrackerState.reset();
+        m_undoSelectedTrackIds.clear();
+        emit editStateChanged();
+        return false;
+    }
+
+    m_selectedTrackIds = pastedTrackIds;
+    m_selectedTrackId = pastedTrackIds.front();
+    m_fadingDeselectedTrackId = {};
+    m_fadingDeselectedTrackOpacity = 0.0F;
+    m_selectionFadeTimer.stop();
+    refreshOverlays();
+    emit selectionChanged(true);
+    emit trackAvailabilityChanged(true);
+    emit audioPoolChanged();
+    emit editStateChanged();
+    emit statusChanged(
+        pastedTrackIds.size() == 1
+            ? QStringLiteral("Pasted node at the center of the frame.")
+            : QStringLiteral("Pasted %1 nodes at the center of the frame.").arg(pastedTrackIds.size()));
+    return true;
+}
+
+bool PlayerController::cutSelectedTracks()
+{
+    if (!hasVideoLoaded() || m_selectedTrackIds.empty())
+    {
+        return false;
+    }
+
+    m_copiedTracks.clear();
+    m_copiedTracks.reserve(m_selectedTrackIds.size());
+    for (const auto& trackId : m_selectedTrackIds)
+    {
+        const auto trackIt = std::find_if(
+            m_tracker.tracks().begin(),
+            m_tracker.tracks().end(),
+            [&trackId](const TrackPoint& track)
+            {
+                return track.id == trackId;
+            });
+        if (trackIt != m_tracker.tracks().end())
+        {
+            m_copiedTracks.push_back(*trackIt);
+        }
+    }
+    if (m_copiedTracks.empty())
+    {
+        return false;
+    }
+
+    saveUndoState();
+    const auto removedCount = m_selectedTrackIds.size() == 1
+        ? (m_tracker.removeTrack(m_selectedTrackIds.front()) ? 1 : 0)
+        : m_tracker.removeTracks(m_selectedTrackIds);
+    if (removedCount <= 0)
+    {
+        m_undoTrackerState.reset();
+        m_undoSelectedTrackIds.clear();
+        emit editStateChanged();
+        return false;
+    }
+
+    setSelectedTrackId({}, false);
+    refreshOverlays();
+    emit trackAvailabilityChanged(hasTracks());
+    emit audioPoolChanged();
+    emit editStateChanged();
+    emit statusChanged(
+        removedCount == 1
+            ? QStringLiteral("Cut selected node.")
+            : QStringLiteral("Cut %1 selected nodes.").arg(removedCount));
+    return true;
+}
+
+bool PlayerController::undoLastTrackEdit()
+{
+    if (!m_undoTrackerState.has_value())
+    {
+        return false;
+    }
+
+    m_redoTrackerState = m_tracker.snapshotState();
+    m_redoSelectedTrackIds = m_selectedTrackIds;
+    restoreTrackEditState(*m_undoTrackerState, m_undoSelectedTrackIds);
+    m_undoTrackerState.reset();
+    m_undoSelectedTrackIds.clear();
+    emit editStateChanged();
+    emit statusChanged(QStringLiteral("Undid last node edit."));
+    return true;
+}
+
+bool PlayerController::redoLastTrackEdit()
+{
+    if (!m_redoTrackerState.has_value())
+    {
+        return false;
+    }
+
+    m_undoTrackerState = m_tracker.snapshotState();
+    m_undoSelectedTrackIds = m_selectedTrackIds;
+    restoreTrackEditState(*m_redoTrackerState, m_redoSelectedTrackIds);
+    m_redoTrackerState.reset();
+    m_redoSelectedTrackIds.clear();
+    emit editStateChanged();
+    emit statusChanged(QStringLiteral("Redid last node edit."));
+    return true;
 }
 
 bool PlayerController::renameTrack(const QUuid& trackId, const QString& label)
@@ -506,6 +817,53 @@ void PlayerController::moveSelectedTrack(const QPointF& imagePoint)
     }
 }
 
+void PlayerController::nudgeSelectedTracks(const QPointF& delta)
+{
+    if (!hasVideoLoaded() || m_selectedTrackIds.empty() || delta.isNull())
+    {
+        return;
+    }
+
+    auto movedAny = false;
+    for (const auto& trackId : m_selectedTrackIds)
+    {
+        const auto trackIt = std::find_if(
+            m_tracker.tracks().begin(),
+            m_tracker.tracks().end(),
+            [&trackId](const TrackPoint& track)
+            {
+                return track.id == trackId;
+            });
+        if (trackIt == m_tracker.tracks().end())
+        {
+            continue;
+        }
+
+        auto basePoint = trackIt->interpolatedSampleAt(m_currentFrame.index);
+        if (!basePoint.has_value())
+        {
+            if (!trackIt->samples.empty())
+            {
+                basePoint = trackIt->samples.begin()->second;
+            }
+            else
+            {
+                continue;
+            }
+        }
+
+        if (m_tracker.updateTrackSample(trackId, m_currentFrame.index, *basePoint + delta))
+        {
+            movedAny = true;
+        }
+    }
+
+    if (movedAny)
+    {
+        refreshOverlays();
+    }
+}
+
 void PlayerController::deleteSelectedTrack()
 {
     if (m_selectedTrackIds.empty())
@@ -513,11 +871,15 @@ void PlayerController::deleteSelectedTrack()
         return;
     }
 
+    saveUndoState();
     const auto removedCount = m_selectedTrackIds.size() == 1
         ? (m_tracker.removeTrack(m_selectedTrackIds.front()) ? 1 : 0)
         : m_tracker.removeTracks(m_selectedTrackIds);
     if (removedCount <= 0)
     {
+        m_undoTrackerState.reset();
+        m_undoSelectedTrackIds.clear();
+        emit editStateChanged();
         setSelectedTrackId({}, false);
         emit statusChanged(QStringLiteral("The selected node selection no longer exists."));
         return;
@@ -527,6 +889,7 @@ void PlayerController::deleteSelectedTrack()
     refreshOverlays();
     emit trackAvailabilityChanged(hasTracks());
     emit audioPoolChanged();
+    emit editStateChanged();
     emit statusChanged(
         removedCount == 1
             ? QStringLiteral("Deleted selected node.")
@@ -540,12 +903,14 @@ void PlayerController::clearAllTracks()
         return;
     }
 
+    saveUndoState();
     m_tracker.reset();
     m_selectedTrackIds.clear();
     setSelectedTrackId({}, false);
     refreshOverlays();
     emit trackAvailabilityChanged(false);
     emit audioPoolChanged();
+    emit editStateChanged();
     emit statusChanged(QStringLiteral("Cleared all nodes."));
 }
 
@@ -878,6 +1243,21 @@ bool PlayerController::hasTracks() const
     return !m_tracker.tracks().empty();
 }
 
+bool PlayerController::canPasteTracks() const
+{
+    return hasVideoLoaded() && !m_copiedTracks.empty();
+}
+
+bool PlayerController::canUndoTrackEdit() const
+{
+    return m_undoTrackerState.has_value();
+}
+
+bool PlayerController::canRedoTrackEdit() const
+{
+    return m_redoTrackerState.has_value();
+}
+
 int PlayerController::trackCount() const
 {
     return static_cast<int>(m_tracker.tracks().size());
@@ -1115,15 +1495,20 @@ void PlayerController::advancePlayback()
         return;
     }
 
+    const auto previousFrameIndex = m_currentFrame.index;
+    int advancedFrames = 0;
     while (m_transport.isPlaying() && m_currentFrame.index < targetFrameIndex)
     {
-        const auto previousFrameIndex = m_currentFrame.index;
+        const auto previousStepFrameIndex = m_currentFrame.index;
         stepForward();
-        if (m_currentFrame.index == previousFrameIndex)
+        if (m_currentFrame.index == previousStepFrameIndex)
         {
             break;
         }
+        ++advancedFrames;
     }
+
+    logPlaybackHitchIfNeeded(targetFrameIndex, previousFrameIndex, advancedFrames);
 }
 
 void PlayerController::advanceSelectionFade()
@@ -1157,6 +1542,47 @@ bool PlayerController::loadFrameAt(const int frameIndex)
     refreshOverlays();
     emitCurrentFrame();
     return true;
+}
+
+void PlayerController::logPlaybackHitchIfNeeded(
+    const int targetFrameIndex,
+    const int previousFrameIndex,
+    const int advancedFrames)
+{
+    if (!m_transport.isPlaying())
+    {
+        return;
+    }
+
+    const auto stats = m_videoPlayback.runtimeStats();
+    const auto tickDeltaMs = m_perfPlaybackTickTimer.isValid() ? m_perfPlaybackTickTimer.restart() : 0;
+    const auto skippedFrames = std::max(0, targetFrameIndex - previousFrameIndex);
+    const auto shouldLog =
+        tickDeltaMs > 40
+        || stats.lastStepWaitMs > 4
+        || stats.lastStepUsedSynchronousFallback
+        || skippedFrames > 1
+        || stats.queueStarvationCount > m_lastLoggedQueueStarvationCount;
+
+    if (!shouldLog)
+    {
+        return;
+    }
+
+    m_lastLoggedQueueStarvationCount = stats.queueStarvationCount;
+    m_perfLogger.logEvent(
+        QStringLiteral("playback_hitch"),
+        QStringLiteral(
+            "tickMs=%1 currentFrame=%2 targetFrame=%3 advanced=%4 queued=%5/%6 waitMs=%7 syncFallback=%8 starvationCount=%9")
+            .arg(tickDeltaMs)
+            .arg(m_currentFrame.index)
+            .arg(targetFrameIndex)
+            .arg(advancedFrames)
+            .arg(stats.queuedFrames)
+            .arg(stats.prefetchTargetFrames)
+            .arg(stats.lastStepWaitMs)
+            .arg(stats.lastStepUsedSynchronousFallback ? QStringLiteral("yes") : QStringLiteral("no"))
+            .arg(stats.queueStarvationCount));
 }
 
 bool PlayerController::needsTrackingFrameProcessing() const
@@ -1206,6 +1632,46 @@ std::optional<int> PlayerController::trimmedEndFrameForTrack(const TrackPoint& t
         startFrame + coveredFrames);
 
     return std::clamp(endFrame, startFrame, maxFrameIndex);
+}
+
+void PlayerController::saveUndoState()
+{
+    m_undoTrackerState = m_tracker.snapshotState();
+    m_undoSelectedTrackIds = m_selectedTrackIds;
+    m_redoTrackerState.reset();
+    m_redoSelectedTrackIds.clear();
+    emit editStateChanged();
+}
+
+void PlayerController::restoreTrackEditState(
+    const MotionTrackerState& trackerState,
+    const std::vector<QUuid>& selectedTrackIds)
+{
+    m_audioEngine->stopAll();
+    m_tracker.restoreState(trackerState);
+
+    m_selectedTrackIds.clear();
+    for (const auto& trackId : selectedTrackIds)
+    {
+        if (m_tracker.hasTrack(trackId))
+        {
+            m_selectedTrackIds.push_back(trackId);
+        }
+    }
+    m_selectedTrackId = m_selectedTrackIds.empty() ? QUuid{} : m_selectedTrackIds.front();
+    m_fadingDeselectedTrackId = {};
+    m_fadingDeselectedTrackOpacity = 0.0F;
+    m_selectionFadeTimer.stop();
+
+    refreshOverlays();
+    emit selectionChanged(!m_selectedTrackIds.empty());
+    emit trackAvailabilityChanged(hasTracks());
+    emit audioPoolChanged();
+
+    if (m_transport.isPlaying())
+    {
+        syncAttachedAudioForCurrentFrame();
+    }
 }
 
 void PlayerController::refreshOverlays()

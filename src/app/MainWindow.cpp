@@ -23,6 +23,7 @@
 #include <QSizePolicy>
 #include <QShortcut>
 #include <QSignalBlocker>
+#include <QResizeEvent>
 #include <QStatusBar>
 #include <QStyle>
 #include <QToolButton>
@@ -239,6 +240,21 @@ MainWindow::MainWindow(QWidget* parent)
     m_memoryUsageTimer.setInterval(1000);
     connect(&m_clearAllShortcutTimer, &QTimer::timeout, this, &MainWindow::clearPendingClearAllShortcut);
     connect(&m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsage);
+    m_statusToastTimer.setSingleShot(true);
+    m_statusToastTimer.setInterval(2800);
+    connect(&m_statusToastTimer, &QTimer::timeout, this, [this]()
+    {
+        if (m_statusToast)
+        {
+            m_statusToast->hide();
+        }
+    });
+    m_canvasTipsTimer.setSingleShot(true);
+    m_canvasTipsTimer.setInterval(6000);
+    connect(&m_canvasTipsTimer, &QTimer::timeout, this, &MainWindow::hideCanvasTipsOverlay);
+    m_nodeNudgeTimer.setSingleShot(false);
+    m_nodeNudgeTimer.setInterval(220);
+    connect(&m_nodeNudgeTimer, &QTimer::timeout, this, &MainWindow::applyHeldNodeNudge);
 
     connect(m_openAction, &QAction::triggered, this, &MainWindow::openVideo);
     connect(m_importSoundAction, &QAction::triggered, this, &MainWindow::importSound);
@@ -274,6 +290,16 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_playAction, &QAction::triggered, m_controller, &PlayerController::togglePlayback);
     connect(m_stepForwardAction, &QAction::triggered, m_controller, &PlayerController::stepForward);
     connect(m_stepBackAction, &QAction::triggered, m_controller, &PlayerController::stepBackward);
+    connect(m_copyAction, &QAction::triggered, this, &MainWindow::copySelectedNode);
+    connect(m_pasteAction, &QAction::triggered, this, &MainWindow::pasteNode);
+    connect(m_cutAction, &QAction::triggered, this, &MainWindow::cutSelectedNode);
+    connect(m_undoAction, &QAction::triggered, this, &MainWindow::undoNodeEdit);
+    connect(m_redoAction, &QAction::triggered, this, &MainWindow::redoNodeEdit);
+    connect(m_selectNextNodeAction, &QAction::triggered, this, &MainWindow::selectNextVisibleNode);
+    connect(m_moveNodeUpAction, &QAction::triggered, this, &MainWindow::moveSelectedNodeUp);
+    connect(m_moveNodeDownAction, &QAction::triggered, this, &MainWindow::moveSelectedNodeDown);
+    connect(m_moveNodeLeftAction, &QAction::triggered, this, &MainWindow::moveSelectedNodeLeft);
+    connect(m_moveNodeRightAction, &QAction::triggered, this, &MainWindow::moveSelectedNodeRight);
     connect(m_selectAllAction, &QAction::triggered, m_controller, &PlayerController::selectAllVisibleTracks);
     connect(m_unselectAllAction, &QAction::triggered, m_controller, &PlayerController::clearSelection);
     connect(
@@ -330,6 +356,12 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_numpadStartShortcut, &QShortcut::activated, m_controller, &PlayerController::goToStart);
     connect(m_stepBackShortcut, &QShortcut::activated, m_controller, &PlayerController::stepBackward);
     connect(m_stepForwardShortcut, &QShortcut::activated, m_controller, &PlayerController::stepForward);
+    connect(m_copyShortcut, &QShortcut::activated, this, &MainWindow::copySelectedNode);
+    connect(m_pasteShortcut, &QShortcut::activated, this, &MainWindow::pasteNode);
+    connect(m_cutShortcut, &QShortcut::activated, this, &MainWindow::cutSelectedNode);
+    connect(m_undoShortcut, &QShortcut::activated, this, &MainWindow::undoNodeEdit);
+    connect(m_redoShortcut, &QShortcut::activated, this, &MainWindow::redoNodeEdit);
+    connect(m_selectNextNodeShortcut, &QShortcut::activated, this, &MainWindow::selectNextVisibleNode);
     connect(
         m_insertionFollowsPlaybackShortcut,
         &QShortcut::activated,
@@ -368,21 +400,18 @@ MainWindow::MainWindow(QWidget* parent)
         &MainWindow::updateMotionTrackingState);
     connect(m_controller, &PlayerController::selectionChanged, this, &MainWindow::updateSelectionState);
     connect(m_controller, &PlayerController::trackAvailabilityChanged, this, &MainWindow::updateTrackAvailabilityState);
+    connect(m_controller, &PlayerController::editStateChanged, this, &MainWindow::updateEditActionState);
     connect(m_controller, &PlayerController::audioPoolChanged, this, &MainWindow::refreshAudioPool);
     connect(m_controller, &PlayerController::videoLoaded, this, &MainWindow::handleVideoLoaded);
     connect(m_controller, &PlayerController::videoAudioStateChanged, this, &MainWindow::updateVideoAudioRow);
     connect(m_controller, &PlayerController::statusChanged, this, &MainWindow::showStatus);
-    connect(m_audioPoolCloseButton, &QPushButton::clicked, this, [this]()
-    {
-        updateAudioPoolVisibility(false);
-        showStatus(QStringLiteral("Audio Pool hidden."));
-    });
 
     updatePlaybackState(false);
     updateInsertionFollowsPlaybackState(m_controller->isInsertionFollowsPlayback());
     syncMotionTrackingUi(m_controller->isMotionTrackingEnabled());
     updateSelectionState(m_controller->hasSelection());
     updateTrackAvailabilityState(m_controller->hasTracks());
+    updateEditActionState();
     updateMemoryUsage();
     updateDebugVisibility(true);
     updateDebugText();
@@ -395,6 +424,63 @@ MainWindow::MainWindow(QWidget* parent)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if (m_canvasTipsOverlay && m_canvasTipsOverlay->isVisible())
+    {
+        const auto eventType = event->type();
+        if (eventType == QEvent::KeyPress
+            || eventType == QEvent::MouseButtonPress
+            || eventType == QEvent::Wheel)
+        {
+            if (auto* widget = qobject_cast<QWidget*>(watched))
+            {
+                if (widget == this || isAncestorOf(widget))
+                {
+                    hideCanvasTipsOverlay();
+                }
+            }
+        }
+    }
+
+    if (!shouldIgnoreNodeMovementShortcuts())
+    {
+        if (event->type() == QEvent::KeyPress)
+        {
+            auto* keyEvent = static_cast<QKeyEvent*>(event);
+            if (!keyEvent->isAutoRepeat() && keyEvent->modifiers() == Qt::NoModifier)
+            {
+                switch (keyEvent->key())
+                {
+                case Qt::Key_Up:
+                case Qt::Key_Left:
+                case Qt::Key_Down:
+                case Qt::Key_Right:
+                    beginHeldNodeNudge(keyEvent->key());
+                    return true;
+                default:
+                    break;
+                }
+            }
+        }
+        else if (event->type() == QEvent::KeyRelease)
+        {
+            auto* keyEvent = static_cast<QKeyEvent*>(event);
+            if (!keyEvent->isAutoRepeat() && keyEvent->modifiers() == Qt::NoModifier)
+            {
+                switch (keyEvent->key())
+                {
+                case Qt::Key_Up:
+                case Qt::Key_Left:
+                case Qt::Key_Down:
+                case Qt::Key_Right:
+                    endHeldNodeNudge(keyEvent->key());
+                    return true;
+                default:
+                    break;
+                }
+            }
+        }
+    }
+
     if (event->type() == QEvent::KeyPress)
     {
         auto* keyEvent = static_cast<QKeyEvent*>(event);
@@ -431,6 +517,12 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
     }
 
     return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event)
+{
+    QMainWindow::resizeEvent(event);
+    updateOverlayPositions();
 }
 
 void MainWindow::openVideo()
@@ -528,6 +620,61 @@ void MainWindow::toggleSelectedNodeAutoPan()
         const QSignalBlocker blocker{m_autoPanAction};
         m_autoPanAction->setChecked(m_controller->hasSelection() && m_controller->selectedTracksAutoPanEnabled());
     }
+}
+
+void MainWindow::copySelectedNode()
+{
+    m_controller->copySelectedTracks();
+    updateEditActionState();
+}
+
+void MainWindow::pasteNode()
+{
+    m_controller->pasteCopiedTracksAtCurrentFrame();
+    updateEditActionState();
+}
+
+void MainWindow::cutSelectedNode()
+{
+    m_controller->cutSelectedTracks();
+    updateEditActionState();
+}
+
+void MainWindow::undoNodeEdit()
+{
+    m_controller->undoLastTrackEdit();
+    updateEditActionState();
+}
+
+void MainWindow::redoNodeEdit()
+{
+    m_controller->redoLastTrackEdit();
+    updateEditActionState();
+}
+
+void MainWindow::selectNextVisibleNode()
+{
+    m_controller->selectNextVisibleTrack();
+}
+
+void MainWindow::moveSelectedNodeUp()
+{
+    nudgeSelectedNode(QPointF{0.0, -4.0});
+}
+
+void MainWindow::moveSelectedNodeDown()
+{
+    nudgeSelectedNode(QPointF{0.0, 4.0});
+}
+
+void MainWindow::moveSelectedNodeLeft()
+{
+    nudgeSelectedNode(QPointF{-4.0, 0.0});
+}
+
+void MainWindow::moveSelectedNodeRight()
+{
+    nudgeSelectedNode(QPointF{4.0, 0.0});
 }
 
 void MainWindow::updateFrame(const QImage& image, const int frameIndex, const double timestampSeconds)
@@ -632,6 +779,10 @@ void MainWindow::updatePlaybackState(const bool playing)
 {
     const auto label = playing ? QStringLiteral("Pause (Space)") : QStringLiteral("Play (Space)");
     m_playAction->setText(label);
+    if (playing)
+    {
+        hideCanvasTipsOverlay();
+    }
     if (m_audioPoolPanel && m_audioPoolPanel->isVisible())
     {
         updateAudioPoolPlaybackIndicators();
@@ -651,6 +802,11 @@ void MainWindow::updateSelectionState(const bool hasSelection)
     m_unselectAllAction->setEnabled(hasSelection);
     m_setNodeStartAction->setEnabled(hasSelection);
     m_setNodeEndAction->setEnabled(hasSelection);
+    m_selectNextNodeAction->setEnabled(hasSelection || m_controller->hasTracks());
+    m_moveNodeUpAction->setEnabled(hasSelection);
+    m_moveNodeDownAction->setEnabled(hasSelection);
+    m_moveNodeLeftAction->setEnabled(hasSelection);
+    m_moveNodeRightAction->setEnabled(hasSelection);
     m_trimNodeAction->setEnabled(hasSelection);
     m_autoPanAction->setEnabled(hasSelection);
     if (m_autoPanAction)
@@ -661,6 +817,7 @@ void MainWindow::updateSelectionState(const bool hasSelection)
     m_toggleNodeNameAction->setEnabled(hasSelection);
     m_importSoundAction->setEnabled(hasSelection);
     m_deleteNodeAction->setEnabled(hasSelection);
+    updateEditActionState();
     updateDebugText();
 }
 
@@ -668,10 +825,15 @@ void MainWindow::updateTrackAvailabilityState(const bool hasTracks)
 {
     m_selectAllAction->setEnabled(hasTracks);
     m_clearAllAction->setEnabled(hasTracks);
+    if (m_selectNextNodeAction)
+    {
+        m_selectNextNodeAction->setEnabled(hasTracks);
+    }
     if (!hasTracks)
     {
         clearPendingClearAllShortcut();
     }
+    updateEditActionState();
     updateDebugText();
 }
 
@@ -681,6 +843,7 @@ void MainWindow::handleVideoLoaded(const QString& filePath, const int totalFrame
     m_clipName = fileInfo.fileName();
     m_timeline->setTimeline(totalFrames, fps);
     refreshTimeline();
+    showCanvasTipsOverlay();
     updateDebugText();
 }
 
@@ -690,10 +853,6 @@ void MainWindow::updateDebugVisibility(const bool enabled)
     if (m_debugOverlay)
     {
         m_debugOverlay->setVisible(enabled);
-        if (enabled)
-        {
-            m_debugOverlay->raise();
-        }
     }
     if (m_toggleDebugAction && m_toggleDebugAction->isChecked() != enabled)
     {
@@ -788,7 +947,7 @@ void MainWindow::refreshAudioPool()
             "QWidget:hover { background: rgba(255, 255, 255, 0.03); border-radius: 4px; }"));
 
         auto* rowLayout = new QHBoxLayout(row);
-        rowLayout->setContentsMargins(2, 0, 2, 0);
+        rowLayout->setContentsMargins(8, 0, 8, 0);
         rowLayout->setSpacing(6);
 
         auto* statusDot = new QLabel(row);
@@ -814,17 +973,21 @@ void MainWindow::refreshAudioPool()
 
         auto* editButton = new QToolButton(row);
         editButton->setCursor(Qt::PointingHandCursor);
-        editButton->setAutoRaise(true);
-        editButton->setIcon(style()->standardIcon(QStyle::SP_FileDialogDetailedView));
+        editButton->setText(QStringLiteral("\u2630"));
+        editButton->setFixedWidth(28);
         editButton->setToolTip(QStringLiteral("Edit %1").arg(item.displayName));
         editButton->setStyleSheet(QStringLiteral(
-            "QToolButton { background: transparent; border: none; padding: 0px; }"
+            "QToolButton { background: transparent; color: #d7dee8; border: none; border-radius: 4px; padding: 1px 4px; font-size: 8.5pt; }"
             "QToolButton::menu-indicator { image: none; width: 0px; }"
-            "QToolButton:hover { background: rgba(255, 255, 255, 0.06); border-radius: 4px; }"));
+            "QToolButton:hover { background: rgba(255, 255, 255, 0.08); }"
+            "QToolButton:pressed { background: #111821; }"));
 
         auto* editMenu = new QMenu(editButton);
+        auto menuFont = editMenu->font();
+        menuFont.setPointSizeF(8.5);
+        editMenu->setFont(menuFont);
         editMenu->setStyleSheet(QStringLiteral(
-            "QMenu { background: #080a0d; color: #eef2f6; border: 1px solid #1f2935; padding: 4px 0; }"
+            "QMenu { background: rgba(8, 10, 13, 204); color: #eef2f6; border: 1px solid #1f2935; border-radius: 8px; padding: 4px 0; font-size: 8.5pt; }"
             "QMenu::item { padding: 6px 14px; }"
             "QMenu::item:selected { background: #1a2028; }"));
         auto* addAction = editMenu->addAction(QStringLiteral("Add to Frame"));
@@ -936,17 +1099,177 @@ void MainWindow::updateVideoAudioRow()
     m_videoAudioLabel->setToolTip(QStringLiteral("Embedded audio from %1").arg(displayName));
 
     const auto muted = m_controller->isEmbeddedVideoAudioMuted();
-    m_videoAudioMuteButton->setIcon(
-        style()->standardIcon(muted ? QStyle::SP_MediaVolumeMuted : QStyle::SP_MediaVolume));
+    m_videoAudioMuteButton->setText(QStringLiteral("\u2630"));
     m_videoAudioMuteButton->setToolTip(
         muted
-            ? QStringLiteral("Unmute video audio")
-            : QStringLiteral("Mute video audio"));
+            ? QStringLiteral("Video audio options (currently muted)")
+            : QStringLiteral("Video audio options"));
 }
 
 void MainWindow::showStatus(const QString& message)
 {
-    statusBar()->showMessage(message, 5000);
+    if (!m_statusToast || message.trimmed().isEmpty())
+    {
+        return;
+    }
+
+    m_statusToast->setText(message);
+    m_statusToast->adjustSize();
+    const auto maxWidth = std::min(560, std::max(220, width() - 64));
+    m_statusToast->setMaximumWidth(maxWidth);
+    m_statusToast->adjustSize();
+    updateOverlayPositions();
+    m_statusToast->show();
+    m_statusToast->raise();
+    m_statusToastTimer.start();
+}
+
+void MainWindow::nudgeSelectedNode(const QPointF& delta)
+{
+    if (delta.isNull())
+    {
+        return;
+    }
+
+    m_controller->nudgeSelectedTracks(delta);
+}
+
+void MainWindow::beginHeldNodeNudge(const int key)
+{
+    QPointF delta;
+    switch (key)
+    {
+    case Qt::Key_Up:
+        delta = QPointF{0.0, -4.0};
+        break;
+    case Qt::Key_Left:
+        delta = QPointF{-4.0, 0.0};
+        break;
+    case Qt::Key_Down:
+        delta = QPointF{0.0, 4.0};
+        break;
+    case Qt::Key_Right:
+        delta = QPointF{4.0, 0.0};
+        break;
+    default:
+        return;
+    }
+
+    m_activeNodeNudgeKey = key;
+    m_activeNodeNudgeDelta = delta;
+    m_nodeNudgeFastMode = false;
+    nudgeSelectedNode(delta);
+    m_nodeNudgeTimer.start();
+}
+
+void MainWindow::endHeldNodeNudge(const int key)
+{
+    if (m_activeNodeNudgeKey != key)
+    {
+        return;
+    }
+
+    m_activeNodeNudgeKey = 0;
+    m_activeNodeNudgeDelta = {};
+    m_nodeNudgeFastMode = false;
+    m_nodeNudgeTimer.stop();
+    m_nodeNudgeTimer.setInterval(220);
+}
+
+void MainWindow::applyHeldNodeNudge()
+{
+    if (m_activeNodeNudgeKey == 0 || m_activeNodeNudgeDelta.isNull())
+    {
+        m_nodeNudgeTimer.stop();
+        return;
+    }
+
+    if (!m_nodeNudgeFastMode)
+    {
+        m_nodeNudgeFastMode = true;
+        m_nodeNudgeTimer.setInterval(24);
+    }
+
+    nudgeSelectedNode(m_activeNodeNudgeDelta);
+}
+
+bool MainWindow::shouldIgnoreNodeMovementShortcuts() const
+{
+    if (!m_controller || !m_controller->hasSelection())
+    {
+        return true;
+    }
+
+    const auto* focused = QApplication::focusWidget();
+    if (!focused)
+    {
+        return false;
+    }
+
+    return focused->inherits("QLineEdit")
+        || focused->inherits("QTextEdit")
+        || focused->inherits("QPlainTextEdit")
+        || focused->inherits("QAbstractSpinBox")
+        || focused->inherits("QComboBox");
+}
+
+void MainWindow::updateOverlayPositions()
+{
+    auto* root = centralWidget();
+    if (!root)
+    {
+        return;
+    }
+
+    if (m_statusToast)
+    {
+        const auto margin = 16;
+        const auto x = margin;
+        const auto y = std::max(margin, root->height() - m_statusToast->height() - margin);
+        m_statusToast->move(x, y);
+    }
+
+    if (m_canvasTipsOverlay && m_canvas)
+    {
+        m_canvasTipsOverlay->move(16, 16);
+    }
+
+    if (m_statusToast && m_statusToast->isVisible())
+    {
+        m_statusToast->raise();
+    }
+    if (m_canvasTipsOverlay && m_canvasTipsOverlay->isVisible())
+    {
+        m_canvasTipsOverlay->raise();
+    }
+}
+
+void MainWindow::showCanvasTipsOverlay()
+{
+    if (!m_canvasTipsOverlay)
+    {
+        return;
+    }
+
+    m_canvasTipsOverlay->setText(
+        QStringLiteral("Left-click to add or select nodes\n"
+                       "Right-click a node for options\n"
+                       "Drag audio from Audio Pool onto the video\n"
+                       "Space plays, , and . step frames"));
+    m_canvasTipsOverlay->adjustSize();
+    updateOverlayPositions();
+    m_canvasTipsOverlay->show();
+    m_canvasTipsOverlay->raise();
+    m_canvasTipsTimer.start();
+}
+
+void MainWindow::hideCanvasTipsOverlay()
+{
+    m_canvasTipsTimer.stop();
+    if (m_canvasTipsOverlay)
+    {
+        m_canvasTipsOverlay->hide();
+    }
 }
 
 void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalPosition, const bool includeSoundActions)
@@ -970,11 +1293,23 @@ void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalP
     renameEditor->setFocusPolicy(Qt::ClickFocus);
     renameEditor->setCursorPosition(0);
     renameEditor->deselect();
+    auto renameFont = renameEditor->font();
+    renameFont.setPointSizeF(8.5);
+    renameFont.setBold(true);
+    renameEditor->setFont(renameFont);
+    auto menuFont = menu.font();
+    menuFont.setPointSizeF(8.5);
+    menu.setFont(menuFont);
+    menu.setStyleSheet(QStringLiteral(
+        "QMenu { background: rgba(18, 23, 32, 204); border: 1px solid #324155; border-radius: 8px; font-size: 8.5pt; }"
+        "QMenu::item { padding: 6px 14px; }"
+        "QMenu::item:selected { background: #223146; }"));
     renameEditor->setStyleSheet(R"(
         QLineEdit {
-            background: transparent;
+            background: rgba(255, 255, 255, 0.03);
             color: #f3f5f7;
-            border: none;
+            border: 1px solid transparent;
+            border-radius: 6px;
             padding: 4px 8px;
             selection-background-color: #223146;
             selection-color: #f3f5f7;
@@ -982,7 +1317,7 @@ void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalP
         QLineEdit:focus {
             background: #1a2330;
             border: 1px solid #324155;
-            border-radius: 4px;
+            border-radius: 6px;
             padding: 3px 7px;
         }
     )");
@@ -1006,9 +1341,9 @@ void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalP
 
     const QFontMetrics metrics{renameEditor->font()};
     const auto labelWidth = metrics.horizontalAdvance(nodeLabel);
-    const auto menuContentWidth = std::clamp(labelWidth + 48, 220, 720);
+    const auto menuContentWidth = std::clamp(labelWidth + 40, 140, 720);
     renameEditor->setMinimumWidth(menuContentWidth);
-    menu.setMinimumWidth(menuContentWidth + 24);
+    renameEditor->setMaximumWidth(menuContentWidth + 80);
     menu.setActiveAction(importAudioAction);
 
     connect(renameEditor, &QLineEdit::returnPressed, &menu, [&menu, this, trackId, renameEditor, nodeLabel]()
@@ -1050,6 +1385,30 @@ void MainWindow::refreshTimeline()
     m_timeline->setTrackSpans(m_controller->timelineTrackSpans());
 }
 
+void MainWindow::updateEditActionState()
+{
+    if (m_copyAction)
+    {
+        m_copyAction->setEnabled(m_controller->hasSelection());
+    }
+    if (m_cutAction)
+    {
+        m_cutAction->setEnabled(m_controller->hasSelection());
+    }
+    if (m_pasteAction)
+    {
+        m_pasteAction->setEnabled(m_controller->canPasteTracks());
+    }
+    if (m_undoAction)
+    {
+        m_undoAction->setEnabled(m_controller->canUndoTrackEdit());
+    }
+    if (m_redoAction)
+    {
+        m_redoAction->setEnabled(m_controller->canRedoTrackEdit());
+    }
+}
+
 bool MainWindow::shouldApplyNodeShortcutToAll() const
 {
     return m_timeline
@@ -1063,21 +1422,31 @@ void MainWindow::buildMenus()
     m_openAction = new QAction(QStringLiteral("Open Video"), this);
     m_openAction->setShortcut(QKeySequence::Open);
 
-    m_goToStartAction = new QAction(QStringLiteral("Start (Enter)"), this);
+    m_goToStartAction = new QAction(QStringLiteral("Jump to Start (Enter)"), this);
     m_playAction = new QAction(QStringLiteral("Play (Space)"), this);
     m_stepForwardAction = new QAction(QStringLiteral("Step Forward (.)"), this);
     m_stepBackAction = new QAction(QStringLiteral("Step Back (,)"), this);
     m_insertionFollowsPlaybackAction = new QAction(QStringLiteral("Insertion Follows Playback (N)"), this);
+    m_copyAction = new QAction(QStringLiteral("Copy (Ctrl+C)"), this);
+    m_pasteAction = new QAction(QStringLiteral("Paste (Ctrl+V)"), this);
+    m_cutAction = new QAction(QStringLiteral("Cut (Ctrl+X)"), this);
+    m_undoAction = new QAction(QStringLiteral("Undo (Ctrl+Z)"), this);
+    m_redoAction = new QAction(QStringLiteral("Redo (Ctrl+Y)"), this);
     m_selectAllAction = new QAction(QStringLiteral("Select All (Ctrl+A)"), this);
     m_unselectAllAction = new QAction(QStringLiteral("Unselect All (Esc)"), this);
 
     m_setNodeStartAction = new QAction(QStringLiteral("Set Start (A)"), this);
     m_setNodeEndAction = new QAction(QStringLiteral("Set End (S)"), this);
+    m_selectNextNodeAction = new QAction(QStringLiteral("Select Next (Tab)"), this);
+    m_moveNodeUpAction = new QAction(QStringLiteral("Move Up (Up)"), this);
+    m_moveNodeDownAction = new QAction(QStringLiteral("Move Down (Down)"), this);
+    m_moveNodeLeftAction = new QAction(QStringLiteral("Move Left (Left)"), this);
+    m_moveNodeRightAction = new QAction(QStringLiteral("Move Right (Right)"), this);
     m_trimNodeAction = new QAction(QStringLiteral("Trim Node (Shift+T)"), this);
     m_autoPanAction = new QAction(QStringLiteral("Auto Pan (R)"), this);
     m_toggleNodeNameAction = new QAction(QStringLiteral("Toggle Node Name (E)"), this);
     m_showAllNodeNamesAction = new QAction(QStringLiteral("Node Name Always On"), this);
-    m_importSoundAction = new QAction(QStringLiteral("Import Sound"), this);
+    m_importSoundAction = new QAction(QStringLiteral("Import Sound (Shift+Ctrl+I)"), this);
     m_showTimelineAction = new QAction(QStringLiteral("Show Timeline (T)"), this);
     m_timelineClickSeeksAction = new QAction(QStringLiteral("Click Seeks Playhead"), this);
     m_audioPoolAction = new QAction(QStringLiteral("Audio Pool (P)"), this);
@@ -1098,17 +1467,26 @@ void MainWindow::buildMenus()
     m_audioPoolAction->setCheckable(true);
     m_audioPoolAction->setChecked(false);
     m_importSoundAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
-
     m_toggleDebugAction = new QAction(QStringLiteral("Toggle Debug"), this);
     m_toggleDebugAction->setCheckable(true);
     m_toggleDebugAction->setChecked(true);
 
     m_setNodeStartAction->setEnabled(false);
     m_setNodeEndAction->setEnabled(false);
+    m_selectNextNodeAction->setEnabled(false);
+    m_moveNodeUpAction->setEnabled(false);
+    m_moveNodeDownAction->setEnabled(false);
+    m_moveNodeLeftAction->setEnabled(false);
+    m_moveNodeRightAction->setEnabled(false);
     m_trimNodeAction->setEnabled(false);
     m_autoPanAction->setEnabled(false);
     m_toggleNodeNameAction->setEnabled(false);
     m_importSoundAction->setEnabled(false);
+    m_copyAction->setEnabled(false);
+    m_pasteAction->setEnabled(false);
+    m_cutAction->setEnabled(false);
+    m_undoAction->setEnabled(false);
+    m_redoAction->setEnabled(false);
     m_deleteNodeAction->setEnabled(false);
     m_selectAllAction->setEnabled(false);
     m_unselectAllAction->setEnabled(false);
@@ -1118,15 +1496,24 @@ void MainWindow::buildMenus()
     fileMenu->addAction(m_openAction);
 
     auto* editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
-    editMenu->addAction(m_goToStartAction);
-    editMenu->addAction(m_playAction);
-    editMenu->addAction(m_stepForwardAction);
-    editMenu->addAction(m_stepBackAction);
+    editMenu->addAction(m_copyAction);
+    editMenu->addAction(m_pasteAction);
+    editMenu->addAction(m_cutAction);
+    editMenu->addAction(m_undoAction);
+    editMenu->addAction(m_redoAction);
+    editMenu->addSeparator();
     editMenu->addAction(m_insertionFollowsPlaybackAction);
     editMenu->addAction(m_selectAllAction);
     editMenu->addAction(m_unselectAllAction);
 
     auto* nodeMenu = menuBar()->addMenu(QStringLiteral("&Node"));
+    nodeMenu->addAction(m_selectNextNodeAction);
+    nodeMenu->addSeparator();
+    nodeMenu->addAction(m_moveNodeUpAction);
+    nodeMenu->addAction(m_moveNodeDownAction);
+    nodeMenu->addAction(m_moveNodeLeftAction);
+    nodeMenu->addAction(m_moveNodeRightAction);
+    nodeMenu->addSeparator();
     nodeMenu->addAction(m_setNodeStartAction);
     nodeMenu->addAction(m_setNodeEndAction);
     nodeMenu->addAction(m_trimNodeAction);
@@ -1142,6 +1529,12 @@ void MainWindow::buildMenus()
     soundMenu->addAction(m_autoPanAction);
 
     auto* timelineMenu = menuBar()->addMenu(QStringLiteral("&Timeline"));
+    timelineMenu->addAction(m_goToStartAction);
+    timelineMenu->addAction(m_playAction);
+    timelineMenu->addAction(m_stepForwardAction);
+    timelineMenu->addAction(m_stepBackAction);
+    timelineMenu->addAction(m_insertionFollowsPlaybackAction);
+    timelineMenu->addSeparator();
     timelineMenu->addAction(m_showTimelineAction);
     timelineMenu->addAction(m_timelineClickSeeksAction);
 
@@ -1172,16 +1565,24 @@ void MainWindow::buildUi()
     auto* layout = new QVBoxLayout(m_mainContent);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    m_frameLabel = new QLabel(QStringLiteral("Frame 0  |  0.00 s"), m_mainContent);
+    m_frameLabel = new QLabel(QStringLiteral("Frame 0  |  0.00 s"), menuBar());
+    m_frameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_frameLabel->setMinimumWidth(180);
     m_playPauseShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
     m_startShortcut = new QShortcut(QKeySequence(Qt::Key_Return), this);
     m_numpadStartShortcut = new QShortcut(QKeySequence(Qt::Key_Enter), this);
     m_stepBackShortcut = new QShortcut(QKeySequence(Qt::Key_Comma), this);
     m_stepForwardShortcut = new QShortcut(QKeySequence(Qt::Key_Period), this);
     m_insertionFollowsPlaybackShortcut = new QShortcut(QKeySequence(Qt::Key_N), this);
+    m_copyShortcut = new QShortcut(QKeySequence::Copy, this);
+    m_pasteShortcut = new QShortcut(QKeySequence::Paste, this);
+    m_cutShortcut = new QShortcut(QKeySequence::Cut, this);
+    m_undoShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Z), this);
+    m_redoShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Y), this);
     m_selectAllShortcut = new QShortcut(QKeySequence::SelectAll, this);
     m_nodeStartShortcut = new QShortcut(QKeySequence(Qt::Key_A), this);
     m_nodeEndShortcut = new QShortcut(QKeySequence(Qt::Key_S), this);
+    m_selectNextNodeShortcut = new QShortcut(QKeySequence(Qt::Key_Tab), this);
     m_showTimelineShortcut = new QShortcut(QKeySequence(Qt::Key_T), this);
     m_trimNodeShortcut = new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_T), this);
     m_autoPanShortcut = new QShortcut(QKeySequence(Qt::Key_R), this);
@@ -1195,9 +1596,15 @@ void MainWindow::buildUi()
     m_stepBackShortcut->setContext(Qt::ApplicationShortcut);
     m_stepForwardShortcut->setContext(Qt::ApplicationShortcut);
     m_insertionFollowsPlaybackShortcut->setContext(Qt::ApplicationShortcut);
+    m_copyShortcut->setContext(Qt::ApplicationShortcut);
+    m_pasteShortcut->setContext(Qt::ApplicationShortcut);
+    m_cutShortcut->setContext(Qt::ApplicationShortcut);
+    m_undoShortcut->setContext(Qt::ApplicationShortcut);
+    m_redoShortcut->setContext(Qt::ApplicationShortcut);
     m_selectAllShortcut->setContext(Qt::ApplicationShortcut);
     m_nodeStartShortcut->setContext(Qt::ApplicationShortcut);
     m_nodeEndShortcut->setContext(Qt::ApplicationShortcut);
+    m_selectNextNodeShortcut->setContext(Qt::ApplicationShortcut);
     m_showTimelineShortcut->setContext(Qt::ApplicationShortcut);
     m_trimNodeShortcut->setContext(Qt::ApplicationShortcut);
     m_autoPanShortcut->setContext(Qt::ApplicationShortcut);
@@ -1219,14 +1626,7 @@ void MainWindow::buildUi()
     timelinePanelLayout->setContentsMargins(0, 0, 0, 0);
     timelinePanelLayout->setSpacing(0);
 
-    auto* timelineInfoRow = new QHBoxLayout();
-    timelineInfoRow->setContentsMargins(8, 0, 8, 0);
-    timelineInfoRow->setSpacing(12);
-    timelineInfoRow->addWidget(m_frameLabel);
-    timelineInfoRow->addStretch(1);
-
     m_timeline = new TimelineView(m_timelinePanel);
-    timelinePanelLayout->addLayout(timelineInfoRow);
     timelinePanelLayout->addWidget(m_timeline, 1);
 
     m_audioPoolPanel = new QFrame(m_contentSplitter);
@@ -1242,15 +1642,18 @@ void MainWindow::buildUi()
     auto* audioPoolHeader = new QHBoxLayout();
     audioPoolHeader->setContentsMargins(8, 0, 8, 0);
     auto* audioPoolTitle = new QLabel(QStringLiteral("Audio Pool"), m_audioPoolPanel);
-    auto* audioPoolImportButton = new QPushButton(QStringLiteral("Import"), m_audioPoolPanel);
-    m_audioPoolCloseButton = new QPushButton(QStringLiteral("x"), m_audioPoolPanel);
-    audioPoolImportButton->setCursor(Qt::PointingHandCursor);
-    m_audioPoolCloseButton->setCursor(Qt::PointingHandCursor);
-    m_audioPoolCloseButton->setFixedWidth(28);
+    m_audioPoolMenuButton = new QToolButton(m_audioPoolPanel);
+    m_audioPoolMenuButton->setCursor(Qt::PointingHandCursor);
+    m_audioPoolMenuButton->setText(QStringLiteral("\u2630"));
+    m_audioPoolMenuButton->setFixedWidth(28);
+    m_audioPoolMenuButton->setToolTip(QStringLiteral("Audio Pool options"));
+    m_audioPoolMenuButton->setStyleSheet(QStringLiteral(
+        "QToolButton { background: transparent; color: #d7dee8; border: none; border-radius: 4px; padding: 1px 4px; font-size: 8.5pt; }"
+        "QToolButton:hover { background: rgba(255, 255, 255, 0.08); }"
+        "QToolButton:pressed { background: #111821; }"));
     audioPoolHeader->addWidget(audioPoolTitle);
     audioPoolHeader->addStretch(1);
-    audioPoolHeader->addWidget(audioPoolImportButton);
-    audioPoolHeader->addWidget(m_audioPoolCloseButton);
+    audioPoolHeader->addWidget(m_audioPoolMenuButton);
     audioPoolLayout->addLayout(audioPoolHeader);
 
     m_videoAudioRow = new QWidget(m_audioPoolPanel);
@@ -1266,12 +1669,56 @@ void MainWindow::buildUi()
     m_videoAudioLabel->setStyleSheet(QStringLiteral("color: #c7d0da; font-size: 8.5pt;"));
 
     m_videoAudioMuteButton = new QToolButton(m_videoAudioRow);
-    m_videoAudioMuteButton->setAutoRaise(true);
     m_videoAudioMuteButton->setCursor(Qt::PointingHandCursor);
+    m_videoAudioMuteButton->setFixedWidth(28);
     m_videoAudioMuteButton->setStyleSheet(QStringLiteral(
-        "QToolButton { background: transparent; border: none; padding: 2px; }"
-        "QToolButton:hover { background: rgba(255, 255, 255, 0.06); border-radius: 4px; }"));
-    connect(m_videoAudioMuteButton, &QToolButton::clicked, m_controller, &PlayerController::toggleEmbeddedVideoAudioMuted);
+        "QToolButton {"
+        "  background: transparent;"
+        "  color: #d7dee8;"
+        "  border: none;"
+        "  border-radius: 4px;"
+        "  padding: 1px 4px;"
+        "  font-size: 8.5pt;"
+        "}"
+        "QToolButton:hover { background: rgba(255, 255, 255, 0.08); }"
+        "QToolButton:pressed { background: #111821; }"));
+    connect(m_videoAudioMuteButton, &QToolButton::clicked, this, [this]()
+    {
+        if (!m_videoAudioMuteButton)
+        {
+            return;
+        }
+
+        QMenu menu(m_videoAudioMuteButton);
+        auto menuFont = menu.font();
+        menuFont.setPointSizeF(8.5);
+        menu.setFont(menuFont);
+        menu.setStyleSheet(QStringLiteral(
+            "QMenu { background: rgba(8, 10, 13, 204); color: #eef2f6; border: 1px solid #1f2935; border-radius: 8px; padding: 4px 0; font-size: 8.5pt; }"
+            "QMenu::item { padding: 6px 14px; }"
+            "QMenu::item:selected { background: #1a2028; }"));
+
+        const auto muted = m_controller->isEmbeddedVideoAudioMuted();
+        auto* toggleMuteAction = menu.addAction(muted ? QStringLiteral("Unmute") : QStringLiteral("Mute"));
+
+        const auto popupWidth = menu.sizeHint().width();
+        auto popupPoint = m_videoAudioMuteButton->mapToGlobal(
+            QPoint(m_videoAudioMuteButton->width() - popupWidth, m_videoAudioMuteButton->height()));
+        if (const auto* screen = m_videoAudioMuteButton->screen())
+        {
+            const auto screenRect = screen->availableGeometry();
+            if (popupPoint.x() + popupWidth > screenRect.right())
+            {
+                popupPoint.setX(screenRect.right() - popupWidth);
+            }
+            popupPoint.setX(std::max(screenRect.left(), popupPoint.x()));
+        }
+
+        if (menu.exec(popupPoint) == toggleMuteAction)
+        {
+            m_controller->toggleEmbeddedVideoAudioMuted();
+        }
+    });
 
     videoAudioLayout->addWidget(videoAudioIcon, 0, Qt::AlignVCenter);
     videoAudioLayout->addWidget(m_videoAudioLabel, 1);
@@ -1290,7 +1737,49 @@ void MainWindow::buildUi()
     m_audioPoolListLayout->setSpacing(1);
     audioPoolScroll->setWidget(m_audioPoolListContainer);
     audioPoolLayout->addWidget(audioPoolScroll, 1);
-    connect(audioPoolImportButton, &QPushButton::clicked, this, &MainWindow::importAudioToPool);
+    connect(m_audioPoolMenuButton, &QToolButton::clicked, this, [this]()
+    {
+        if (!m_audioPoolMenuButton)
+        {
+            return;
+        }
+
+        QMenu menu(m_audioPoolMenuButton);
+        auto menuFont = menu.font();
+        menuFont.setPointSizeF(8.5);
+        menu.setFont(menuFont);
+        menu.setStyleSheet(QStringLiteral(
+            "QMenu { background: rgba(8, 10, 13, 204); color: #eef2f6; border: 1px solid #1f2935; border-radius: 8px; padding: 4px 0; font-size: 8.5pt; }"
+            "QMenu::item { padding: 6px 14px; }"
+            "QMenu::item:selected { background: #1a2028; }"));
+
+        auto* importAction = menu.addAction(QStringLiteral("Import (Shift+Ctrl+I)"));
+        auto* closeAction = menu.addAction(QStringLiteral("Close (P)"));
+
+        const auto popupWidth = menu.sizeHint().width();
+        auto popupPoint = m_audioPoolMenuButton->mapToGlobal(
+            QPoint(m_audioPoolMenuButton->width() - popupWidth, m_audioPoolMenuButton->height()));
+        if (const auto* screen = m_audioPoolMenuButton->screen())
+        {
+            const auto screenRect = screen->availableGeometry();
+            if (popupPoint.x() + popupWidth > screenRect.right())
+            {
+                popupPoint.setX(screenRect.right() - popupWidth);
+            }
+            popupPoint.setX(std::max(screenRect.left(), popupPoint.x()));
+        }
+
+        const auto* chosenAction = menu.exec(popupPoint);
+        if (chosenAction == importAction)
+        {
+            importAudioToPool();
+        }
+        else if (chosenAction == closeAction)
+        {
+            updateAudioPoolVisibility(false);
+            showStatus(QStringLiteral("Audio Pool hidden."));
+        }
+    });
 
     m_mainVerticalSplitter->addWidget(m_canvas);
     m_mainVerticalSplitter->addWidget(m_timelinePanel);
@@ -1323,17 +1812,32 @@ void MainWindow::buildUi()
     outerLayout->addWidget(m_contentSplitter, 1);
 
     setCentralWidget(root);
+    menuBar()->setCornerWidget(m_frameLabel, Qt::TopRightCorner);
+    statusBar()->hide();
 
-    auto* debugOverlay = new DebugOverlayWindow(root);
+    auto* debugOverlay = new DebugOverlayWindow();
     m_debugOverlay = debugOverlay;
-    m_debugOverlay->move(16, 16);
+    connect(this, &QObject::destroyed, debugOverlay, &QObject::deleteLater);
+    m_debugOverlay->move(mapToGlobal(QPoint(16, 48)));
     m_debugOverlay->setVisible(m_debugVisible);
-    m_debugOverlay->raise();
     connect(debugOverlay, &DebugOverlayWindow::closeRequested, this, [this]()
     {
         updateDebugVisibility(false);
         showStatus(QStringLiteral("Debug window hidden."));
     });
+
+    m_statusToast = new QLabel(root);
+    m_statusToast->setObjectName(QStringLiteral("statusToast"));
+    m_statusToast->setWordWrap(true);
+    m_statusToast->hide();
+
+    m_canvasTipsOverlay = new QLabel(m_canvas);
+    m_canvasTipsOverlay->setObjectName(QStringLiteral("canvasTipsOverlay"));
+    m_canvasTipsOverlay->setWordWrap(true);
+    m_canvasTipsOverlay->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_canvasTipsOverlay->setMaximumWidth(300);
+    m_canvasTipsOverlay->hide();
+    updateOverlayPositions();
 
     setStyleSheet(R"(
         QMainWindow {
@@ -1367,9 +1871,11 @@ void MainWindow::buildUi()
             padding-right: 4px;
         }
         QMenu {
-            background: #121720;
+            background: rgba(18, 23, 32, 204);
             color: #f3f5f7;
             border: 1px solid #324155;
+            border-radius: 8px;
+            font-size: 8.5pt;
         }
         QMenu::item:selected {
             background: #223146;
@@ -1379,6 +1885,27 @@ void MainWindow::buildUi()
         }
         QStatusBar {
             background: #121720;
+        }
+        QStatusBar QLabel {
+            color: #b8c6d4;
+            font-size: 9pt;
+            padding-right: 10px;
+        }
+        QLabel#statusToast {
+            color: #f2f5f8;
+            font-size: 9pt;
+            background: rgba(11, 15, 20, 210);
+            border: 1px solid #324155;
+            border-radius: 8px;
+            padding: 8px 12px;
+        }
+        QLabel#canvasTipsOverlay {
+            color: #dce4ec;
+            font-size: 9pt;
+            background: rgba(11, 15, 20, 156);
+            border: 1px solid rgba(80, 98, 123, 180);
+            border-radius: 8px;
+            padding: 8px 10px;
         }
         QFrame {
             background: #0f141b;
@@ -1394,14 +1921,13 @@ void MainWindow::buildUi()
             background: #07090c;
         }
         QFrame#debugOverlay {
-            background: #0b0f14;
-            border: 1px solid #253142;
-            border-radius: 8px;
+            background: transparent;
+            border: none;
         }
         QWidget#debugOverlayTitleBar {
-            background: #111821;
-            border-top-left-radius: 8px;
-            border-top-right-radius: 8px;
+            background: rgba(17, 24, 33, 128);
+            border: 1px solid #253142;
+            border-radius: 8px;
         }
         QLabel#debugOverlayTitle {
             color: #f3f5f7;
@@ -1411,7 +1937,9 @@ void MainWindow::buildUi()
             color: #d8dde4;
             font-size: 9pt;
             padding: 10px;
-            background: #0b0f14;
+            background: rgba(11, 15, 20, 128);
+            border: 1px solid #253142;
+            border-radius: 8px;
         }
         QPushButton#debugOverlayCloseButton {
             background: #18202b;

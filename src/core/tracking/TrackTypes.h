@@ -2,6 +2,7 @@
 
 #include <map>
 #include <optional>
+#include <vector>
 
 #include <QColor>
 #include <QPointF>
@@ -98,4 +99,10 @@ struct TrackOverlay
     bool showLabel = false;
     bool hasAttachedAudio = false;
     bool autoPanEnabled = false;
+};
+
+struct MotionTrackerState
+{
+    std::vector<TrackPoint> tracks;
+    int nextColorIndex = 0;
 };

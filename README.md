@@ -99,6 +99,23 @@ These scripts build in a short-path workspace like `C:\dawg-dev\src` and keep yo
 
 That means the repo folder can be very large on disk without GitHub receiving all of that data.
 
+## Performance Logging
+
+DAWG now writes lightweight runtime performance events to `.watch-out.log`.
+
+If you use the helper scripts, the active runtime log is typically written in the short-path build workspace, for example:
+
+- `C:\dawg-dev\out\Debug\.watch-out.log`
+
+That log can contain entries such as:
+
+- `session` for clip/backend startup information
+- `seek` and `seek_slow` for timeline jumps
+- `playback_hitch` for frame pacing issues during playback
+- `stop` for transport stop points
+
+The repo-root `.watch-out.log` may not be the live one if the app is launched through the short-path scripts.
+
 ## What Is Actually Pushed To GitHub
 
 Git only pushes tracked files, not every file sitting in the folder.

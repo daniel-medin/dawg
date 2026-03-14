@@ -1,6 +1,7 @@
 #include "core/video/VideoPlaybackService.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -21,8 +22,13 @@ std::unique_ptr<VideoDecoder> createVideoDecoder()
 }
 
 VideoPlaybackService::VideoPlaybackService()
-    : m_frameQueue(3)
+    : m_frameQueue(12)
 {
+}
+
+VideoPlaybackService::~VideoPlaybackService()
+{
+    close();
 }
 
 bool VideoPlaybackService::open(const QString& filePath)
@@ -45,25 +51,53 @@ bool VideoPlaybackService::open(const QString& filePath)
         return false;
     }
 
-    m_loadedPath = filePath;
-    m_totalFrames = decoder->frameCount();
-    m_fps = decoder->fps();
-    m_currentFrame = *firstFrame;
-    m_decoder = std::move(decoder);
-    cacheFrameTimestamp(m_currentFrame);
-    prefetchFrames(2);
+    {
+        const std::lock_guard decoderLock(m_decoderMutex);
+        m_decoder = std::move(decoder);
+    }
+
+    {
+        const std::lock_guard stateLock(m_stateMutex);
+        m_loadedPath = filePath;
+        m_totalFrames = m_decoder ? m_decoder->frameCount() : 0;
+        m_fps = m_decoder ? m_decoder->fps() : 0.0;
+        m_currentFrame = *firstFrame;
+        m_frameQueue.clear();
+        m_frameTimestampsSeconds.clear();
+        m_reachedEndOfStream = false;
+        m_lastStepWaitMs = 0;
+        m_lastStepUsedSynchronousFallback = false;
+        m_queueStarvationCount = 0;
+        ++m_prefetchGeneration;
+        cacheFrameTimestampLocked(m_currentFrame);
+    }
+
+    startPrefetchThread();
+    requestPrefetch();
     return true;
 }
 
 void VideoPlaybackService::close()
 {
-    m_decoder.reset();
+    stopPrefetchThread();
+
+    {
+        const std::lock_guard decoderLock(m_decoderMutex);
+        m_decoder.reset();
+    }
+
+    const std::lock_guard stateLock(m_stateMutex);
     m_frameQueue.clear();
     m_frameTimestampsSeconds.clear();
     m_loadedPath.clear();
     m_currentFrame = {};
     m_totalFrames = 0;
     m_fps = 0.0;
+    m_reachedEndOfStream = false;
+    m_lastStepWaitMs = 0;
+    m_lastStepUsedSynchronousFallback = false;
+    m_queueStarvationCount = 0;
+    ++m_prefetchGeneration;
 }
 
 bool VideoPlaybackService::hasVideoLoaded() const
@@ -134,27 +168,46 @@ bool VideoPlaybackService::seekFrame(const int frameIndex)
         return true;
     }
 
-    if (!m_decoder->seekFrame(targetFrameIndex))
+    std::optional<VideoFrame> resolvedFrame;
     {
-        return false;
-    }
-
-    m_frameQueue.clear();
-    while (true)
-    {
-        const auto frame = m_decoder->readFrame();
-        if (!frame.has_value() || !frame->isValid())
+        const std::lock_guard decoderLock(m_decoderMutex);
+        if (!m_decoder || !m_decoder->seekFrame(targetFrameIndex))
         {
             return false;
         }
 
-        cacheFrameTimestamp(*frame);
-        if (frame->index >= targetFrameIndex)
+        while (true)
         {
-            m_currentFrame = *frame;
-            return true;
+            const auto frame = m_decoder->readFrame();
+            if (!frame.has_value() || !frame->isValid())
+            {
+                break;
+            }
+
+            if (frame->index >= targetFrameIndex)
+            {
+                resolvedFrame = *frame;
+                break;
+            }
         }
     }
+
+    if (!resolvedFrame.has_value() || !resolvedFrame->isValid())
+    {
+        return false;
+    }
+
+    {
+        const std::lock_guard stateLock(m_stateMutex);
+        m_frameQueue.clear();
+        m_currentFrame = *resolvedFrame;
+        m_reachedEndOfStream = false;
+        ++m_prefetchGeneration;
+        cacheFrameTimestampLocked(m_currentFrame);
+    }
+
+    requestPrefetch();
+    return true;
 }
 
 std::optional<VideoFrame> VideoPlaybackService::stepForward()
@@ -164,38 +217,80 @@ std::optional<VideoFrame> VideoPlaybackService::stepForward()
         return std::nullopt;
     }
 
-    while (!m_frameQueue.empty())
+    qint64 waitMs = 0;
     {
-        const auto nextFrame = m_frameQueue.takeFront();
-        if (!nextFrame.has_value() || !nextFrame->isValid())
+        std::unique_lock stateLock(m_stateMutex);
+        if (m_frameQueue.empty() && !m_reachedEndOfStream)
         {
-            continue;
+            const auto waitStart = std::chrono::steady_clock::now();
+            m_prefetchCv.notify_all();
+            m_prefetchCv.wait_for(
+                stateLock,
+                std::chrono::milliseconds(10),
+                [this]()
+                {
+                    return !m_frameQueue.empty() || m_reachedEndOfStream || m_stopPrefetch;
+                });
+            waitMs = static_cast<qint64>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - waitStart).count());
         }
 
-        if (nextFrame->index <= m_currentFrame.index)
+        while (!m_frameQueue.empty())
         {
-            continue;
-        }
+            const auto nextFrame = m_frameQueue.takeFront();
+            if (!nextFrame.has_value() || !nextFrame->isValid())
+            {
+                continue;
+            }
 
-        m_currentFrame = *nextFrame;
-        prefetchFrames(2);
-        return m_currentFrame;
+            if (nextFrame->index <= m_currentFrame.index)
+            {
+                continue;
+            }
+
+            m_lastStepWaitMs = waitMs;
+            m_lastStepUsedSynchronousFallback = false;
+            m_currentFrame = *nextFrame;
+            stateLock.unlock();
+            requestPrefetch();
+            return m_currentFrame;
+        }
     }
 
-    const auto nextFrame = m_decoder->readFrame();
+    std::optional<VideoFrame> nextFrame;
+    {
+        const std::lock_guard decoderLock(m_decoderMutex);
+        if (m_decoder)
+        {
+            nextFrame = m_decoder->readFrame();
+        }
+    }
+
     if (!nextFrame.has_value() || !nextFrame->isValid())
     {
+        const std::lock_guard stateLock(m_stateMutex);
+        m_reachedEndOfStream = true;
+        m_lastStepWaitMs = waitMs;
+        m_lastStepUsedSynchronousFallback = false;
         return std::nullopt;
     }
 
-    cacheFrameTimestamp(*nextFrame);
-    m_currentFrame = *nextFrame;
-    prefetchFrames(2);
+    {
+        const std::lock_guard stateLock(m_stateMutex);
+        cacheFrameTimestampLocked(*nextFrame);
+        m_lastStepWaitMs = waitMs;
+        m_lastStepUsedSynchronousFallback = true;
+        ++m_queueStarvationCount;
+        m_currentFrame = *nextFrame;
+    }
+    requestPrefetch();
     return m_currentFrame;
 }
 
 double VideoPlaybackService::frameTimestampSeconds(const int frameIndex) const
 {
+    const std::lock_guard stateLock(m_stateMutex);
     if (frameIndex >= 0
         && frameIndex < static_cast<int>(m_frameTimestampsSeconds.size())
         && m_frameTimestampsSeconds[static_cast<std::size_t>(frameIndex)] >= 0.0)
@@ -209,8 +304,15 @@ double VideoPlaybackService::frameTimestampSeconds(const int frameIndex) const
 
 int VideoPlaybackService::frameIndexForPresentationTime(const double targetTimestampSeconds, const int currentFrameIndex) const
 {
+    const std::lock_guard stateLock(m_stateMutex);
     int bestFrameIndex = std::max(0, currentFrameIndex);
-    double bestTimestamp = frameTimestampSeconds(bestFrameIndex);
+    double bestTimestamp = (bestFrameIndex >= 0
+        && bestFrameIndex < static_cast<int>(m_frameTimestampsSeconds.size())
+        && m_frameTimestampsSeconds[static_cast<std::size_t>(bestFrameIndex)] >= 0.0)
+            ? m_frameTimestampsSeconds[static_cast<std::size_t>(bestFrameIndex)]
+            : ((bestFrameIndex >= 0)
+                ? (static_cast<double>(bestFrameIndex) / (m_fps > 0.0 ? m_fps : 30.0))
+                : 0.0);
 
     for (int frameIndex = 0; frameIndex < static_cast<int>(m_frameTimestampsSeconds.size()); ++frameIndex)
     {
@@ -243,7 +345,26 @@ int VideoPlaybackService::frameIndexForPresentationTime(const double targetTimes
     return std::clamp(bestFrameIndex, 0, std::max(0, m_totalFrames - 1));
 }
 
+VideoPlaybackRuntimeStats VideoPlaybackService::runtimeStats() const
+{
+    const std::lock_guard stateLock(m_stateMutex);
+    return VideoPlaybackRuntimeStats{
+        .queuedFrames = static_cast<int>(m_frameQueue.size()),
+        .prefetchTargetFrames = static_cast<int>(m_prefetchTargetSize),
+        .reachedEndOfStream = m_reachedEndOfStream,
+        .lastStepWaitMs = m_lastStepWaitMs,
+        .lastStepUsedSynchronousFallback = m_lastStepUsedSynchronousFallback,
+        .queueStarvationCount = m_queueStarvationCount,
+    };
+}
+
 void VideoPlaybackService::cacheFrameTimestamp(const VideoFrame& frame)
+{
+    const std::lock_guard stateLock(m_stateMutex);
+    cacheFrameTimestampLocked(frame);
+}
+
+void VideoPlaybackService::cacheFrameTimestampLocked(const VideoFrame& frame)
 {
     if (frame.index < 0)
     {
@@ -260,25 +381,98 @@ void VideoPlaybackService::cacheFrameTimestamp(const VideoFrame& frame)
 
 void VideoPlaybackService::prefetchFrames(const std::size_t desiredQueuedFrames)
 {
-    if (!m_decoder)
+    m_prefetchTargetSize = std::max<std::size_t>(1, desiredQueuedFrames);
+    requestPrefetch();
+}
+
+void VideoPlaybackService::startPrefetchThread()
+{
+    stopPrefetchThread();
     {
-        return;
+        const std::lock_guard stateLock(m_stateMutex);
+        m_stopPrefetch = false;
     }
+    m_prefetchThread = std::thread(&VideoPlaybackService::prefetchLoop, this);
+}
 
-    while (m_frameQueue.size() < desiredQueuedFrames)
+void VideoPlaybackService::stopPrefetchThread()
+{
     {
-        const auto decodedFrame = m_decoder->readFrame();
-        if (!decodedFrame.has_value() || !decodedFrame->isValid())
+        const std::lock_guard stateLock(m_stateMutex);
+        m_stopPrefetch = true;
+    }
+    m_prefetchCv.notify_all();
+
+    if (m_prefetchThread.joinable())
+    {
+        m_prefetchThread.join();
+    }
+}
+
+void VideoPlaybackService::requestPrefetch()
+{
+    m_prefetchCv.notify_all();
+}
+
+void VideoPlaybackService::prefetchLoop()
+{
+    for (;;)
+    {
+        std::uint64_t generation = 0;
         {
-            break;
+            std::unique_lock stateLock(m_stateMutex);
+            m_prefetchCv.wait(
+                stateLock,
+                [this]()
+                {
+                    return m_stopPrefetch
+                        || (m_totalFrames > 0 && !m_reachedEndOfStream && m_frameQueue.size() < m_prefetchTargetSize);
+                });
+
+            if (m_stopPrefetch)
+            {
+                return;
+            }
+
+            generation = m_prefetchGeneration;
         }
 
-        cacheFrameTimestamp(*decodedFrame);
-        if (decodedFrame->index <= m_currentFrame.index)
+        std::optional<VideoFrame> decodedFrame;
         {
-            continue;
+            const std::lock_guard decoderLock(m_decoderMutex);
+            if (!m_decoder)
+            {
+                continue;
+            }
+
+            decodedFrame = m_decoder->readFrame();
         }
 
-        m_frameQueue.push(*decodedFrame);
+        {
+            const std::lock_guard stateLock(m_stateMutex);
+            if (m_stopPrefetch)
+            {
+                return;
+            }
+
+            if (generation != m_prefetchGeneration)
+            {
+                continue;
+            }
+
+            if (!decodedFrame.has_value() || !decodedFrame->isValid())
+            {
+                m_reachedEndOfStream = true;
+                continue;
+            }
+
+            cacheFrameTimestampLocked(*decodedFrame);
+            if (decodedFrame->index > m_currentFrame.index)
+            {
+                m_frameQueue.push(*decodedFrame);
+            }
+        }
+
+        m_prefetchCv.notify_all();
     }
 }

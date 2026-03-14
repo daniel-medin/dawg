@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -15,6 +16,7 @@
 
 #include "app/TransportController.h"
 #include "app/AudioPoolService.h"
+#include "app/PerformanceLogger.h"
 #include "core/audio/AudioEngine.h"
 #include "core/render/RenderService.h"
 #include "core/tracking/MotionTracker.h"
@@ -46,11 +48,17 @@ public:
     void selectTracks(const QList<QUuid>& trackIds);
     void selectTrack(const QUuid& trackId);
     void clearSelection();
+    bool copySelectedTracks();
+    bool pasteCopiedTracksAtCurrentFrame();
+    bool cutSelectedTracks();
+    bool undoLastTrackEdit();
+    bool redoLastTrackEdit();
     bool renameTrack(const QUuid& trackId, const QString& label);
     void setTrackStartFrame(const QUuid& trackId, int frameIndex);
     void setTrackEndFrame(const QUuid& trackId, int frameIndex);
     void moveTrackFrameSpan(const QUuid& trackId, int deltaFrames);
     void moveSelectedTrack(const QPointF& imagePoint);
+    void nudgeSelectedTracks(const QPointF& delta);
     void deleteSelectedTrack();
     void clearAllTracks();
     void setSelectedTrackStartToCurrentFrame();
@@ -63,6 +71,7 @@ public:
     void toggleEmbeddedVideoAudioMuted();
     void setInsertionFollowsPlayback(bool enabled);
     void setMotionTrackingEnabled(bool enabled);
+    void selectNextVisibleTrack();
 
     [[nodiscard]] bool hasVideoLoaded() const;
     [[nodiscard]] bool isPlaying() const;
@@ -70,6 +79,9 @@ public:
     [[nodiscard]] bool isMotionTrackingEnabled() const;
     [[nodiscard]] bool hasSelection() const;
     [[nodiscard]] bool hasTracks() const;
+    [[nodiscard]] bool canPasteTracks() const;
+    [[nodiscard]] bool canUndoTrackEdit() const;
+    [[nodiscard]] bool canRedoTrackEdit() const;
     [[nodiscard]] int trackCount() const;
     [[nodiscard]] int currentFrameIndex() const;
     [[nodiscard]] int totalFrames() const;
@@ -104,6 +116,7 @@ signals:
     void selectionChanged(bool hasSelection);
     void trackAvailabilityChanged(bool hasTracks);
     void audioPoolChanged();
+    void editStateChanged();
     void statusChanged(const QString& message);
 
 private slots:
@@ -116,11 +129,14 @@ private:
     bool loadFrameAt(int frameIndex);
     [[nodiscard]] double frameTimestampSeconds(int frameIndex) const;
     [[nodiscard]] std::optional<int> trimmedEndFrameForTrack(const TrackPoint& track) const;
+    void saveUndoState();
+    void restoreTrackEditState(const MotionTrackerState& trackerState, const std::vector<QUuid>& selectedTrackIds);
     void syncAttachedAudioForCurrentFrame();
     void refreshOverlays();
     void emitCurrentFrame();
     [[nodiscard]] bool isTrackSelected(const QUuid& trackId) const;
     void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
+    void logPlaybackHitchIfNeeded(int targetFrameIndex, int previousFrameIndex, int advancedFrames);
 
     VideoPlaybackService m_videoPlayback;
     TransportController m_transport;
@@ -141,10 +157,18 @@ private:
     bool m_motionTrackingEnabled = false;
     double m_playbackStartTimestampSeconds = 0.0;
     QElapsedTimer m_playbackElapsedTimer;
+    QElapsedTimer m_perfPlaybackTickTimer;
     std::vector<QUuid> m_selectedTrackIds;
     QUuid m_selectedTrackId;
     QUuid m_fadingDeselectedTrackId;
     float m_fadingDeselectedTrackOpacity = 0.0F;
     QTimer m_selectionFadeTimer;
+    std::vector<TrackPoint> m_copiedTracks;
+    std::optional<MotionTrackerState> m_undoTrackerState;
+    std::vector<QUuid> m_undoSelectedTrackIds;
+    std::optional<MotionTrackerState> m_redoTrackerState;
+    std::vector<QUuid> m_redoSelectedTrackIds;
+    PerformanceLogger m_perfLogger;
+    std::uint64_t m_lastLoggedQueueStarvationCount = 0;
     const QUuid m_embeddedVideoAudioTrackId = QUuid(QStringLiteral("{eb6fc60f-0781-433f-9f03-ff16531165f7}"));
 };

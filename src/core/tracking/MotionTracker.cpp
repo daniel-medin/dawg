@@ -310,6 +310,17 @@ int MotionTracker::detachTrackAudioByPath(const QString& assetPath)
     return detachedCount;
 }
 
+void MotionTracker::addTrack(const TrackPoint& track)
+{
+    m_tracks.push_back(track);
+}
+
+void MotionTracker::restoreState(const MotionTrackerState& state)
+{
+    m_tracks = state.tracks;
+    m_nextColorIndex = state.nextColorIndex;
+}
+
 int MotionTracker::setTrackStartFrames(const std::vector<QUuid>& trackIds, const int startFrame)
 {
     if (trackIds.empty())
@@ -435,6 +446,14 @@ int MotionTracker::removeTracks(const std::vector<QUuid>& trackIds)
 const std::vector<TrackPoint>& MotionTracker::tracks() const
 {
     return m_tracks;
+}
+
+MotionTrackerState MotionTracker::snapshotState() const
+{
+    return MotionTrackerState{
+        .tracks = m_tracks,
+        .nextColorIndex = m_nextColorIndex
+    };
 }
 
 bool MotionTracker::hasMotionTrackedTracks() const
