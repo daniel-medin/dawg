@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <cmath>
 #include <memory>
 
 #include <QCoreApplication>
@@ -163,6 +164,7 @@ QString hresultToString(const HRESULT result)
         .arg(static_cast<quint32>(result), 8, 16, QLatin1Char('0'))
         .toUpper();
 }
+
 #endif
 }
 
@@ -615,10 +617,10 @@ struct D3D11RenderBackend::Impl
         return true;
     }
 
-    bool uploadImage(TextureResource& resource, const QImage& image)
+    bool uploadImage(TextureResource& resource, const QImage& image, const QImage::Format uploadFormat)
     {
-        const auto uploadImage = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-        if (!ensureTexture(resource, uploadImage.size()))
+        const auto preparedImage = image.convertToFormat(uploadFormat);
+        if (!ensureTexture(resource, preparedImage.size()))
         {
             return false;
         }
@@ -628,15 +630,15 @@ struct D3D11RenderBackend::Impl
         {
             logDiagnostic(
                 QStringLiteral("d3d_upload_fail"),
-                QStringLiteral("Map texture size=%1x%2").arg(uploadImage.width()).arg(uploadImage.height()),
+                QStringLiteral("Map texture size=%1x%2").arg(preparedImage.width()).arg(preparedImage.height()),
                 true);
             return false;
         }
 
-        const auto bytesPerRow = static_cast<std::size_t>(uploadImage.width()) * 4;
-        for (int row = 0; row < uploadImage.height(); ++row)
+        const auto bytesPerRow = static_cast<std::size_t>(preparedImage.width()) * 4;
+        for (int row = 0; row < preparedImage.height(); ++row)
         {
-            const auto* sourceRow = uploadImage.constBits() + (row * uploadImage.bytesPerLine());
+            const auto* sourceRow = preparedImage.constBits() + (row * preparedImage.bytesPerLine());
             auto* destinationRow = static_cast<std::byte*>(mapped.pData) + (row * mapped.RowPitch);
             std::memcpy(destinationRow, sourceRow, bytesPerRow);
         }
@@ -723,22 +725,28 @@ struct D3D11RenderBackend::Impl
             return false;
         }
 
-        if (!uploadImage(videoTexture, frame.cpuImage))
+        const auto videoUploadImage = frame.cpuImage.convertToFormat(QImage::Format_RGB32);
+        if (!uploadImage(videoTexture, videoUploadImage, QImage::Format_RGB32))
         {
             logDiagnostic(
                 QStringLiteral("d3d_present_fail"),
                 QStringLiteral("videoUpload frame=%1 size=%2x%3")
                     .arg(frame.index)
-                    .arg(frame.cpuImage.width())
-                    .arg(frame.cpuImage.height()),
+                    .arg(videoUploadImage.width())
+                    .arg(videoUploadImage.height()),
                 true);
             return false;
         }
 
-        const auto preparedOverlayImage = overlayImage.isNull()
+        auto preparedOverlayImage = overlayImage.isNull()
             ? QImage(surfaceSize, QImage::Format_ARGB32_Premultiplied)
             : overlayImage;
-        if (preparedOverlayImage.isNull() || !uploadImage(overlayTexture, preparedOverlayImage))
+        if (overlayImage.isNull())
+        {
+            preparedOverlayImage.fill(Qt::transparent);
+        }
+        if (preparedOverlayImage.isNull()
+            || !uploadImage(overlayTexture, preparedOverlayImage, QImage::Format_ARGB32_Premultiplied))
         {
             logDiagnostic(
                 QStringLiteral("d3d_present_fail"),
@@ -784,7 +792,7 @@ struct D3D11RenderBackend::Impl
             return false;
         }
 
-        if (successfulPresentCount == 0 || (successfulPresentCount % 120) == 0)
+        if (successfulPresentCount == 0)
         {
             logDiagnostic(
                 QStringLiteral("d3d_present_ok"),

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -48,26 +49,26 @@ QString audioPathFromMimeData(const QMimeData* mimeData)
 class VideoSurfaceLayer final : public QWidget
 {
 public:
-    explicit VideoSurfaceLayer(QWidget* parent = nullptr)
+    explicit VideoSurfaceLayer(std::function<void(bool)> nativePresentationChanged, QWidget* parent = nullptr)
         : QWidget(parent)
+        , m_nativePresentationChanged(std::move(nativePresentationChanged))
     {
+        setAttribute(Qt::WA_NativeWindow);
+        setAttribute(Qt::WA_PaintOnScreen);
         setAttribute(Qt::WA_OpaquePaintEvent);
         setAttribute(Qt::WA_NoSystemBackground);
         setAutoFillBackground(false);
-        setAttribute(Qt::WA_NativeWindow);
     }
 
     void setFrame(const QImage& frame)
     {
         m_frame = frame;
-        scheduleNativeProbe();
         update();
     }
 
     void setVideoFrame(const VideoFrame& frame)
     {
         m_videoFrame = frame;
-        scheduleNativeProbe();
         update();
     }
 
@@ -79,26 +80,27 @@ public:
         }
 
         m_sourceFrameSize = sourceSize;
-        scheduleNativeProbe();
         update();
     }
 
     void setRenderService(RenderService* renderService)
     {
         m_renderService = renderService;
-        scheduleNativeProbe();
         update();
     }
 
-    void setNativeProbeEnabled(const bool enabled)
+    void setNativePresentationEnabled(const bool enabled)
     {
-        if (m_nativeProbeEnabled == enabled)
+        if (m_nativePresentationEnabled == enabled)
         {
             return;
         }
 
-        m_nativeProbeEnabled = enabled;
-        m_nativeProbePending = enabled;
+        m_nativePresentationEnabled = enabled;
+        if (!enabled)
+        {
+            setNativePresentationActive(false);
+        }
         update();
     }
 
@@ -128,52 +130,62 @@ public:
     }
 
 protected:
+    [[nodiscard]] QPaintEngine* paintEngine() const override
+    {
+        return nullptr;
+    }
+
     void paintEvent(QPaintEvent* event) override
     {
         Q_UNUSED(event);
 
-        const auto frameRect = imageRenderRect();
-        runNativeProbe(frameRect);
-        QPainter painter(this);
-        painter.fillRect(rect(), QColor{12, 14, 18});
-        painter.fillRect(frameRect, QColor{24, 27, 32});
-        if (!m_frame.isNull())
-        {
-            painter.drawImage(frameRect, m_frame);
-        }
+        static_cast<void>(presentFrameToNativeSurface(imageRenderRect()));
     }
 
 private:
-    void scheduleNativeProbe()
+    [[nodiscard]] bool presentFrameToNativeSurface(const QRectF& frameRect)
     {
-        m_nativeProbePending = true;
-    }
-
-    void runNativeProbe(const QRectF& frameRect)
-    {
-        if (!m_nativeProbeEnabled
-            || !m_nativeProbePending
+        if (!m_nativePresentationEnabled
             || !m_renderService
             || !m_renderService->canPresentToNativeWindow())
         {
-            return;
+            setNativePresentationActive(false);
+            return false;
         }
 
-        m_nativeProbePending = false;
-        if (!m_videoFrame.isValid())
+        if (!m_videoFrame.isValid() || !frameRect.isValid() || !size().isValid())
+        {
+            setNativePresentationActive(false);
+            return false;
+        }
+
+        const auto presented =
+            m_renderService->presentToNativeWindow(this, size(), m_videoFrame, frameRect, QImage{});
+        setNativePresentationActive(presented);
+        return presented;
+    }
+
+    void setNativePresentationActive(const bool active)
+    {
+        if (m_nativePresentationActive == active)
         {
             return;
         }
 
-        m_renderService->presentToNativeWindow(this, size(), m_videoFrame, frameRect, QImage{});
+        m_nativePresentationActive = active;
+        if (m_nativePresentationChanged)
+        {
+            m_nativePresentationChanged(active);
+        }
     }
 
     QImage m_frame;
     QSize m_sourceFrameSize;
     VideoFrame m_videoFrame;
     RenderService* m_renderService = nullptr;
-    bool m_nativeProbeEnabled = true;
-    bool m_nativeProbePending = true;
+    std::function<void(bool)> m_nativePresentationChanged;
+    bool m_nativePresentationEnabled = false;
+    bool m_nativePresentationActive = false;
 };
 
 class VideoOverlayLayer final : public QWidget
@@ -192,6 +204,7 @@ public:
 
     void setFrame(const QImage& frame)
     {
+        m_frame = frame;
         m_presentedFrameSize = frame.size();
         m_hasFrame = !frame.isNull();
         update();
@@ -225,6 +238,17 @@ public:
         update();
     }
 
+    void setNativePresentationActive(const bool active)
+    {
+        if (m_nativePresentationActive == active)
+        {
+            return;
+        }
+
+        m_nativePresentationActive = active;
+        update();
+    }
+
 protected:
     void paintEvent(QPaintEvent* event) override
     {
@@ -238,6 +262,16 @@ protected:
             painter.fillRect(frameRect, QColor{24, 27, 32});
             paintWelcomeState(painter, frameRect);
             return;
+        }
+
+        if (!m_nativePresentationActive)
+        {
+            painter.fillRect(rect(), QColor{12, 14, 18});
+            painter.fillRect(frameRect, QColor{24, 27, 32});
+            if (!m_frame.isNull())
+            {
+                painter.drawImage(frameRect, m_frame);
+            }
         }
 
         paintOverlayContent(painter, frameRect);
@@ -654,6 +688,7 @@ private:
     }
 
     VideoCanvas* m_owner = nullptr;
+    QImage m_frame;
     QImage m_emptyStateLogo;
     QSize m_presentedFrameSize;
     QSize m_sourceFrameSize;
@@ -663,6 +698,7 @@ private:
     QRectF m_selectionRect;
     bool m_showAllLabels = false;
     bool m_hasFrame = false;
+    bool m_nativePresentationActive = false;
     bool m_pendingSeed = false;
     bool m_isMarqueeSelecting = false;
 };
@@ -672,7 +708,15 @@ VideoCanvas::VideoCanvas(QWidget* parent)
     : QWidget(parent)
 {
     setMinimumSize(960, 540);
-    m_surfaceLayer = new VideoSurfaceLayer(this);
+    m_surfaceLayer = new VideoSurfaceLayer(
+        [this](const bool active)
+        {
+            if (m_overlayLayer)
+            {
+                static_cast<VideoOverlayLayer*>(m_overlayLayer)->setNativePresentationActive(active);
+            }
+        },
+        this);
     m_overlayLayer = new VideoOverlayLayer(this);
     m_surfaceLayer->setGeometry(rect());
     m_overlayLayer->setGeometry(rect());
@@ -712,9 +756,9 @@ void VideoCanvas::setSourceFrameSize(const QSize& sourceSize)
     static_cast<VideoOverlayLayer*>(m_overlayLayer)->setSourceFrameSize(sourceSize);
 }
 
-void VideoCanvas::setNativeProbeEnabled(const bool enabled)
+void VideoCanvas::setNativePresentationEnabled(const bool enabled)
 {
-    static_cast<VideoSurfaceLayer*>(m_surfaceLayer)->setNativeProbeEnabled(enabled);
+    static_cast<VideoSurfaceLayer*>(m_surfaceLayer)->setNativePresentationEnabled(enabled);
 }
 
 void VideoCanvas::setDisplayScaleFactor(const double scaleFactor)

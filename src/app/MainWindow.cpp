@@ -912,11 +912,6 @@ void MainWindow::updateNativeViewportVisibility(const bool visible)
         return;
     }
 
-    if (m_canvas)
-    {
-        m_canvas->setNativeProbeEnabled(!visible);
-    }
-
     if (visible)
     {
         if (m_nativeViewport)
@@ -1716,17 +1711,14 @@ void MainWindow::buildUi()
 
     m_canvas = new VideoCanvas(m_mainVerticalSplitter);
     m_canvas->setRenderService(m_controller->renderService());
-    m_nativeViewportWindow = new QWidget(nullptr);
-    m_nativeViewportWindow->setWindowTitle(QStringLiteral("Native Video Viewport Test"));
-    m_nativeViewportWindow->resize(960, 540);
-    m_nativeViewportWindow->hide();
-    m_nativeViewportWindow->installEventFilter(this);
-    auto* nativeViewportLayout = new QVBoxLayout(m_nativeViewportWindow);
-    nativeViewportLayout->setContentsMargins(0, 0, 0, 0);
-    nativeViewportLayout->setSpacing(0);
-    m_nativeViewport = new NativeVideoViewport(m_nativeViewportWindow);
+    m_nativeViewport = new NativeVideoViewport(nullptr);
+    m_nativeViewport->setWindowTitle(QStringLiteral("Native Video Viewport Test"));
+    m_nativeViewport->resize(960, 540);
+    m_nativeViewport->hide();
+    m_nativeViewport->installEventFilter(this);
     m_nativeViewport->setRenderService(nullptr);
-    nativeViewportLayout->addWidget(m_nativeViewport, 1);
+    m_nativeViewportWindow = m_nativeViewport;
+    connect(this, &QObject::destroyed, m_nativeViewportWindow, &QObject::deleteLater);
     m_timelinePanel = new QFrame(m_mainVerticalSplitter);
     m_timelinePanel->setObjectName(QStringLiteral("timelinePanel"));
     m_timelinePanel->setFrameShape(QFrame::NoFrame);

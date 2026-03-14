@@ -30,7 +30,7 @@ public:
     void setVideoFrame(const VideoFrame& frame);
     void setRenderService(RenderService* renderService);
     void setSourceFrameSize(const QSize& sourceSize);
-    void setNativeProbeEnabled(bool enabled);
+    void setNativePresentationEnabled(bool enabled);
     void setDisplayScaleFactor(double scaleFactor);
     void setOverlays(const std::vector<TrackOverlay>& overlays);
     void setShowAllLabels(bool enabled);

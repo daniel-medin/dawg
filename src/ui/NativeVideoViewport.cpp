@@ -2,10 +2,19 @@
 
 #include <algorithm>
 
+#include <QCoreApplication>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFontMetricsF>
+#include <QPaintEngine>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QResizeEvent>
+#include <QTextStream>
+
+#include "core/render/RenderService.h"
 
 namespace
 {
@@ -20,22 +29,52 @@ QRectF fallbackFrameRect(const QSize& widgetSize)
         static_cast<double>(height)
     };
 }
+
+QString findRepositoryLogPath()
+{
+    QDir dir{QCoreApplication::applicationDirPath()};
+    while (dir.exists() && !dir.isRoot())
+    {
+        if (dir.exists(QStringLiteral(".git")))
+        {
+            return dir.absoluteFilePath(QStringLiteral(".watch-out.log"));
+        }
+
+        if (!dir.cdUp())
+        {
+            break;
+        }
+    }
+
+    return QDir::current().absoluteFilePath(QStringLiteral(".watch-out.log"));
+}
+
+void logNativeViewportEvent(const QString& category, const QString& message)
+{
+    QFile file(findRepositoryLogPath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    {
+        return;
+    }
+
+    QTextStream stream(&file);
+    stream << QDateTime::currentDateTime().toString(Qt::ISODateWithMs)
+           << " [" << category << "] "
+           << message
+           << '\n';
+}
 }
 
 NativeVideoViewport::NativeVideoViewport(QWidget* parent)
     : QWidget(parent)
     , m_ownedRenderService(std::make_unique<RenderService>())
-    , m_nativeTarget(new QWidget(this))
+    , m_renderService(m_ownedRenderService.get())
 {
     setAutoFillBackground(false);
+    setAttribute(Qt::WA_NativeWindow);
+    setAttribute(Qt::WA_PaintOnScreen);
     setAttribute(Qt::WA_OpaquePaintEvent);
     setAttribute(Qt::WA_NoSystemBackground);
-
-    m_nativeTarget->setAttribute(Qt::WA_NativeWindow);
-    m_nativeTarget->setAttribute(Qt::WA_OpaquePaintEvent);
-    m_nativeTarget->setAttribute(Qt::WA_NoSystemBackground);
-    m_nativeTarget->setAutoFillBackground(false);
-    m_nativeTarget->hide();
 }
 
 void NativeVideoViewport::setPresentedFrame(const QImage& frame, const VideoFrame& videoFrame, const QSize& sourceSize)
@@ -69,40 +108,24 @@ void NativeVideoViewport::setShowAllLabels(const bool enabled)
     update();
 }
 
+QPaintEngine* NativeVideoViewport::paintEngine() const
+{
+    return nullptr;
+}
+
 void NativeVideoViewport::paintEvent(QPaintEvent* event)
 {
     Q_UNUSED(event);
 
     const auto frameRect = imageRenderRect();
-    updateNativeTargetGeometry(frameRect);
     const auto overlayImage = buildOverlayImage(frameRect);
-
-    QPainter painter(this);
-    painter.fillRect(rect(), QColor{12, 14, 18});
-
-    if (tryNativePresent(frameRect, overlayImage))
-    {
-        painter.setPen(QPen(QColor{255, 255, 255, 30}, 1.0));
-        painter.drawRect(frameRect);
-        return;
-    }
-
-    painter.fillRect(frameRect, QColor{24, 27, 32});
-    if (!m_frame.isNull())
-    {
-        painter.drawImage(frameRect, m_frame);
-    }
-
-    if (!overlayImage.isNull())
-    {
-        painter.drawImage(QPoint{0, 0}, overlayImage);
-    }
+    static_cast<void>(tryNativePresent(frameRect, overlayImage));
 }
 
 void NativeVideoViewport::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
-    updateNativeTargetGeometry(imageRenderRect());
+    update();
 }
 
 QRectF NativeVideoViewport::imageRenderRect() const
@@ -138,55 +161,59 @@ QImage NativeVideoViewport::buildOverlayImage(const QRectF& frameRect) const
     return overlayImage;
 }
 
-void NativeVideoViewport::updateNativeTargetGeometry(const QRectF& frameRect)
-{
-    const auto alignedRect = frameRect.toAlignedRect();
-    if (m_nativeTargetRect == alignedRect)
-    {
-        return;
-    }
-
-    m_nativeTargetRect = alignedRect;
-    m_nativeTarget->setGeometry(m_nativeTargetRect);
-    m_nativeTarget->raise();
-}
-
 bool NativeVideoViewport::tryNativePresent(const QRectF& frameRect, const QImage& overlayImage)
 {
     if (!m_renderService
         || !m_renderService->canPresentToNativeWindow()
         || !m_videoFrame.isValid()
-        || !m_nativeTargetRect.isValid())
+        || !frameRect.isValid()
+        || !size().isValid())
     {
-        m_nativeTarget->hide();
+        logPresentationState(
+            QStringLiteral("native_viewport_fallback"),
+            QStringLiteral("precheck render=%1 frame=%2 rect=%3 size=%4x%5")
+                .arg(m_renderService && m_renderService->canPresentToNativeWindow() ? QStringLiteral("ok") : QStringLiteral("no"))
+                .arg(m_videoFrame.isValid() ? QStringLiteral("ok") : QStringLiteral("no"))
+                .arg(frameRect.isValid() ? QStringLiteral("ok") : QStringLiteral("no"))
+                .arg(width())
+                .arg(height()));
         return false;
     }
 
-    if (!m_nativeTarget->isVisible())
-    {
-        m_nativeTarget->show();
-    }
-
     const auto presented = m_renderService->presentToNativeWindow(
-        m_nativeTarget,
-        m_nativeTargetRect.size(),
+        this,
+        size(),
         m_videoFrame,
-        QRectF{
-            0.0,
-            0.0,
-            static_cast<double>(m_nativeTargetRect.width()),
-            static_cast<double>(m_nativeTargetRect.height())
-        },
+        frameRect,
         overlayImage);
     if (presented)
     {
-        m_nativeTarget->raise();
+        if (!m_lastPresentationState.isEmpty())
+        {
+            m_lastPresentationState.clear();
+        }
         return true;
     }
 
-    m_nativeTarget->hide();
-    Q_UNUSED(frameRect);
+    logPresentationState(
+        QStringLiteral("native_viewport_fallback"),
+        QStringLiteral("native_present_failed surface=%1x%2 frame=%3")
+            .arg(width())
+            .arg(height())
+            .arg(m_videoFrame.index));
     return false;
+}
+
+void NativeVideoViewport::logPresentationState(const QString& category, const QString& message, const bool force)
+{
+    const auto state = category + QLatin1Char('|') + message;
+    if (!force && state == m_lastPresentationState)
+    {
+        return;
+    }
+
+    m_lastPresentationState = state;
+    logNativeViewportEvent(category, message);
 }
 
 void NativeVideoViewport::paintOverlayContent(QPainter& painter, const QRectF& frameRect) const

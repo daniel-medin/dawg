@@ -1,14 +1,20 @@
 #pragma once
 
 #include <memory>
+#include <QString>
 #include <vector>
 
 #include <QImage>
 #include <QWidget>
 
-#include "core/render/RenderService.h"
 #include "core/tracking/TrackTypes.h"
 #include "core/video/VideoFrame.h"
+
+class QResizeEvent;
+class RenderService;
+class QPainter;
+class QPaintEvent;
+class QPaintEngine;
 
 class NativeVideoViewport final : public QWidget
 {
@@ -23,6 +29,7 @@ public:
     void setShowAllLabels(bool enabled);
 
 protected:
+    [[nodiscard]] QPaintEngine* paintEngine() const override;
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 
@@ -30,8 +37,8 @@ private:
     [[nodiscard]] QRectF imageRenderRect() const;
     [[nodiscard]] QImage buildOverlayImage(const QRectF& frameRect) const;
     void paintOverlayContent(QPainter& painter, const QRectF& frameRect) const;
-    void updateNativeTargetGeometry(const QRectF& frameRect);
     [[nodiscard]] bool tryNativePresent(const QRectF& frameRect, const QImage& overlayImage);
+    void logPresentationState(const QString& category, const QString& message, bool force = false);
 
     QImage m_frame;
     VideoFrame m_videoFrame;
@@ -39,7 +46,6 @@ private:
     std::vector<TrackOverlay> m_overlays;
     RenderService* m_renderService = nullptr;
     std::unique_ptr<RenderService> m_ownedRenderService;
-    QWidget* m_nativeTarget = nullptr;
-    QRect m_nativeTargetRect;
     bool m_showAllLabels = false;
+    QString m_lastPresentationState;
 };

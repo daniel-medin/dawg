@@ -34,8 +34,8 @@ bool RenderService::fastPlaybackEnabled() const
 
 QImage RenderService::presentFrame(const VideoFrame& frame, const bool playbackActive)
 {
-    // The current UI still presents QImage through Qt, so eagerly uploading every
-    // frame into D3D11 only adds CPU/GPU overhead without changing what is shown.
+    // Frame delivery still needs a CPU image for Qt overlays, fallback drawing, and
+    // non-native paths. Native widgets upload to D3D at paint time instead.
     Q_UNUSED(m_backend);
     Q_UNUSED(playbackActive);
 
