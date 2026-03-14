@@ -3,6 +3,7 @@
 #include <vector>
 
 #include <QString>
+#include <QUuid>
 
 #include "core/tracking/TrackTypes.h"
 
@@ -12,6 +13,7 @@ struct AudioPoolItem
 {
     QString key;
     QString assetPath;
+    QUuid trackId;
     QString displayName;
     int connectedNodeCount = 0;
     bool isPlaying = false;

@@ -27,6 +27,6 @@ signals:
 private:
     QTimer m_playbackTimer;
     bool m_isPlaying = false;
-    bool m_insertionFollowsPlayback = true;
+    bool m_insertionFollowsPlayback = false;
     int m_playbackAnchorFrame = -1;
 };

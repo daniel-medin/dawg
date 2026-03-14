@@ -46,6 +46,7 @@
 
 #include "app/PlayerController.h"
 #include "ui/DebugOverlayWindow.h"
+#include "ui/MixView.h"
 #include "ui/NativeVideoViewport.h"
 #include "ui/TimelineView.h"
 #include "ui/VideoCanvas.h"
@@ -204,11 +205,13 @@ public:
         const QString& assetPath,
         std::function<bool(const QString&)> startPreview,
         std::function<void()> stopPreview,
+        std::function<void()> activateItem,
         QWidget* parent = nullptr)
         : QWidget(parent)
         , m_assetPath(assetPath)
         , m_startPreview(std::move(startPreview))
         , m_stopPreview(std::move(stopPreview))
+        , m_activateItem(std::move(activateItem))
     {
         setCursor(Qt::OpenHandCursor);
         setMouseTracking(true);
@@ -269,6 +272,7 @@ protected:
         if (event->button() == Qt::LeftButton)
         {
             m_dragStartPosition = event->position().toPoint();
+            m_dragPerformed = false;
 
             if (previewModifierActive(event->modifiers()))
             {
@@ -321,6 +325,7 @@ protected:
 
         auto* drag = new QDrag(this);
         drag->setMimeData(mimeData);
+        m_dragPerformed = true;
         drag->exec(Qt::CopyAction, Qt::CopyAction);
         updateCursorState();
     }
@@ -330,6 +335,20 @@ protected:
         if (event->button() == Qt::LeftButton && m_previewHeld)
         {
             stopPreviewIfNeeded();
+            updateCursorState();
+            event->accept();
+            return;
+        }
+
+        if (event->button() == Qt::LeftButton
+            && !m_dragPerformed
+            && !previewModifierActive(event->modifiers())
+            && rect().contains(event->position().toPoint()))
+        {
+            if (m_activateItem)
+            {
+                m_activateItem();
+            }
             updateCursorState();
             event->accept();
             return;
@@ -379,7 +398,9 @@ private:
     QString m_assetPath;
     std::function<bool(const QString&)> m_startPreview;
     std::function<void()> m_stopPreview;
+    std::function<void()> m_activateItem;
     QPoint m_dragStartPosition;
+    bool m_dragPerformed = false;
     bool m_hovered = false;
     bool m_previewHeld = false;
 };
@@ -395,8 +416,10 @@ MainWindow::MainWindow(QWidget* parent)
     m_clearAllShortcutTimer.setSingleShot(true);
     m_clearAllShortcutTimer.setInterval(1500);
     m_memoryUsageTimer.setInterval(1000);
+    m_mixMeterTimer.setInterval(33);
     connect(&m_clearAllShortcutTimer, &QTimer::timeout, this, &MainWindow::clearPendingClearAllShortcut);
     connect(&m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsage);
+    connect(&m_mixMeterTimer, &QTimer::timeout, this, &MainWindow::refreshMixView);
     m_statusToastTimer.setSingleShot(true);
     m_statusToastTimer.setInterval(2800);
     connect(&m_statusToastTimer, &QTimer::timeout, this, [this]()
@@ -419,6 +442,11 @@ MainWindow::MainWindow(QWidget* parent)
     {
         updateTimelineVisibility(visible);
         showStatus(visible ? QStringLiteral("Timeline shown.") : QStringLiteral("Timeline hidden."));
+    });
+    connect(m_showMixAction, &QAction::toggled, this, [this](const bool visible)
+    {
+        updateMixVisibility(visible);
+        showStatus(visible ? QStringLiteral("Mix window shown.") : QStringLiteral("Mix window hidden."));
     });
     connect(m_timelineClickSeeksAction, &QAction::toggled, this, [this](const bool enabled)
     {
@@ -579,6 +607,12 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_controller, &PlayerController::videoLoaded, this, &MainWindow::handleVideoLoaded);
     connect(m_controller, &PlayerController::videoAudioStateChanged, this, &MainWindow::updateVideoAudioRow);
     connect(m_controller, &PlayerController::statusChanged, this, &MainWindow::showStatus);
+    connect(m_showMixShortcut, &QShortcut::activated, m_showMixAction, &QAction::trigger);
+    connect(m_mixView, &MixView::masterGainChanged, m_controller, &PlayerController::setMasterMixGainDb);
+    connect(m_mixView, &MixView::masterMutedChanged, m_controller, &PlayerController::setMasterMixMuted);
+    connect(m_mixView, &MixView::laneGainChanged, m_controller, &PlayerController::setMixLaneGainDb);
+    connect(m_mixView, &MixView::laneMutedChanged, m_controller, &PlayerController::setMixLaneMuted);
+    connect(m_mixView, &MixView::laneSoloChanged, m_controller, &PlayerController::setMixLaneSoloed);
 
     updatePlaybackState(false);
     updateInsertionFollowsPlaybackState(m_controller->isInsertionFollowsPlayback());
@@ -592,6 +626,7 @@ MainWindow::MainWindow(QWidget* parent)
     refreshAudioPool();
     updateVideoAudioRow();
     m_memoryUsageTimer.start();
+    m_mixMeterTimer.start();
     showStatus(QStringLiteral("Open a clip to start adding nodes."));
     tryOpenLocalDevVideo();
 }
@@ -1130,18 +1165,53 @@ void MainWindow::updateTimelineVisibility(const bool visible)
         m_timelinePanel->setVisible(visible);
     }
 
-    if (visible && m_mainVerticalSplitter && m_timelinePanel)
-    {
-        const auto totalHeight = std::max(320, m_mainVerticalSplitter->height());
-        const auto timelineHeight = std::clamp(m_timelinePreferredHeight, 96, std::max(96, totalHeight / 2));
-        m_mainVerticalSplitter->setSizes({std::max(200, totalHeight - timelineHeight), timelineHeight});
-    }
+    syncMainVerticalPanelSizes();
 
     if (m_showTimelineAction && m_showTimelineAction->isChecked() != visible)
     {
         const QSignalBlocker blocker{m_showTimelineAction};
         m_showTimelineAction->setChecked(visible);
     }
+}
+
+void MainWindow::updateMixVisibility(const bool visible)
+{
+    if (m_mixPanel)
+    {
+        if (!visible)
+        {
+            m_mixPreferredHeight = std::max(132, m_mixPanel->height());
+        }
+        m_mixPanel->setVisible(visible);
+    }
+
+    syncMainVerticalPanelSizes();
+
+    if (m_showMixAction && m_showMixAction->isChecked() != visible)
+    {
+        const QSignalBlocker blocker{m_showMixAction};
+        m_showMixAction->setChecked(visible);
+    }
+}
+
+void MainWindow::syncMainVerticalPanelSizes()
+{
+    if (!m_mainVerticalSplitter)
+    {
+        return;
+    }
+
+    const auto totalHeight = std::max(320, m_mainVerticalSplitter->height());
+    const auto timelineVisible = m_timelinePanel && m_timelinePanel->isVisible();
+    const auto mixVisible = m_mixPanel && m_mixPanel->isVisible();
+    const auto timelineHeight = timelineVisible
+        ? std::clamp(m_timelinePreferredHeight, 96, std::max(96, totalHeight / 2))
+        : 0;
+    const auto mixHeight = mixVisible
+        ? std::clamp(m_mixPreferredHeight, 132, std::max(132, totalHeight / 2))
+        : 0;
+    const auto canvasHeight = std::max(200, totalHeight - timelineHeight - mixHeight);
+    m_mainVerticalSplitter->setSizes({canvasHeight, timelineHeight, mixHeight});
 }
 
 void MainWindow::refreshAudioPool()
@@ -1182,9 +1252,17 @@ void MainWindow::refreshAudioPool()
             {
                 m_controller->stopAudioPoolPreview();
             },
+            [this, trackId = item.trackId]()
+            {
+                if (!trackId.isNull())
+                {
+                    m_controller->selectTrackAndJumpToStart(trackId);
+                }
+            },
             m_audioPoolListContainer);
         row->setProperty("audioPoolItemKey", item.key);
         row->setProperty("assetPath", item.assetPath);
+        row->setProperty("trackId", item.trackId);
         row->setToolTip(item.connectionSummary);
         row->setStyleSheet(QStringLiteral(
             "QWidget { background: transparent; border: none; }"
@@ -1624,12 +1702,30 @@ void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalP
 
 void MainWindow::refreshTimeline()
 {
-    if (!m_timeline)
+    if (!m_timeline && !m_mixView)
     {
         return;
     }
 
-    m_timeline->setTrackSpans(m_controller->timelineTrackSpans());
+    const auto trackSpans = m_controller->timelineTrackSpans();
+    if (m_timeline)
+    {
+        m_timeline->setTrackSpans(trackSpans);
+    }
+    refreshMixView();
+}
+
+void MainWindow::refreshMixView()
+{
+    if (m_mixView)
+    {
+        const auto laneStrips = m_controller->mixLaneStrips();
+        m_mixView->setMixState(
+            m_controller->masterMixGainDb(),
+            m_controller->masterMixMuted(),
+            laneStrips);
+        m_mixView->setMeterLevels(m_controller->masterMixLevel(), laneStrips);
+    }
 }
 
 void MainWindow::updateEditActionState()
@@ -1697,6 +1793,7 @@ void MainWindow::buildMenus()
     m_showAllNodeNamesAction = new QAction(QStringLiteral("Node Name Always On"), this);
     m_importSoundAction = new QAction(QStringLiteral("Import Sound (Shift+Ctrl+I)"), this);
     m_showTimelineAction = new QAction(QStringLiteral("Show Timeline (T)"), this);
+    m_showMixAction = new QAction(QStringLiteral("Toggle Mix Window (Ctrl++)"), this);
     m_timelineClickSeeksAction = new QAction(QStringLiteral("Click Seeks Playhead"), this);
     m_audioPoolAction = new QAction(QStringLiteral("Audio Pool (P)"), this);
     m_deleteNodeAction = new QAction(QStringLiteral("Delete (Backspace)"), this);
@@ -1706,11 +1803,13 @@ void MainWindow::buildMenus()
     m_motionTrackingAction->setCheckable(true);
     m_autoPanAction->setCheckable(true);
     m_insertionFollowsPlaybackAction->setCheckable(true);
-    m_insertionFollowsPlaybackAction->setChecked(true);
+    m_insertionFollowsPlaybackAction->setChecked(false);
     m_showAllNodeNamesAction->setCheckable(true);
     m_showAllNodeNamesAction->setChecked(true);
     m_showTimelineAction->setCheckable(true);
     m_showTimelineAction->setChecked(true);
+    m_showMixAction->setCheckable(true);
+    m_showMixAction->setChecked(false);
     m_timelineClickSeeksAction->setCheckable(true);
     m_timelineClickSeeksAction->setChecked(true);
     m_audioPoolAction->setCheckable(true);
@@ -1792,6 +1891,9 @@ void MainWindow::buildMenus()
     timelineMenu->addAction(m_showTimelineAction);
     timelineMenu->addAction(m_timelineClickSeeksAction);
 
+    auto* mixMenu = menuBar()->addMenu(QStringLiteral("&Mix"));
+    mixMenu->addAction(m_showMixAction);
+
     auto* viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
     viewMenu->addAction(m_toggleNodeNameAction);
     viewMenu->addAction(m_showAllNodeNamesAction);
@@ -1841,6 +1943,7 @@ void MainWindow::buildUi()
     m_nodeEndShortcut = new QShortcut(QKeySequence(Qt::Key_S), this);
     m_selectNextNodeShortcut = new QShortcut(QKeySequence(Qt::Key_Tab), this);
     m_showTimelineShortcut = new QShortcut(QKeySequence(Qt::Key_T), this);
+    m_showMixShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl++")), this);
     m_trimNodeShortcut = new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_T), this);
     m_autoPanShortcut = new QShortcut(QKeySequence(Qt::Key_R), this);
     m_audioPoolShortcut = new QShortcut(QKeySequence(Qt::Key_P), this);
@@ -1865,6 +1968,7 @@ void MainWindow::buildUi()
     m_nodeEndShortcut->setContext(Qt::ApplicationShortcut);
     m_selectNextNodeShortcut->setContext(Qt::ApplicationShortcut);
     m_showTimelineShortcut->setContext(Qt::ApplicationShortcut);
+    m_showMixShortcut->setContext(Qt::ApplicationShortcut);
     m_trimNodeShortcut->setContext(Qt::ApplicationShortcut);
     m_autoPanShortcut->setContext(Qt::ApplicationShortcut);
     m_audioPoolShortcut->setContext(Qt::ApplicationShortcut);
@@ -1896,6 +2000,18 @@ void MainWindow::buildUi()
 
     m_timeline = new TimelineView(m_timelinePanel);
     timelinePanelLayout->addWidget(m_timeline, 1);
+
+    m_mixPanel = new QFrame(m_mainVerticalSplitter);
+    m_mixPanel->setObjectName(QStringLiteral("mixPanel"));
+    m_mixPanel->setVisible(false);
+    m_mixPanel->setFrameShape(QFrame::NoFrame);
+    m_mixPanel->setMinimumHeight(120);
+    auto* mixPanelLayout = new QVBoxLayout(m_mixPanel);
+    mixPanelLayout->setContentsMargins(0, 0, 0, 0);
+    mixPanelLayout->setSpacing(0);
+
+    m_mixView = new MixView(m_mixPanel);
+    mixPanelLayout->addWidget(m_mixView, 1);
 
     m_audioPoolPanel = new QFrame(m_contentSplitter);
     m_audioPoolPanel->setObjectName(QStringLiteral("audioPoolPanel"));
@@ -2060,14 +2176,20 @@ void MainWindow::buildUi()
 
     m_mainVerticalSplitter->addWidget(m_canvas);
     m_mainVerticalSplitter->addWidget(m_timelinePanel);
+    m_mainVerticalSplitter->addWidget(m_mixPanel);
     m_mainVerticalSplitter->setStretchFactor(0, 1);
     m_mainVerticalSplitter->setStretchFactor(1, 0);
-    m_mainVerticalSplitter->setSizes({700, m_timelinePreferredHeight});
+    m_mainVerticalSplitter->setStretchFactor(2, 0);
+    m_mainVerticalSplitter->setSizes({700, m_timelinePreferredHeight, 0});
     connect(m_mainVerticalSplitter, &QSplitter::splitterMoved, this, [this]()
     {
         if (m_timelinePanel && m_timelinePanel->isVisible())
         {
             m_timelinePreferredHeight = std::max(96, m_timelinePanel->height());
+        }
+        if (m_mixPanel && m_mixPanel->isVisible())
+        {
+            m_mixPreferredHeight = std::max(132, m_mixPanel->height());
         }
     });
 
@@ -2189,6 +2311,10 @@ void MainWindow::buildUi()
         }
         QFrame#audioPoolPanel {
             background: #07090c;
+        }
+        QFrame#mixPanel {
+            background: #080b10;
+            border-top: 1px solid #131a23;
         }
         QScrollArea#audioPoolScroll {
             background: #07090c;

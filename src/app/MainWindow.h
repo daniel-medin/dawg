@@ -16,6 +16,7 @@
 
 class PlayerController;
 class DebugOverlayWindow;
+class MixView;
 class NativeVideoViewport;
 class TimelineView;
 class VideoCanvas;
@@ -62,6 +63,7 @@ private slots:
     void updateDebugVisibility(bool enabled);
     void updateAudioPoolVisibility(bool visible);
     void updateTimelineVisibility(bool visible);
+    void updateMixVisibility(bool visible);
     void refreshAudioPool();
     void updateAudioPoolPlaybackIndicators();
     void updateVideoAudioRow();
@@ -73,6 +75,7 @@ private:
     void buildMenus();
     void buildUi();
     void refreshTimeline();
+    void refreshMixView();
     void updateEditActionState();
     void updateOverlayPositions();
     void showCanvasTipsOverlay();
@@ -88,14 +91,17 @@ private:
     void populateAudioPoolFromLocalDevDirectory();
     void armClearAllShortcut();
     void clearPendingClearAllShortcut();
+    void syncMainVerticalPanelSizes();
 
     PlayerController* m_controller = nullptr;
     VideoCanvas* m_canvas = nullptr;
     TimelineView* m_timeline = nullptr;
+    MixView* m_mixView = nullptr;
     QSplitter* m_contentSplitter = nullptr;
     QSplitter* m_mainVerticalSplitter = nullptr;
     QWidget* m_mainContent = nullptr;
     QFrame* m_timelinePanel = nullptr;
+    QFrame* m_mixPanel = nullptr;
     QLabel* m_frameLabel = nullptr;
     QLabel* m_statusToast = nullptr;
     QLabel* m_canvasTipsOverlay = nullptr;
@@ -137,6 +143,7 @@ private:
     QAction* m_showAllNodeNamesAction = nullptr;
     QAction* m_importSoundAction = nullptr;
     QAction* m_showTimelineAction = nullptr;
+    QAction* m_showMixAction = nullptr;
     QAction* m_timelineClickSeeksAction = nullptr;
     QAction* m_audioPoolAction = nullptr;
     QAction* m_deleteNodeAction = nullptr;
@@ -162,6 +169,7 @@ private:
     QShortcut* m_nodeEndShortcut = nullptr;
     QShortcut* m_selectNextNodeShortcut = nullptr;
     QShortcut* m_showTimelineShortcut = nullptr;
+    QShortcut* m_showMixShortcut = nullptr;
     QShortcut* m_trimNodeShortcut = nullptr;
     QShortcut* m_autoPanShortcut = nullptr;
     QShortcut* m_audioPoolShortcut = nullptr;
@@ -172,6 +180,7 @@ private:
     bool m_debugVisible = true;
     int m_audioPoolPreferredWidth = 320;
     int m_timelinePreferredHeight = 148;
+    int m_mixPreferredHeight = 184;
     QString m_clipName;
     QString m_memoryUsageText;
     QString m_processorUsageText;
@@ -179,6 +188,7 @@ private:
     QImage m_lastPresentedFrame;
     QTimer m_clearAllShortcutTimer;
     QTimer m_memoryUsageTimer;
+    QTimer m_mixMeterTimer;
     QTimer m_statusToastTimer;
     QTimer m_canvasTipsTimer;
     QTimer m_nodeNudgeTimer;

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include <QImage>
@@ -24,6 +25,7 @@
 #include "core/video/AnalysisFrameProvider.h"
 #include "core/video/VideoFrame.h"
 #include "core/video/VideoPlaybackService.h"
+#include "ui/MixView.h"
 #include "ui/TimelineView.h"
 
 class PlayerController final : public QObject
@@ -47,6 +49,7 @@ public:
     bool createTrackWithAudioAtCurrentFrame(const QString& filePath);
     bool createTrackWithAudioAtCurrentFrame(const QString& filePath, const QPointF& imagePoint);
     bool importSoundForSelectedTrack(const QString& filePath);
+    bool selectTrackAndJumpToStart(const QUuid& trackId);
     void selectAllVisibleTracks();
     void selectTracks(const QList<QUuid>& trackIds);
     void selectTrack(const QUuid& trackId);
@@ -75,6 +78,11 @@ public:
     void setFastPlaybackEnabled(bool enabled);
     void setInsertionFollowsPlayback(bool enabled);
     void setMotionTrackingEnabled(bool enabled);
+    void setMasterMixGainDb(float gainDb);
+    void setMasterMixMuted(bool muted);
+    void setMixLaneGainDb(int laneIndex, float gainDb);
+    void setMixLaneMuted(int laneIndex, bool muted);
+    void setMixLaneSoloed(int laneIndex, bool soloed);
     void selectNextVisibleTrack();
     bool startAudioPoolPreview(const QString& filePath);
     void stopAudioPoolPreview();
@@ -105,6 +113,9 @@ public:
     [[nodiscard]] bool isEmbeddedVideoAudioMuted() const;
     [[nodiscard]] bool isFastPlaybackEnabled() const;
     [[nodiscard]] bool isFastPlaybackActive() const;
+    [[nodiscard]] float masterMixGainDb() const;
+    [[nodiscard]] bool masterMixMuted() const;
+    [[nodiscard]] float masterMixLevel() const;
     [[nodiscard]] QSize videoFrameSize() const;
     [[nodiscard]] QString trackLabel(const QUuid& trackId) const;
     [[nodiscard]] bool trackHasAttachedAudio(const QUuid& trackId) const;
@@ -113,6 +124,7 @@ public:
     bool removeAudioFromPool(const QString& filePath);
     bool removeAudioAndConnectedNodesFromPool(const QString& filePath);
     [[nodiscard]] std::vector<AudioPoolItem> audioPoolItems() const;
+    [[nodiscard]] std::vector<MixLaneStrip> mixLaneStrips() const;
     [[nodiscard]] std::vector<TimelineTrackSpan> timelineTrackSpans() const;
     [[nodiscard]] const std::vector<TrackOverlay>& currentOverlays() const;
 
@@ -149,6 +161,10 @@ private:
     void emitCurrentFrame();
     bool applyPresentationScaleForPlaybackState(bool playbackActive);
     [[nodiscard]] bool isTrackSelected(const QUuid& trackId) const;
+    [[nodiscard]] float mixLaneGainDb(int laneIndex) const;
+    [[nodiscard]] bool isMixLaneMuted(int laneIndex) const;
+    [[nodiscard]] bool isMixLaneSoloed(int laneIndex) const;
+    [[nodiscard]] bool anyMixLaneSoloed() const;
     void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
     void logPlaybackHitchIfNeeded(int targetFrameIndex, int previousFrameIndex, int advancedFrames);
 
@@ -172,6 +188,11 @@ private:
     double m_playbackStartTimestampSeconds = 0.0;
     QElapsedTimer m_playbackElapsedTimer;
     QElapsedTimer m_perfPlaybackTickTimer;
+    float m_masterMixGainDb = 0.0F;
+    bool m_masterMixMuted = false;
+    std::unordered_map<int, float> m_mixLaneGainDbByLane;
+    std::unordered_map<int, bool> m_mixLaneMutedByLane;
+    std::unordered_map<int, bool> m_mixLaneSoloByLane;
     std::vector<QUuid> m_selectedTrackIds;
     QUuid m_selectedTrackId;
     QUuid m_fadingDeselectedTrackId;

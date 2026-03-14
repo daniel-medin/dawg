@@ -95,10 +95,21 @@ bool MciAudioEngine::playTrack(const QUuid& trackId, const QString& filePath, co
 #endif
 }
 
+void MciAudioEngine::setTrackGain(const QUuid& trackId, const float gainDb)
+{
+    Q_UNUSED(trackId);
+    Q_UNUSED(gainDb);
+}
+
 void MciAudioEngine::setTrackPan(const QUuid& trackId, const float pan)
 {
     Q_UNUSED(trackId);
     Q_UNUSED(pan);
+}
+
+void MciAudioEngine::setMasterGain(const float gainDb)
+{
+    Q_UNUSED(gainDb);
 }
 
 void MciAudioEngine::stopTrack(const QUuid& trackId)
@@ -138,4 +149,15 @@ void MciAudioEngine::stopAll()
 bool MciAudioEngine::isTrackPlaying(const QUuid& trackId) const
 {
     return m_activeTracks.contains(trackId);
+}
+
+float MciAudioEngine::trackLevel(const QUuid& trackId) const
+{
+    Q_UNUSED(trackId);
+    return 0.0F;
+}
+
+float MciAudioEngine::masterLevel() const
+{
+    return 0.0F;
 }

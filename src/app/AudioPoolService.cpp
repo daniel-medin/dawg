@@ -53,6 +53,7 @@ std::vector<AudioPoolItem> AudioPoolService::items(
 
         struct ConnectedTrackInfo
         {
+            QUuid id;
             QString label;
             bool isPlaying = false;
         };
@@ -67,6 +68,7 @@ std::vector<AudioPoolItem> AudioPoolService::items(
             }
 
             connectedTracks.push_back(ConnectedTrackInfo{
+                .id = track.id,
                 .label = track.label,
                 .isPlaying = audioEngine.isTrackPlaying(track.id)
             });
@@ -79,6 +81,7 @@ std::vector<AudioPoolItem> AudioPoolService::items(
             items.push_back(AudioPoolItem{
                 .key = QStringLiteral("%1#0").arg(assetPath),
                 .assetPath = assetPath,
+                .trackId = {},
                 .displayName = fileName,
                 .connectedNodeCount = 0,
                 .isPlaying = isPreviewPlaying,
@@ -101,6 +104,7 @@ std::vector<AudioPoolItem> AudioPoolService::items(
             items.push_back(AudioPoolItem{
                 .key = QStringLiteral("%1#%2").arg(assetPath).arg(index),
                 .assetPath = assetPath,
+                .trackId = connectedTrack.id,
                 .displayName = displayName,
                 .connectedNodeCount = connectedNodeCount,
                 .isPlaying = connectedTrack.isPlaying || isPreviewPlaying,

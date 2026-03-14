@@ -19,6 +19,8 @@
 
 namespace
 {
+constexpr float kMixerFloorSilenceDb = -100.0F;
+
 struct TrackIdHash
 {
     std::size_t operator()(const QUuid& trackId) const noexcept
@@ -79,6 +81,102 @@ private:
     juce::AudioSource& m_inputSource;
     std::atomic<float> m_pan{0.0f};
 };
+
+class GainAudioSource final : public juce::AudioSource
+{
+public:
+    explicit GainAudioSource(juce::AudioSource& inputSource)
+        : m_inputSource(inputSource)
+    {
+    }
+
+    void setGainDb(const float gainDb)
+    {
+        m_gainLinear.store(juce::Decibels::decibelsToGain(gainDb, kMixerFloorSilenceDb));
+    }
+
+    void prepareToPlay(const int samplesPerBlockExpected, const double sampleRate) override
+    {
+        m_inputSource.prepareToPlay(samplesPerBlockExpected, sampleRate);
+    }
+
+    void releaseResources() override
+    {
+        m_inputSource.releaseResources();
+    }
+
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override
+    {
+        m_inputSource.getNextAudioBlock(bufferToFill);
+
+        auto* buffer = bufferToFill.buffer;
+        if (!buffer)
+        {
+            return;
+        }
+
+        buffer->applyGain(bufferToFill.startSample, bufferToFill.numSamples, m_gainLinear.load());
+    }
+
+private:
+    juce::AudioSource& m_inputSource;
+    std::atomic<float> m_gainLinear{1.0f};
+};
+
+class MeterAudioSource final : public juce::AudioSource
+{
+public:
+    explicit MeterAudioSource(juce::AudioSource& inputSource)
+        : m_inputSource(inputSource)
+    {
+    }
+
+    [[nodiscard]] float level() const
+    {
+        return m_level.load();
+    }
+
+    void prepareToPlay(const int samplesPerBlockExpected, const double sampleRate) override
+    {
+        m_inputSource.prepareToPlay(samplesPerBlockExpected, sampleRate);
+    }
+
+    void releaseResources() override
+    {
+        m_inputSource.releaseResources();
+        m_level.store(0.0F);
+    }
+
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override
+    {
+        m_inputSource.getNextAudioBlock(bufferToFill);
+
+        const auto* buffer = bufferToFill.buffer;
+        if (!buffer)
+        {
+            m_level.store(0.0F);
+            return;
+        }
+
+        float peak = 0.0F;
+        for (int channel = 0; channel < buffer->getNumChannels(); ++channel)
+        {
+            const auto* channelData = buffer->getReadPointer(channel, bufferToFill.startSample);
+            for (int sampleIndex = 0; sampleIndex < bufferToFill.numSamples; ++sampleIndex)
+            {
+                peak = std::max(peak, std::abs(channelData[sampleIndex]));
+            }
+        }
+
+        const auto previous = m_level.load();
+        const auto smoothed = peak > previous ? peak : (previous * 0.90F);
+        m_level.store(std::clamp(smoothed, 0.0F, 1.0F));
+    }
+
+private:
+    juce::AudioSource& m_inputSource;
+    std::atomic<float> m_level{0.0F};
+};
 }
 
 struct JuceAudioEngine::Impl
@@ -87,7 +185,9 @@ struct JuceAudioEngine::Impl
     {
         juce::AudioTransportSource transport;
         std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
+        std::unique_ptr<GainAudioSource> gainSource;
         std::unique_ptr<PanAudioSource> panSource;
+        std::unique_ptr<MeterAudioSource> meterSource;
         QString filePath;
     };
 
@@ -95,6 +195,8 @@ struct JuceAudioEngine::Impl
     juce::AudioDeviceManager deviceManager;
     juce::AudioSourcePlayer audioSourcePlayer;
     juce::MixerAudioSource mixer;
+    std::unique_ptr<GainAudioSource> masterGainSource;
+    std::unique_ptr<MeterAudioSource> masterMeterSource;
     juce::AudioFormatManager formatManager;
     std::unordered_map<QUuid, std::unique_ptr<TrackPlayback>, TrackIdHash> activeTracks;
     bool ready = false;
@@ -113,7 +215,9 @@ JuceAudioEngine::JuceAudioEngine(QObject* parent)
         return;
     }
 
-    m_impl->audioSourcePlayer.setSource(&m_impl->mixer);
+    m_impl->masterGainSource = std::make_unique<GainAudioSource>(m_impl->mixer);
+    m_impl->masterMeterSource = std::make_unique<MeterAudioSource>(*m_impl->masterGainSource);
+    m_impl->audioSourcePlayer.setSource(m_impl->masterMeterSource.get());
     m_impl->deviceManager.addAudioCallback(&m_impl->audioSourcePlayer);
     m_impl->ready = true;
 }
@@ -183,12 +287,30 @@ bool JuceAudioEngine::playTrack(const QUuid& trackId, const QString& filePath, c
     playback->readerSource = std::make_unique<juce::AudioFormatReaderSource>(reader.release(), true);
     playback->transport.setSource(playback->readerSource.get(), 0, nullptr, sourceSampleRate);
     playback->transport.setPosition(static_cast<double>(clampedOffsetMs) / 1000.0);
-    playback->panSource = std::make_unique<PanAudioSource>(playback->transport);
+    playback->gainSource = std::make_unique<GainAudioSource>(playback->transport);
+    playback->panSource = std::make_unique<PanAudioSource>(*playback->gainSource);
+    playback->meterSource = std::make_unique<MeterAudioSource>(*playback->panSource);
 
-    m_impl->mixer.addInputSource(playback->panSource.get(), false);
+    m_impl->mixer.addInputSource(playback->meterSource.get(), false);
     playback->transport.start();
     m_impl->activeTracks.emplace(trackId, std::move(playback));
     return true;
+}
+
+void JuceAudioEngine::setTrackGain(const QUuid& trackId, const float gainDb)
+{
+    if (!m_impl)
+    {
+        return;
+    }
+
+    const auto activeIt = m_impl->activeTracks.find(trackId);
+    if (activeIt == m_impl->activeTracks.end() || !activeIt->second->gainSource)
+    {
+        return;
+    }
+
+    activeIt->second->gainSource->setGainDb(gainDb);
 }
 
 void JuceAudioEngine::setTrackPan(const QUuid& trackId, const float pan)
@@ -207,6 +329,16 @@ void JuceAudioEngine::setTrackPan(const QUuid& trackId, const float pan)
     activeIt->second->panSource->setPan(pan);
 }
 
+void JuceAudioEngine::setMasterGain(const float gainDb)
+{
+    if (!m_impl || !m_impl->masterGainSource)
+    {
+        return;
+    }
+
+    m_impl->masterGainSource->setGainDb(gainDb);
+}
+
 void JuceAudioEngine::stopTrack(const QUuid& trackId)
 {
     if (!m_impl)
@@ -222,9 +354,9 @@ void JuceAudioEngine::stopTrack(const QUuid& trackId)
 
     auto& playback = *activeIt->second;
     playback.transport.stop();
-    if (playback.panSource)
+    if (playback.meterSource)
     {
-        m_impl->mixer.removeInputSource(playback.panSource.get());
+        m_impl->mixer.removeInputSource(playback.meterSource.get());
     }
     playback.transport.setSource(nullptr);
     m_impl->activeTracks.erase(activeIt);
@@ -259,6 +391,32 @@ bool JuceAudioEngine::isTrackPlaying(const QUuid& trackId) const
 
     const auto activeIt = m_impl->activeTracks.find(trackId);
     return activeIt != m_impl->activeTracks.end() && activeIt->second->transport.isPlaying();
+}
+
+float JuceAudioEngine::trackLevel(const QUuid& trackId) const
+{
+    if (!m_impl)
+    {
+        return 0.0F;
+    }
+
+    const auto activeIt = m_impl->activeTracks.find(trackId);
+    if (activeIt == m_impl->activeTracks.end() || !activeIt->second->meterSource)
+    {
+        return 0.0F;
+    }
+
+    return activeIt->second->meterSource->level();
+}
+
+float JuceAudioEngine::masterLevel() const
+{
+    if (!m_impl || !m_impl->masterMeterSource)
+    {
+        return 0.0F;
+    }
+
+    return m_impl->masterMeterSource->level();
 }
 
 std::optional<int> JuceAudioEngine::durationMs(const QString& filePath) const
