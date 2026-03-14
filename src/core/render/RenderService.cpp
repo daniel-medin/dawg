@@ -37,21 +37,23 @@ QImage RenderService::presentFrame(const VideoFrame& frame, const bool playbackA
     // The current UI still presents QImage through Qt, so eagerly uploading every
     // frame into D3D11 only adds CPU/GPU overhead without changing what is shown.
     Q_UNUSED(m_backend);
-
-    if (m_fastPlaybackEnabled && playbackActive && !frame.cpuImage.isNull())
-    {
-        const auto reducedImage = frame.cpuImage.scaled(
-            std::max(1, frame.cpuImage.width() / 2),
-            std::max(1, frame.cpuImage.height() / 2),
-            Qt::IgnoreAspectRatio,
-            Qt::FastTransformation);
-
-        return reducedImage.scaled(
-            frame.cpuImage.width(),
-            frame.cpuImage.height(),
-            Qt::IgnoreAspectRatio,
-            Qt::FastTransformation);
-    }
+    Q_UNUSED(playbackActive);
 
     return frame.cpuImage;
+}
+
+bool RenderService::canPresentToNativeWindow() const
+{
+    return m_backend && m_backend->canPresentToNativeWindow();
+}
+
+bool RenderService::presentToNativeWindow(
+    QWidget* widget,
+    const QSize& surfaceSize,
+    const VideoFrame& frame,
+    const QRectF& targetRect,
+    const QImage& overlayImage)
+{
+    return m_backend
+        && m_backend->presentToNativeWindow(widget, surfaceSize, frame, targetRect, overlayImage);
 }

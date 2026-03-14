@@ -38,9 +38,11 @@ bool VideoPlaybackService::open(const QString& filePath)
     close();
 
     auto decoder = createVideoDecoder();
+    decoder->setOutputScale(m_presentationScale);
     if (!decoder->open(filePath.toStdString()))
     {
         decoder = std::make_unique<OpenCvVideoDecoder>();
+        decoder->setOutputScale(m_presentationScale);
         if (!decoder->open(filePath.toStdString()))
         {
             return false;
@@ -96,9 +98,10 @@ void VideoPlaybackService::close()
     m_frameTimestampsSeconds.clear();
     m_loadedPath.clear();
     m_currentFrame = {};
-    m_totalFrames = 0;
-    m_fps = 0.0;
-    m_reachedEndOfStream = false;
+        m_totalFrames = 0;
+        m_fps = 0.0;
+        m_presentationScale = 1.0;
+        m_reachedEndOfStream = false;
     m_decoderNeedsRealign = false;
     m_lastStepWaitMs = 0;
     m_lastStepUsedSynchronousFallback = false;
@@ -146,6 +149,64 @@ bool VideoPlaybackService::isHardwareDecoded() const
     return m_decoder && m_decoder->isHardwareAccelerated();
 }
 
+bool VideoPlaybackService::setPresentationScale(const double scale)
+{
+    const auto clampedScale = std::clamp(scale, 0.1, 1.0);
+
+    {
+        const std::lock_guard stateLock(m_stateMutex);
+        if (std::abs(m_presentationScale - clampedScale) < 0.001)
+        {
+            return true;
+        }
+    }
+
+    if (!hasVideoLoaded())
+    {
+        const std::lock_guard stateLock(m_stateMutex);
+        m_presentationScale = clampedScale;
+        return true;
+    }
+
+    const auto currentFrameIndex = m_currentFrame.index;
+    {
+        const std::lock_guard decoderLock(m_decoderMutex);
+        if (m_decoder)
+        {
+            m_decoder->setOutputScale(clampedScale);
+        }
+    }
+
+    const auto reloadedFrame = decodeFrameAt(currentFrameIndex);
+    if (!reloadedFrame.has_value() || !reloadedFrame->isValid())
+    {
+        return false;
+    }
+
+    {
+        const std::lock_guard stateLock(m_stateMutex);
+        m_presentationScale = clampedScale;
+        m_frameQueue.clear();
+        m_recentFrameCache.clear();
+        m_currentFrame = *reloadedFrame;
+        m_reachedEndOfStream = false;
+        m_decoderNeedsRealign = false;
+        m_lastStepWaitMs = 0;
+        m_lastStepUsedSynchronousFallback = false;
+        ++m_prefetchGeneration;
+        cacheFrameLocked(m_currentFrame);
+    }
+
+    requestPrefetch();
+    return true;
+}
+
+double VideoPlaybackService::presentationScale() const
+{
+    const std::lock_guard stateLock(m_stateMutex);
+    return m_presentationScale;
+}
+
 bool VideoPlaybackService::seekFrame(const int frameIndex)
 {
     if (!hasVideoLoaded())
@@ -191,29 +252,7 @@ bool VideoPlaybackService::seekFrame(const int frameIndex)
         return true;
     }
 
-    std::optional<VideoFrame> resolvedFrame;
-    {
-        const std::lock_guard decoderLock(m_decoderMutex);
-        if (!m_decoder || !m_decoder->seekFrame(targetFrameIndex))
-        {
-            return false;
-        }
-
-        while (true)
-        {
-            const auto frame = m_decoder->readFrame();
-            if (!frame.has_value() || !frame->isValid())
-            {
-                break;
-            }
-
-            if (frame->index >= targetFrameIndex)
-            {
-                resolvedFrame = *frame;
-                break;
-            }
-        }
-    }
+    const auto resolvedFrame = decodeFrameAt(targetFrameIndex);
 
     if (!resolvedFrame.has_value() || !resolvedFrame->isValid())
     {
@@ -458,6 +497,29 @@ std::optional<VideoFrame> VideoPlaybackService::findCachedFrameLocked(const int 
     }
 
     return *frameIt;
+}
+
+std::optional<VideoFrame> VideoPlaybackService::decodeFrameAt(const int frameIndex)
+{
+    const std::lock_guard decoderLock(m_decoderMutex);
+    if (!m_decoder || !m_decoder->seekFrame(frameIndex))
+    {
+        return std::nullopt;
+    }
+
+    while (true)
+    {
+        const auto frame = m_decoder->readFrame();
+        if (!frame.has_value() || !frame->isValid())
+        {
+            return std::nullopt;
+        }
+
+        if (frame->index >= frameIndex)
+        {
+            return frame;
+        }
+    }
 }
 
 void VideoPlaybackService::prefetchFrames(const std::size_t desiredQueuedFrames)

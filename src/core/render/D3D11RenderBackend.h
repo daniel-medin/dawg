@@ -13,6 +13,13 @@ public:
     [[nodiscard]] bool isReady() const override;
     [[nodiscard]] QString backendName() const override;
     [[nodiscard]] QImage renderFrame(const VideoFrame& frame) override;
+    [[nodiscard]] bool canPresentToNativeWindow() const override;
+    bool presentToNativeWindow(
+        QWidget* widget,
+        const QSize& surfaceSize,
+        const VideoFrame& frame,
+        const QRectF& targetRect,
+        const QImage& overlayImage) override;
 
 private:
     struct Impl;

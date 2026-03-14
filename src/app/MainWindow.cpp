@@ -683,7 +683,7 @@ void MainWindow::moveSelectedNodeRight()
 
 void MainWindow::updateFrame(const QImage& image, const int frameIndex, const double timestampSeconds)
 {
-    m_canvas->setFrame(image);
+    m_canvas->setPresentedFrame(image, m_controller->currentVideoFrame(), m_controller->videoFrameSize());
     m_timeline->setCurrentFrame(frameIndex);
     m_frameLabel->setText(
         QStringLiteral("Frame %1  |  %2 s")
@@ -1633,6 +1633,7 @@ void MainWindow::buildUi()
     m_mainVerticalSplitter->setHandleWidth(6);
 
     m_canvas = new VideoCanvas(m_mainVerticalSplitter);
+    m_canvas->setRenderService(m_controller->renderService());
     m_timelinePanel = new QFrame(m_mainVerticalSplitter);
     m_timelinePanel->setObjectName(QStringLiteral("timelinePanel"));
     m_timelinePanel->setFrameShape(QFrame::NoFrame);

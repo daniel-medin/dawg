@@ -1,5 +1,6 @@
 #include "core/render/D3D11RenderBackend.h"
 
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -13,54 +14,450 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#include <Windows.h>
 #include <d3d11.h>
+#include <d3dcompiler.h>
+#include <dxgi.h>
+#pragma comment(lib, "d3dcompiler.lib")
 #endif
+
+namespace
+{
+#ifdef Q_OS_WIN
+struct Vertex
+{
+    float x;
+    float y;
+    float z;
+    float u;
+    float v;
+};
+
+constexpr char kVertexShaderSource[] = R"(
+struct VSInput {
+    float3 pos : POSITION;
+    float2 uv  : TEXCOORD0;
+};
+
+struct PSInput {
+    float4 pos : SV_POSITION;
+    float2 uv  : TEXCOORD0;
+};
+
+PSInput main(VSInput input)
+{
+    PSInput output;
+    output.pos = float4(input.pos, 1.0f);
+    output.uv = input.uv;
+    return output;
+}
+)";
+
+constexpr char kPixelShaderSource[] = R"(
+Texture2D sourceTexture : register(t0);
+SamplerState sourceSampler : register(s0);
+
+float4 main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET
+{
+    return sourceTexture.Sample(sourceSampler, uv);
+}
+)";
+
+void releaseCom(IUnknown*& object)
+{
+    if (object)
+    {
+        object->Release();
+        object = nullptr;
+    }
+}
+
+template <typename T>
+void releaseTyped(T*& object)
+{
+    if (object)
+    {
+        object->Release();
+        object = nullptr;
+    }
+}
+
+struct TextureResource
+{
+    ID3D11Texture2D* texture = nullptr;
+    ID3D11ShaderResourceView* shaderResourceView = nullptr;
+    QSize size;
+
+    void reset()
+    {
+        releaseTyped(shaderResourceView);
+        releaseTyped(texture);
+        size = {};
+    }
+};
+
+void setQuadVertices(
+    std::array<Vertex, 4>& vertices,
+    const QRectF& rect,
+    const QSize& surfaceSize)
+{
+    const auto width = std::max(1, surfaceSize.width());
+    const auto height = std::max(1, surfaceSize.height());
+
+    const auto left = static_cast<float>((rect.left() / width) * 2.0 - 1.0);
+    const auto right = static_cast<float>((rect.right() / width) * 2.0 - 1.0);
+    const auto top = static_cast<float>(1.0 - (rect.top() / height) * 2.0);
+    const auto bottom = static_cast<float>(1.0 - (rect.bottom() / height) * 2.0);
+
+    vertices = {{
+        {left, top, 0.0F, 0.0F, 0.0F},
+        {right, top, 0.0F, 1.0F, 0.0F},
+        {left, bottom, 0.0F, 0.0F, 1.0F},
+        {right, bottom, 0.0F, 1.0F, 1.0F},
+    }};
+}
+#endif
+}
 
 struct D3D11RenderBackend::Impl
 {
 #ifdef Q_OS_WIN
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* deviceContext = nullptr;
-    ID3D11Texture2D* frameTexture = nullptr;
-    QSize textureSize;
+    IDXGISwapChain* swapChain = nullptr;
+    ID3D11RenderTargetView* renderTargetView = nullptr;
+    ID3D11VertexShader* vertexShader = nullptr;
+    ID3D11PixelShader* pixelShader = nullptr;
+    ID3D11InputLayout* inputLayout = nullptr;
+    ID3D11Buffer* vertexBuffer = nullptr;
+    ID3D11SamplerState* samplerState = nullptr;
+    ID3D11BlendState* alphaBlendState = nullptr;
+    ID3D11RasterizerState* rasterizerState = nullptr;
+    TextureResource videoTexture;
+    TextureResource overlayTexture;
+    HWND hwnd = nullptr;
+    QSize swapChainSize;
 
     ~Impl()
     {
-        if (frameTexture)
-        {
-            frameTexture->Release();
-        }
-
-        if (deviceContext)
-        {
-            deviceContext->Release();
-        }
-
-        if (device)
-        {
-            device->Release();
-        }
+        releaseSwapChainResources();
+        videoTexture.reset();
+        overlayTexture.reset();
+        releaseTyped(rasterizerState);
+        releaseTyped(alphaBlendState);
+        releaseTyped(samplerState);
+        releaseTyped(vertexBuffer);
+        releaseTyped(inputLayout);
+        releaseTyped(pixelShader);
+        releaseTyped(vertexShader);
+        releaseTyped(deviceContext);
+        releaseTyped(device);
     }
 
-    void ensureFrameTexture(const QSize& imageSize)
+    bool initializeDevice()
     {
-        if (!device || !deviceContext || !imageSize.isValid())
+        if (device && deviceContext)
         {
-            return;
+            return true;
         }
 
-        if (frameTexture
-            && textureSize.width() == imageSize.width()
-            && textureSize.height() == imageSize.height())
+        UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+#if defined(_DEBUG)
+        creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+
+        D3D_FEATURE_LEVEL featureLevel{};
+        const auto result = D3D11CreateDevice(
+            nullptr,
+            D3D_DRIVER_TYPE_HARDWARE,
+            nullptr,
+            creationFlags,
+            nullptr,
+            0,
+            D3D11_SDK_VERSION,
+            &device,
+            &featureLevel,
+            &deviceContext);
+        return SUCCEEDED(result) && device && deviceContext;
+    }
+
+    void releaseSwapChainResources()
+    {
+        releaseTyped(renderTargetView);
+        if (swapChain)
         {
-            return;
+            swapChain->SetFullscreenState(FALSE, nullptr);
+        }
+        releaseTyped(swapChain);
+        hwnd = nullptr;
+        swapChainSize = {};
+    }
+
+    bool ensurePipeline()
+    {
+        if (vertexShader && pixelShader && inputLayout && vertexBuffer && samplerState && alphaBlendState && rasterizerState)
+        {
+            return true;
         }
 
-        if (frameTexture)
+        if (!initializeDevice())
         {
-            frameTexture->Release();
-            frameTexture = nullptr;
+            return false;
         }
+
+        ID3DBlob* vertexShaderBlob = nullptr;
+        ID3DBlob* pixelShaderBlob = nullptr;
+        ID3DBlob* errorBlob = nullptr;
+
+        auto cleanupBlobs = [&]()
+        {
+            releaseTyped(vertexShaderBlob);
+            releaseTyped(pixelShaderBlob);
+            releaseTyped(errorBlob);
+        };
+
+        if (FAILED(D3DCompile(
+                kVertexShaderSource,
+                sizeof(kVertexShaderSource) - 1,
+                nullptr,
+                nullptr,
+                nullptr,
+                "main",
+                "vs_4_0",
+                0,
+                0,
+                &vertexShaderBlob,
+                &errorBlob)))
+        {
+            cleanupBlobs();
+            return false;
+        }
+
+        if (FAILED(D3DCompile(
+                kPixelShaderSource,
+                sizeof(kPixelShaderSource) - 1,
+                nullptr,
+                nullptr,
+                nullptr,
+                "main",
+                "ps_4_0",
+                0,
+                0,
+                &pixelShaderBlob,
+                &errorBlob)))
+        {
+            cleanupBlobs();
+            return false;
+        }
+
+        if (FAILED(device->CreateVertexShader(
+                vertexShaderBlob->GetBufferPointer(),
+                vertexShaderBlob->GetBufferSize(),
+                nullptr,
+                &vertexShader)))
+        {
+            cleanupBlobs();
+            return false;
+        }
+
+        if (FAILED(device->CreatePixelShader(
+                pixelShaderBlob->GetBufferPointer(),
+                pixelShaderBlob->GetBufferSize(),
+                nullptr,
+                &pixelShader)))
+        {
+            cleanupBlobs();
+            return false;
+        }
+
+        const D3D11_INPUT_ELEMENT_DESC inputLayoutDescription[] = {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        };
+
+        if (FAILED(device->CreateInputLayout(
+                inputLayoutDescription,
+                ARRAYSIZE(inputLayoutDescription),
+                vertexShaderBlob->GetBufferPointer(),
+                vertexShaderBlob->GetBufferSize(),
+                &inputLayout)))
+        {
+            cleanupBlobs();
+            return false;
+        }
+
+        D3D11_BUFFER_DESC vertexBufferDescription{};
+        vertexBufferDescription.ByteWidth = static_cast<UINT>(sizeof(Vertex) * 4);
+        vertexBufferDescription.Usage = D3D11_USAGE_DYNAMIC;
+        vertexBufferDescription.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        vertexBufferDescription.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        if (FAILED(device->CreateBuffer(&vertexBufferDescription, nullptr, &vertexBuffer)))
+        {
+            cleanupBlobs();
+            return false;
+        }
+
+        D3D11_SAMPLER_DESC samplerDescription{};
+        samplerDescription.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        samplerDescription.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+        samplerDescription.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+        samplerDescription.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        samplerDescription.ComparisonFunc = D3D11_COMPARISON_NEVER;
+        samplerDescription.MinLOD = 0;
+        samplerDescription.MaxLOD = D3D11_FLOAT32_MAX;
+        if (FAILED(device->CreateSamplerState(&samplerDescription, &samplerState)))
+        {
+            cleanupBlobs();
+            return false;
+        }
+
+        D3D11_BLEND_DESC blendDescription{};
+        blendDescription.RenderTarget[0].BlendEnable = TRUE;
+        blendDescription.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+        blendDescription.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+        blendDescription.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+        blendDescription.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+        blendDescription.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+        blendDescription.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+        blendDescription.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+        if (FAILED(device->CreateBlendState(&blendDescription, &alphaBlendState)))
+        {
+            cleanupBlobs();
+            return false;
+        }
+
+        D3D11_RASTERIZER_DESC rasterizerDescription{};
+        rasterizerDescription.FillMode = D3D11_FILL_SOLID;
+        rasterizerDescription.CullMode = D3D11_CULL_NONE;
+        rasterizerDescription.DepthClipEnable = TRUE;
+        if (FAILED(device->CreateRasterizerState(&rasterizerDescription, &rasterizerState)))
+        {
+            cleanupBlobs();
+            return false;
+        }
+
+        cleanupBlobs();
+        return true;
+    }
+
+    bool ensureSwapChain(HWND targetWindow, const QSize& size)
+    {
+        if (!ensurePipeline() || !targetWindow || !size.isValid())
+        {
+            return false;
+        }
+
+        if (swapChain && hwnd == targetWindow)
+        {
+            if (swapChainSize == size)
+            {
+                return ensureRenderTargetView();
+            }
+
+            releaseTyped(renderTargetView);
+            if (FAILED(swapChain->ResizeBuffers(
+                    0,
+                    static_cast<UINT>(size.width()),
+                    static_cast<UINT>(size.height()),
+                    DXGI_FORMAT_B8G8R8A8_UNORM,
+                    0)))
+            {
+                releaseSwapChainResources();
+                return false;
+            }
+
+            swapChainSize = size;
+            return ensureRenderTargetView();
+        }
+
+        releaseSwapChainResources();
+
+        IDXGIDevice* dxgiDevice = nullptr;
+        IDXGIAdapter* adapter = nullptr;
+        IDXGIFactory* factory = nullptr;
+        if (FAILED(device->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void**>(&dxgiDevice))))
+        {
+            return false;
+        }
+
+        const auto releaseDxgi = [&]()
+        {
+            releaseTyped(factory);
+            releaseTyped(adapter);
+            releaseTyped(dxgiDevice);
+        };
+
+        if (FAILED(dxgiDevice->GetAdapter(&adapter))
+            || FAILED(adapter->GetParent(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&factory))))
+        {
+            releaseDxgi();
+            return false;
+        }
+
+        DXGI_SWAP_CHAIN_DESC swapChainDescription{};
+        swapChainDescription.BufferDesc.Width = static_cast<UINT>(size.width());
+        swapChainDescription.BufferDesc.Height = static_cast<UINT>(size.height());
+        swapChainDescription.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        swapChainDescription.SampleDesc.Count = 1;
+        swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        swapChainDescription.BufferCount = 2;
+        swapChainDescription.OutputWindow = targetWindow;
+        swapChainDescription.Windowed = TRUE;
+        swapChainDescription.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+        const auto result = factory->CreateSwapChain(device, &swapChainDescription, &swapChain);
+        releaseDxgi();
+        if (FAILED(result) || !swapChain)
+        {
+            releaseSwapChainResources();
+            return false;
+        }
+
+        hwnd = targetWindow;
+        swapChainSize = size;
+        return ensureRenderTargetView();
+    }
+
+    bool ensureRenderTargetView()
+    {
+        if (!swapChain)
+        {
+            return false;
+        }
+
+        if (renderTargetView)
+        {
+            return true;
+        }
+
+        ID3D11Texture2D* backBuffer = nullptr;
+        const auto result = swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer));
+        if (FAILED(result) || !backBuffer)
+        {
+            releaseTyped(backBuffer);
+            return false;
+        }
+
+        const auto createResult = device->CreateRenderTargetView(backBuffer, nullptr, &renderTargetView);
+        releaseTyped(backBuffer);
+        return SUCCEEDED(createResult) && renderTargetView;
+    }
+
+    bool ensureTexture(TextureResource& resource, const QSize& imageSize)
+    {
+        if (!device || !imageSize.isValid())
+        {
+            return false;
+        }
+
+        if (resource.texture
+            && resource.size.width() == imageSize.width()
+            && resource.size.height() == imageSize.height())
+        {
+            return true;
+        }
+
+        resource.reset();
 
         D3D11_TEXTURE2D_DESC description{};
         description.Width = static_cast<UINT>(imageSize.width());
@@ -73,39 +470,156 @@ struct D3D11RenderBackend::Impl
         description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         description.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-        if (FAILED(device->CreateTexture2D(&description, nullptr, &frameTexture)))
+        if (FAILED(device->CreateTexture2D(&description, nullptr, &resource.texture)))
         {
-            frameTexture = nullptr;
-            textureSize = {};
-            return;
+            resource.reset();
+            return false;
         }
 
-        textureSize = imageSize;
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDescription{};
+        srvDescription.Format = description.Format;
+        srvDescription.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        srvDescription.Texture2D.MipLevels = 1;
+        if (FAILED(device->CreateShaderResourceView(resource.texture, &srvDescription, &resource.shaderResourceView)))
+        {
+            resource.reset();
+            return false;
+        }
+
+        resource.size = imageSize;
+        return true;
     }
 
-    void uploadFrame(const QImage& image)
+    bool uploadImage(TextureResource& resource, const QImage& image)
     {
-        ensureFrameTexture(image.size());
-        if (!frameTexture || image.isNull())
+        const auto uploadImage = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        if (!ensureTexture(resource, uploadImage.size()))
         {
-            return;
+            return false;
         }
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
-        if (FAILED(deviceContext->Map(frameTexture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+        if (FAILED(deviceContext->Map(resource.texture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
         {
-            return;
+            return false;
         }
 
-        const auto bytesPerRow = static_cast<std::size_t>(image.width()) * 4;
-        for (int row = 0; row < image.height(); ++row)
+        const auto bytesPerRow = static_cast<std::size_t>(uploadImage.width()) * 4;
+        for (int row = 0; row < uploadImage.height(); ++row)
         {
-            const auto* sourceRow = image.constBits() + (row * image.bytesPerLine());
+            const auto* sourceRow = uploadImage.constBits() + (row * uploadImage.bytesPerLine());
             auto* destinationRow = static_cast<std::byte*>(mapped.pData) + (row * mapped.RowPitch);
             std::memcpy(destinationRow, sourceRow, bytesPerRow);
         }
 
-        deviceContext->Unmap(frameTexture, 0);
+        deviceContext->Unmap(resource.texture, 0);
+        return true;
+    }
+
+    bool updateQuadBuffer(const std::array<Vertex, 4>& vertices)
+    {
+        if (!vertexBuffer)
+        {
+            return false;
+        }
+
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(deviceContext->Map(vertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+        {
+            return false;
+        }
+
+        std::memcpy(mapped.pData, vertices.data(), sizeof(Vertex) * vertices.size());
+        deviceContext->Unmap(vertexBuffer, 0);
+        return true;
+    }
+
+    bool drawTexturedQuad(
+        ID3D11ShaderResourceView* shaderResourceView,
+        const QRectF& rect,
+        const QSize& surfaceSize,
+        const bool alphaBlend)
+    {
+        if (!shaderResourceView || !renderTargetView)
+        {
+            return false;
+        }
+
+        std::array<Vertex, 4> vertices{};
+        setQuadVertices(vertices, rect, surfaceSize);
+        if (!updateQuadBuffer(vertices))
+        {
+            return false;
+        }
+
+        const UINT stride = sizeof(Vertex);
+        const UINT offset = 0;
+        deviceContext->IASetInputLayout(inputLayout);
+        deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        deviceContext->IASetVertexBuffers(0, 1, &vertexBuffer, &stride, &offset);
+        deviceContext->VSSetShader(vertexShader, nullptr, 0);
+        deviceContext->PSSetShader(pixelShader, nullptr, 0);
+        deviceContext->PSSetSamplers(0, 1, &samplerState);
+        deviceContext->PSSetShaderResources(0, 1, &shaderResourceView);
+        deviceContext->RSSetState(rasterizerState);
+
+        const float blendFactor[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+        deviceContext->OMSetBlendState(alphaBlend ? alphaBlendState : nullptr, blendFactor, 0xFFFFFFFF);
+        deviceContext->Draw(4, 0);
+
+        ID3D11ShaderResourceView* nullShaderResource = nullptr;
+        deviceContext->PSSetShaderResources(0, 1, &nullShaderResource);
+        return true;
+    }
+
+    bool present(
+        QWidget* widget,
+        const QSize& surfaceSize,
+        const VideoFrame& frame,
+        const QRectF& targetRect,
+        const QImage& overlayImage)
+    {
+        if (!widget || !ensureSwapChain(reinterpret_cast<HWND>(widget->winId()), surfaceSize))
+        {
+            return false;
+        }
+
+        if (!uploadImage(videoTexture, frame.cpuImage))
+        {
+            return false;
+        }
+
+        const auto preparedOverlayImage = overlayImage.isNull()
+            ? QImage(surfaceSize, QImage::Format_ARGB32_Premultiplied)
+            : overlayImage;
+        if (preparedOverlayImage.isNull() || !uploadImage(overlayTexture, preparedOverlayImage))
+        {
+            return false;
+        }
+
+        D3D11_VIEWPORT viewport{};
+        viewport.Width = static_cast<float>(surfaceSize.width());
+        viewport.Height = static_cast<float>(surfaceSize.height());
+        viewport.MinDepth = 0.0F;
+        viewport.MaxDepth = 1.0F;
+
+        const float clearColor[4] = {12.0F / 255.0F, 14.0F / 255.0F, 18.0F / 255.0F, 1.0F};
+        deviceContext->OMSetRenderTargets(1, &renderTargetView, nullptr);
+        deviceContext->RSSetViewports(1, &viewport);
+        deviceContext->ClearRenderTargetView(renderTargetView, clearColor);
+
+        if (!drawTexturedQuad(videoTexture.shaderResourceView, targetRect, surfaceSize, false))
+        {
+            return false;
+        }
+
+        const QRectF fullRect{0.0, 0.0, static_cast<double>(surfaceSize.width()), static_cast<double>(surfaceSize.height())};
+        if (!drawTexturedQuad(overlayTexture.shaderResourceView, fullRect, surfaceSize, true))
+        {
+            return false;
+        }
+
+        return SUCCEEDED(swapChain->Present(1, 0));
     }
 #endif
 };
@@ -114,18 +628,7 @@ D3D11RenderBackend::D3D11RenderBackend()
     : m_impl(std::make_unique<Impl>())
 {
 #ifdef Q_OS_WIN
-    D3D_FEATURE_LEVEL featureLevel{};
-    D3D11CreateDevice(
-        nullptr,
-        D3D_DRIVER_TYPE_HARDWARE,
-        nullptr,
-        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-        nullptr,
-        0,
-        D3D11_SDK_VERSION,
-        &m_impl->device,
-        &featureLevel,
-        &m_impl->deviceContext);
+    static_cast<void>(m_impl->initializeDevice());
 #endif
 }
 
@@ -147,17 +650,38 @@ QString D3D11RenderBackend::backendName() const
 
 QImage D3D11RenderBackend::renderFrame(const VideoFrame& frame)
 {
-    if (frame.cpuImage.isNull())
+    return frame.cpuImage;
+}
+
+bool D3D11RenderBackend::canPresentToNativeWindow() const
+{
+#ifdef Q_OS_WIN
+    return isReady();
+#else
+    return false;
+#endif
+}
+
+bool D3D11RenderBackend::presentToNativeWindow(
+    QWidget* widget,
+    const QSize& surfaceSize,
+    const VideoFrame& frame,
+    const QRectF& targetRect,
+    const QImage& overlayImage)
+{
+#ifdef Q_OS_WIN
+    if (!widget || frame.cpuImage.isNull())
     {
-        return {};
+        return false;
     }
 
-    const auto uploadImage = frame.cpuImage.convertToFormat(QImage::Format_ARGB32);
-#ifdef Q_OS_WIN
-    if (isReady())
-    {
-        m_impl->uploadFrame(uploadImage);
-    }
+    return m_impl->present(widget, surfaceSize, frame, targetRect, overlayImage);
+#else
+    Q_UNUSED(widget);
+    Q_UNUSED(surfaceSize);
+    Q_UNUSED(frame);
+    Q_UNUSED(targetRect);
+    Q_UNUSED(overlayImage);
+    return false;
 #endif
-    return uploadImage;
 }

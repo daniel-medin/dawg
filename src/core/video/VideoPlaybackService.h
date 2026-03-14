@@ -41,6 +41,8 @@ public:
     [[nodiscard]] const VideoFrame& currentFrame() const;
     [[nodiscard]] QString decoderBackendName() const;
     [[nodiscard]] bool isHardwareDecoded() const;
+    bool setPresentationScale(double scale);
+    [[nodiscard]] double presentationScale() const;
 
     bool seekFrame(int frameIndex);
     [[nodiscard]] std::optional<VideoFrame> stepForward();
@@ -57,6 +59,7 @@ private:
     void cacheFrameTimestampLocked(const VideoFrame& frame);
     void cacheFrameTimestamp(const VideoFrame& frame);
     [[nodiscard]] std::optional<VideoFrame> findCachedFrameLocked(int frameIndex) const;
+    [[nodiscard]] std::optional<VideoFrame> decodeFrameAt(int frameIndex);
     void prefetchFrames(std::size_t desiredQueuedFrames);
 
     mutable std::mutex m_decoderMutex;
@@ -71,6 +74,7 @@ private:
     VideoFrame m_currentFrame;
     int m_totalFrames = 0;
     double m_fps = 0.0;
+    double m_presentationScale = 1.0;
     std::size_t m_prefetchTargetSize = 8;
     bool m_stopPrefetch = false;
     bool m_reachedEndOfStream = false;

@@ -86,7 +86,7 @@ target_link_libraries(dawg
 )
 
 if(WIN32)
-    target_link_libraries(dawg PRIVATE Psapi Winmm d3d11 dxgi)
+    target_link_libraries(dawg PRIVATE Psapi Winmm d3d11 dxgi d3dcompiler)
 endif()
 
 if(TARGET PkgConfig::FFMPEG)

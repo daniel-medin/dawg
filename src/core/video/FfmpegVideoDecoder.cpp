@@ -113,6 +113,20 @@ cv::Mat rotateFrameBgr(const cv::Mat& inputFrame, const int rotationDegrees)
     return rotatedFrame;
 }
 
+cv::Mat scaledFrameBgr(const cv::Mat& inputFrame, const double outputScale)
+{
+    if (inputFrame.empty() || outputScale >= 0.999)
+    {
+        return inputFrame;
+    }
+
+    const auto scaledWidth = std::max(1, static_cast<int>(std::lround(inputFrame.cols * outputScale)));
+    const auto scaledHeight = std::max(1, static_cast<int>(std::lround(inputFrame.rows * outputScale)));
+    cv::Mat scaledFrame;
+    cv::resize(inputFrame, scaledFrame, cv::Size{scaledWidth, scaledHeight}, 0.0, 0.0, cv::INTER_AREA);
+    return scaledFrame;
+}
+
 struct HardwareFormatSelectionContext
 {
     AVPixelFormat hardwarePixelFormat = AV_PIX_FMT_NONE;
@@ -166,6 +180,7 @@ struct FfmpegVideoDecoder::Impl
     QString activeBackendName = QStringLiteral("FFmpeg");
     HardwareFormatSelectionContext hardwareFormatSelection;
     int presentationRotationDegrees = 0;
+    double outputScale = 1.0;
 
     ~Impl()
     {
@@ -500,11 +515,12 @@ std::optional<VideoFrame> FfmpegVideoDecoder::readFrame()
                 dstLinesize);
 
             const auto presentedBgr = rotateFrameBgr(cpuBgr, m_impl->presentationRotationDegrees);
+            const auto outputBgr = scaledFrameBgr(presentedBgr, m_impl->outputScale);
             QImage cpuImage(
-                presentedBgr.data,
-                presentedBgr.cols,
-                presentedBgr.rows,
-                static_cast<int>(presentedBgr.step[0]),
+                outputBgr.data,
+                outputBgr.cols,
+                outputBgr.rows,
+                static_cast<int>(outputBgr.step[0]),
                 QImage::Format_BGR888);
 
             VideoFrame frame;
@@ -578,6 +594,21 @@ double FfmpegVideoDecoder::fps() const
 cv::Size FfmpegVideoDecoder::frameSize() const
 {
     return isOpen() ? m_impl->detectedFrameSize : cv::Size{};
+}
+
+void FfmpegVideoDecoder::setOutputScale(const double scale)
+{
+    if (!m_impl)
+    {
+        return;
+    }
+
+    m_impl->outputScale = std::clamp(scale, 0.1, 1.0);
+}
+
+double FfmpegVideoDecoder::outputScale() const
+{
+    return m_impl ? m_impl->outputScale : 1.0;
 }
 
 QString FfmpegVideoDecoder::backendName() const

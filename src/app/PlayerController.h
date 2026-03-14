@@ -9,6 +9,7 @@
 #include <QObject>
 #include <QUuid>
 #include <QString>
+#include <QSize>
 #include <QElapsedTimer>
 #include <QTimer>
 
@@ -95,10 +96,14 @@ public:
     [[nodiscard]] bool videoHardwareAccelerated() const;
     [[nodiscard]] QString renderBackendName() const;
     [[nodiscard]] bool renderHardwareAccelerated() const;
+    [[nodiscard]] RenderService* renderService();
+    [[nodiscard]] const VideoFrame& currentVideoFrame() const;
     [[nodiscard]] bool hasEmbeddedVideoAudio() const;
     [[nodiscard]] QString embeddedVideoAudioDisplayName() const;
     [[nodiscard]] bool isEmbeddedVideoAudioMuted() const;
     [[nodiscard]] bool isFastPlaybackEnabled() const;
+    [[nodiscard]] bool isFastPlaybackActive() const;
+    [[nodiscard]] QSize videoFrameSize() const;
     [[nodiscard]] QString trackLabel(const QUuid& trackId) const;
     [[nodiscard]] bool trackHasAttachedAudio(const QUuid& trackId) const;
     [[nodiscard]] bool trackAutoPanEnabled(const QUuid& trackId) const;
@@ -139,6 +144,7 @@ private:
     void syncAttachedAudioForCurrentFrame();
     void refreshOverlays();
     void emitCurrentFrame();
+    bool applyPresentationScaleForPlaybackState(bool playbackActive);
     [[nodiscard]] bool isTrackSelected(const QUuid& trackId) const;
     void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
     void logPlaybackHitchIfNeeded(int targetFrameIndex, int previousFrameIndex, int advancedFrames);

@@ -1,6 +1,7 @@
 #include "core/video/OpenCvVideoDecoder.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include <QImage>
 
@@ -57,8 +58,23 @@ std::optional<VideoFrame> OpenCvVideoDecoder::readFrame()
     const auto timestampSeconds = timestampMs >= 0.0 ? (timestampMs / 1000.0) : derivedTimestampSeconds;
     const auto durationSeconds = fps() > 0.0 ? (1.0 / fps()) : 0.0;
 
+    cv::Mat outputFrame = frame;
+    if (m_outputScale < 0.999)
+    {
+        cv::resize(
+            frame,
+            outputFrame,
+            cv::Size{
+                std::max(1, static_cast<int>(std::lround(frame.cols * m_outputScale))),
+                std::max(1, static_cast<int>(std::lround(frame.rows * m_outputScale)))
+            },
+            0.0,
+            0.0,
+            cv::INTER_AREA);
+    }
+
     cv::Mat rgbFrame;
-    cv::cvtColor(frame, rgbFrame, cv::COLOR_BGR2RGB);
+    cv::cvtColor(outputFrame, rgbFrame, cv::COLOR_BGR2RGB);
     QImage image(
         rgbFrame.data,
         rgbFrame.cols,
@@ -106,6 +122,16 @@ cv::Size OpenCvVideoDecoder::frameSize() const
         static_cast<int>(m_capture.get(cv::CAP_PROP_FRAME_WIDTH)),
         static_cast<int>(m_capture.get(cv::CAP_PROP_FRAME_HEIGHT))
     };
+}
+
+void OpenCvVideoDecoder::setOutputScale(const double scale)
+{
+    m_outputScale = std::clamp(scale, 0.1, 1.0);
+}
+
+double OpenCvVideoDecoder::outputScale() const
+{
+    return m_outputScale;
 }
 
 QString OpenCvVideoDecoder::backendName() const

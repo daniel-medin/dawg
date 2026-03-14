@@ -67,6 +67,7 @@ bool PlayerController::openVideo(const QString& filePath)
 {
     pause(false);
     m_audioEngine->stopTrack(m_embeddedVideoAudioTrackId);
+    m_videoPlayback.setPresentationScale(1.0);
 
     if (!m_videoPlayback.open(filePath))
     {
@@ -171,6 +172,8 @@ void PlayerController::togglePlayback()
         return;
     }
 
+    applyPresentationScaleForPlaybackState(true);
+    emitCurrentFrame();
     m_transport.startPlayback(m_currentFrame.index);
     m_playbackStartTimestampSeconds = frameTimestampSeconds(m_currentFrame.index);
     m_playbackElapsedTimer.restart();
@@ -199,6 +202,7 @@ void PlayerController::pause(const bool restorePlaybackAnchor)
         return;
     }
 
+    applyPresentationScaleForPlaybackState(false);
     loadFrameAt(restoreFrame);
 }
 
@@ -1247,6 +1251,7 @@ void PlayerController::setFastPlaybackEnabled(const bool enabled)
     }
 
     m_renderService.setFastPlaybackEnabled(enabled);
+    applyPresentationScaleForPlaybackState(m_transport.isPlaying());
     emit videoAudioStateChanged();
     emitCurrentFrame();
     emit statusChanged(
@@ -1379,6 +1384,16 @@ bool PlayerController::renderHardwareAccelerated() const
     return m_renderService.isHardwareAccelerated();
 }
 
+RenderService* PlayerController::renderService()
+{
+    return &m_renderService;
+}
+
+const VideoFrame& PlayerController::currentVideoFrame() const
+{
+    return m_currentFrame;
+}
+
 bool PlayerController::hasEmbeddedVideoAudio() const
 {
     return !m_embeddedVideoAudioPath.isEmpty();
@@ -1397,6 +1412,16 @@ bool PlayerController::isEmbeddedVideoAudioMuted() const
 bool PlayerController::isFastPlaybackEnabled() const
 {
     return m_renderService.fastPlaybackEnabled();
+}
+
+bool PlayerController::isFastPlaybackActive() const
+{
+    return m_renderService.fastPlaybackEnabled() && m_transport.isPlaying();
+}
+
+QSize PlayerController::videoFrameSize() const
+{
+    return QSize{m_currentFrame.frameSize.width, m_currentFrame.frameSize.height};
 }
 
 QString PlayerController::trackLabel(const QUuid& trackId) const
@@ -1823,6 +1848,20 @@ void PlayerController::emitCurrentFrame()
         m_renderService.presentFrame(m_currentFrame, m_transport.isPlaying()),
         m_currentFrame.index,
         m_currentFrame.timestampSeconds);
+}
+
+bool PlayerController::applyPresentationScaleForPlaybackState(const bool playbackActive)
+{
+    const auto targetScale = (m_renderService.fastPlaybackEnabled() && playbackActive) ? 0.5 : 1.0;
+    if (!m_videoPlayback.setPresentationScale(targetScale))
+    {
+        return false;
+    }
+
+    m_currentFrame = m_videoPlayback.currentFrame();
+    updateCurrentGrayFrameIfNeeded();
+    refreshOverlays();
+    return true;
 }
 
 void PlayerController::syncAttachedAudioForCurrentFrame()
