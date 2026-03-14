@@ -17,8 +17,11 @@ public:
 
     [[nodiscard]] QString backendName() const;
     [[nodiscard]] bool isHardwareAccelerated() const;
-    [[nodiscard]] QImage presentFrame(const VideoFrame& frame);
+    void setFastPlaybackEnabled(bool enabled);
+    [[nodiscard]] bool fastPlaybackEnabled() const;
+    [[nodiscard]] QImage presentFrame(const VideoFrame& frame, bool playbackActive);
 
 private:
     std::unique_ptr<IRenderBackend> m_backend;
+    bool m_fastPlaybackEnabled = false;
 };

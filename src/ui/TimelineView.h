@@ -6,6 +6,7 @@
 #include <QColor>
 #include <QRectF>
 #include <QString>
+#include <QTimer>
 #include <QUuid>
 #include <QWidget>
 
@@ -70,6 +71,8 @@ private:
     [[nodiscard]] int preferredHeight() const;
     void updatePreferredHeight();
     void requestFrame(int frameIndex);
+    void requestFrameCoalesced(int frameIndex);
+    void flushPendingFrameRequest();
     void requestFrameAt(const QPointF& position);
 
     std::optional<TimelineTrackGeometry> m_trimmedTrack;
@@ -84,4 +87,6 @@ private:
     bool m_dragging = false;
     bool m_seekOnClickEnabled = true;
     int m_lastRequestedFrame = -1;
+    int m_pendingRequestedFrame = -1;
+    QTimer m_scrubRequestTimer;
 };

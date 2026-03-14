@@ -2,6 +2,7 @@
 
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -52,8 +53,10 @@ private:
     void stopPrefetchThread();
     void requestPrefetch();
     void prefetchLoop();
+    void cacheFrameLocked(const VideoFrame& frame);
     void cacheFrameTimestampLocked(const VideoFrame& frame);
     void cacheFrameTimestamp(const VideoFrame& frame);
+    [[nodiscard]] std::optional<VideoFrame> findCachedFrameLocked(int frameIndex) const;
     void prefetchFrames(std::size_t desiredQueuedFrames);
 
     mutable std::mutex m_decoderMutex;
@@ -62,6 +65,7 @@ private:
     std::thread m_prefetchThread;
     std::unique_ptr<VideoDecoder> m_decoder;
     VideoFrameQueue m_frameQueue;
+    std::deque<VideoFrame> m_recentFrameCache;
     std::vector<double> m_frameTimestampsSeconds;
     QString m_loadedPath;
     VideoFrame m_currentFrame;
@@ -70,6 +74,7 @@ private:
     std::size_t m_prefetchTargetSize = 8;
     bool m_stopPrefetch = false;
     bool m_reachedEndOfStream = false;
+    bool m_decoderNeedsRealign = false;
     qint64 m_lastStepWaitMs = 0;
     bool m_lastStepUsedSynchronousFallback = false;
     std::uint64_t m_queueStarvationCount = 0;

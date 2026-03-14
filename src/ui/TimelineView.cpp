@@ -14,6 +14,9 @@ TimelineView::TimelineView(QWidget* parent)
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
+    m_scrubRequestTimer.setSingleShot(true);
+    m_scrubRequestTimer.setInterval(16);
+    connect(&m_scrubRequestTimer, &QTimer::timeout, this, &TimelineView::flushPendingFrameRequest);
     updatePreferredHeight();
 }
 
@@ -30,6 +33,8 @@ void TimelineView::clear()
     m_trackSpans.clear();
     m_dragging = false;
     m_lastRequestedFrame = -1;
+    m_pendingRequestedFrame = -1;
+    m_scrubRequestTimer.stop();
     updatePreferredHeight();
     update();
 }
@@ -46,6 +51,7 @@ void TimelineView::setCurrentFrame(const int frameIndex)
 {
     m_currentFrame = std::clamp(frameIndex, 0, std::max(0, m_totalFrames - 1));
     m_lastRequestedFrame = m_currentFrame;
+    m_pendingRequestedFrame = -1;
     update();
 }
 
@@ -234,7 +240,7 @@ void TimelineView::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
-    requestFrameAt(event->position());
+    requestFrameCoalesced(frameForPosition(event->position().x()));
 }
 
 void TimelineView::mouseReleaseEvent(QMouseEvent* event)
@@ -243,6 +249,7 @@ void TimelineView::mouseReleaseEvent(QMouseEvent* event)
 
     if (event->button() == Qt::LeftButton)
     {
+        flushPendingFrameRequest();
         m_trimmedTrack.reset();
         m_draggedTrack.reset();
         m_trimmingStart = false;
@@ -396,6 +403,34 @@ void TimelineView::requestFrame(const int frameIndex)
 
     m_lastRequestedFrame = clampedFrameIndex;
     emit frameRequested(clampedFrameIndex);
+}
+
+void TimelineView::requestFrameCoalesced(const int frameIndex)
+{
+    const auto clampedFrameIndex = std::clamp(frameIndex, 0, std::max(0, m_totalFrames - 1));
+    if (clampedFrameIndex == m_lastRequestedFrame)
+    {
+        m_pendingRequestedFrame = -1;
+        return;
+    }
+
+    m_pendingRequestedFrame = clampedFrameIndex;
+    if (!m_scrubRequestTimer.isActive())
+    {
+        m_scrubRequestTimer.start();
+    }
+}
+
+void TimelineView::flushPendingFrameRequest()
+{
+    if (m_pendingRequestedFrame < 0)
+    {
+        return;
+    }
+
+    const auto frameIndex = m_pendingRequestedFrame;
+    m_pendingRequestedFrame = -1;
+    requestFrame(frameIndex);
 }
 
 void TimelineView::updateTrimAt(const QPointF& position)

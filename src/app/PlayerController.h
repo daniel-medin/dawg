@@ -40,6 +40,8 @@ public:
     void seekToFrame(int frameIndex);
     void stepBackward();
     void stepForward();
+    void stepFastBackward();
+    void stepFastForward();
     void seedTrack(const QPointF& imagePoint);
     bool createTrackWithAudioAtCurrentFrame(const QString& filePath);
     bool createTrackWithAudioAtCurrentFrame(const QString& filePath, const QPointF& imagePoint);
@@ -69,6 +71,7 @@ public:
     void trimSelectedTracksToAttachedSound();
     void toggleSelectedTrackAutoPan();
     void toggleEmbeddedVideoAudioMuted();
+    void setFastPlaybackEnabled(bool enabled);
     void setInsertionFollowsPlayback(bool enabled);
     void setMotionTrackingEnabled(bool enabled);
     void selectNextVisibleTrack();
@@ -95,6 +98,7 @@ public:
     [[nodiscard]] bool hasEmbeddedVideoAudio() const;
     [[nodiscard]] QString embeddedVideoAudioDisplayName() const;
     [[nodiscard]] bool isEmbeddedVideoAudioMuted() const;
+    [[nodiscard]] bool isFastPlaybackEnabled() const;
     [[nodiscard]] QString trackLabel(const QUuid& trackId) const;
     [[nodiscard]] bool trackHasAttachedAudio(const QUuid& trackId) const;
     [[nodiscard]] bool trackAutoPanEnabled(const QUuid& trackId) const;
@@ -124,6 +128,7 @@ private slots:
     void advanceSelectionFade();
 
 private:
+    [[nodiscard]] bool advanceOneFrame(bool presentFrame, bool syncAudio);
     [[nodiscard]] bool needsTrackingFrameProcessing() const;
     void updateCurrentGrayFrameIfNeeded();
     bool loadFrameAt(int frameIndex);

@@ -248,9 +248,14 @@ void PlayerController::seekToFrame(const int frameIndex)
 
 void PlayerController::stepForward()
 {
+    static_cast<void>(advanceOneFrame(true, m_transport.isPlaying()));
+}
+
+bool PlayerController::advanceOneFrame(const bool presentFrame, const bool syncAudio)
+{
     if (!hasVideoLoaded())
     {
-        return;
+        return false;
     }
 
     updateCurrentGrayFrameIfNeeded();
@@ -260,7 +265,7 @@ void PlayerController::stepForward()
     {
         pause();
         emit statusChanged(QStringLiteral("Reached the end of the clip."));
-        return;
+        return false;
     }
 
     cv::Mat nextGrayFrame;
@@ -273,12 +278,17 @@ void PlayerController::stepForward()
     m_currentFrame = *nextFrame;
     m_currentGrayFrame = nextGrayFrame;
 
-    refreshOverlays();
-    emitCurrentFrame();
-    if (m_transport.isPlaying())
+    if (presentFrame)
+    {
+        refreshOverlays();
+        emitCurrentFrame();
+    }
+    if (syncAudio)
     {
         syncAttachedAudioForCurrentFrame();
     }
+
+    return true;
 }
 
 void PlayerController::stepBackward()
@@ -300,6 +310,51 @@ void PlayerController::stepBackward()
     if (!loadFrameAt(targetFrameIndex))
     {
         emit statusChanged(QStringLiteral("Failed to step backward."));
+    }
+}
+
+void PlayerController::stepFastBackward()
+{
+    if (!hasVideoLoaded())
+    {
+        return;
+    }
+
+    pause(false);
+
+    const auto targetFrameIndex = std::max(0, m_currentFrame.index - 5);
+    if (targetFrameIndex == m_currentFrame.index)
+    {
+        emit statusChanged(QStringLiteral("Already at the first frame."));
+        return;
+    }
+
+    if (!loadFrameAt(targetFrameIndex))
+    {
+        emit statusChanged(QStringLiteral("Failed to step fast backward."));
+    }
+}
+
+void PlayerController::stepFastForward()
+{
+    if (!hasVideoLoaded())
+    {
+        return;
+    }
+
+    pause(false);
+
+    const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
+    const auto targetFrameIndex = std::min(maxFrameIndex, m_currentFrame.index + 5);
+    if (targetFrameIndex == m_currentFrame.index)
+    {
+        emit statusChanged(QStringLiteral("Already at the last frame."));
+        return;
+    }
+
+    if (!loadFrameAt(targetFrameIndex))
+    {
+        emit statusChanged(QStringLiteral("Failed to step fast forward."));
     }
 }
 
@@ -1184,6 +1239,22 @@ void PlayerController::toggleEmbeddedVideoAudioMuted()
             : QStringLiteral("Video audio unmuted."));
 }
 
+void PlayerController::setFastPlaybackEnabled(const bool enabled)
+{
+    if (m_renderService.fastPlaybackEnabled() == enabled)
+    {
+        return;
+    }
+
+    m_renderService.setFastPlaybackEnabled(enabled);
+    emit videoAudioStateChanged();
+    emitCurrentFrame();
+    emit statusChanged(
+        enabled
+            ? QStringLiteral("Fast playback enabled.")
+            : QStringLiteral("Fast playback disabled."));
+}
+
 void PlayerController::setMotionTrackingEnabled(const bool enabled)
 {
     if (m_motionTrackingEnabled == enabled)
@@ -1321,6 +1392,11 @@ QString PlayerController::embeddedVideoAudioDisplayName() const
 bool PlayerController::isEmbeddedVideoAudioMuted() const
 {
     return m_embeddedVideoAudioMuted;
+}
+
+bool PlayerController::isFastPlaybackEnabled() const
+{
+    return m_renderService.fastPlaybackEnabled();
 }
 
 QString PlayerController::trackLabel(const QUuid& trackId) const
@@ -1500,12 +1576,22 @@ void PlayerController::advancePlayback()
     while (m_transport.isPlaying() && m_currentFrame.index < targetFrameIndex)
     {
         const auto previousStepFrameIndex = m_currentFrame.index;
-        stepForward();
-        if (m_currentFrame.index == previousStepFrameIndex)
+        const auto shouldPresentFrame = previousStepFrameIndex >= (targetFrameIndex - 1);
+        if (!advanceOneFrame(shouldPresentFrame, false))
         {
             break;
         }
         ++advancedFrames;
+    }
+
+    if (advancedFrames > 0 && m_transport.isPlaying())
+    {
+        if (m_currentFrame.index != targetFrameIndex)
+        {
+            refreshOverlays();
+            emitCurrentFrame();
+        }
+        syncAttachedAudioForCurrentFrame();
     }
 
     logPlaybackHitchIfNeeded(targetFrameIndex, previousFrameIndex, advancedFrames);
@@ -1733,7 +1819,10 @@ void PlayerController::setSelectedTrackId(const QUuid& trackId, const bool fadeP
 
 void PlayerController::emitCurrentFrame()
 {
-    emit frameReady(m_renderService.presentFrame(m_currentFrame), m_currentFrame.index, m_currentFrame.timestampSeconds);
+    emit frameReady(
+        m_renderService.presentFrame(m_currentFrame, m_transport.isPlaying()),
+        m_currentFrame.index,
+        m_currentFrame.timestampSeconds);
 }
 
 void PlayerController::syncAttachedAudioForCurrentFrame()

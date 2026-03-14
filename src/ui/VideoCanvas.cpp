@@ -19,6 +19,8 @@ VideoCanvas::VideoCanvas(QWidget* parent)
     setMinimumSize(960, 540);
     setMouseTracking(true);
     setAcceptDrops(true);
+    setAttribute(Qt::WA_OpaquePaintEvent);
+    setAutoFillBackground(false);
 }
 
 void VideoCanvas::setFrame(const QImage& frame)
@@ -46,10 +48,9 @@ void VideoCanvas::setShowAllLabels(const bool enabled)
 
 void VideoCanvas::paintEvent(QPaintEvent* event)
 {
-    QWidget::paintEvent(event);
+    Q_UNUSED(event);
 
     QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing);
     painter.fillRect(rect(), QColor{12, 14, 18});
 
     const auto frameRect = imageRenderRect();
@@ -68,6 +69,8 @@ void VideoCanvas::paintEvent(QPaintEvent* event)
 
     const auto scaleX = frameRect.width() / static_cast<double>(m_frame.width());
     const auto scaleY = frameRect.height() / static_cast<double>(m_frame.height());
+
+    painter.setRenderHint(QPainter::Antialiasing);
 
     for (const auto& overlay : m_overlays)
     {

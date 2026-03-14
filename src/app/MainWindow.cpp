@@ -290,6 +290,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_playAction, &QAction::triggered, m_controller, &PlayerController::togglePlayback);
     connect(m_stepForwardAction, &QAction::triggered, m_controller, &PlayerController::stepForward);
     connect(m_stepBackAction, &QAction::triggered, m_controller, &PlayerController::stepBackward);
+    connect(m_stepFastForwardAction, &QAction::triggered, m_controller, &PlayerController::stepFastForward);
+    connect(m_stepFastBackAction, &QAction::triggered, m_controller, &PlayerController::stepFastBackward);
     connect(m_copyAction, &QAction::triggered, this, &MainWindow::copySelectedNode);
     connect(m_pasteAction, &QAction::triggered, this, &MainWindow::pasteNode);
     connect(m_cutAction, &QAction::triggered, this, &MainWindow::cutSelectedNode);
@@ -356,6 +358,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_numpadStartShortcut, &QShortcut::activated, m_controller, &PlayerController::goToStart);
     connect(m_stepBackShortcut, &QShortcut::activated, m_controller, &PlayerController::stepBackward);
     connect(m_stepForwardShortcut, &QShortcut::activated, m_controller, &PlayerController::stepForward);
+    connect(m_stepFastForwardShortcut, &QShortcut::activated, m_controller, &PlayerController::stepFastForward);
+    connect(m_stepFastBackShortcut, &QShortcut::activated, m_controller, &PlayerController::stepFastBackward);
     connect(m_copyShortcut, &QShortcut::activated, this, &MainWindow::copySelectedNode);
     connect(m_pasteShortcut, &QShortcut::activated, this, &MainWindow::pasteNode);
     connect(m_cutShortcut, &QShortcut::activated, this, &MainWindow::cutSelectedNode);
@@ -1096,7 +1100,10 @@ void MainWindow::updateVideoAudioRow()
 
     const auto displayName = m_controller->embeddedVideoAudioDisplayName();
     m_videoAudioLabel->setText(displayName);
-    m_videoAudioLabel->setToolTip(QStringLiteral("Embedded audio from %1").arg(displayName));
+    m_videoAudioLabel->setToolTip(
+        QStringLiteral("Embedded audio from %1%2")
+            .arg(displayName)
+            .arg(m_controller->isFastPlaybackEnabled() ? QStringLiteral("\nFast Playback enabled") : QString{}));
 
     const auto muted = m_controller->isEmbeddedVideoAudioMuted();
     m_videoAudioMuteButton->setText(QStringLiteral("\u2630"));
@@ -1426,6 +1433,8 @@ void MainWindow::buildMenus()
     m_playAction = new QAction(QStringLiteral("Play (Space)"), this);
     m_stepForwardAction = new QAction(QStringLiteral("Step Forward (.)"), this);
     m_stepBackAction = new QAction(QStringLiteral("Step Back (,)"), this);
+    m_stepFastForwardAction = new QAction(QStringLiteral("Step Fast Forward (-)"), this);
+    m_stepFastBackAction = new QAction(QStringLiteral("Step Fast Backward (M)"), this);
     m_insertionFollowsPlaybackAction = new QAction(QStringLiteral("Insertion Follows Playback (N)"), this);
     m_copyAction = new QAction(QStringLiteral("Copy (Ctrl+C)"), this);
     m_pasteAction = new QAction(QStringLiteral("Paste (Ctrl+V)"), this);
@@ -1533,6 +1542,8 @@ void MainWindow::buildMenus()
     timelineMenu->addAction(m_playAction);
     timelineMenu->addAction(m_stepForwardAction);
     timelineMenu->addAction(m_stepBackAction);
+    timelineMenu->addAction(m_stepFastForwardAction);
+    timelineMenu->addAction(m_stepFastBackAction);
     timelineMenu->addAction(m_insertionFollowsPlaybackAction);
     timelineMenu->addSeparator();
     timelineMenu->addAction(m_showTimelineAction);
@@ -1573,6 +1584,8 @@ void MainWindow::buildUi()
     m_numpadStartShortcut = new QShortcut(QKeySequence(Qt::Key_Enter), this);
     m_stepBackShortcut = new QShortcut(QKeySequence(Qt::Key_Comma), this);
     m_stepForwardShortcut = new QShortcut(QKeySequence(Qt::Key_Period), this);
+    m_stepFastForwardShortcut = new QShortcut(QKeySequence(Qt::Key_Minus), this);
+    m_stepFastBackShortcut = new QShortcut(QKeySequence(Qt::Key_M), this);
     m_insertionFollowsPlaybackShortcut = new QShortcut(QKeySequence(Qt::Key_N), this);
     m_copyShortcut = new QShortcut(QKeySequence::Copy, this);
     m_pasteShortcut = new QShortcut(QKeySequence::Paste, this);
@@ -1595,6 +1608,8 @@ void MainWindow::buildUi()
     m_numpadStartShortcut->setContext(Qt::ApplicationShortcut);
     m_stepBackShortcut->setContext(Qt::ApplicationShortcut);
     m_stepForwardShortcut->setContext(Qt::ApplicationShortcut);
+    m_stepFastForwardShortcut->setContext(Qt::ApplicationShortcut);
+    m_stepFastBackShortcut->setContext(Qt::ApplicationShortcut);
     m_insertionFollowsPlaybackShortcut->setContext(Qt::ApplicationShortcut);
     m_copyShortcut->setContext(Qt::ApplicationShortcut);
     m_pasteShortcut->setContext(Qt::ApplicationShortcut);
@@ -1699,7 +1714,11 @@ void MainWindow::buildUi()
             "QMenu::item:selected { background: #1a2028; }"));
 
         const auto muted = m_controller->isEmbeddedVideoAudioMuted();
+        const auto fastPlaybackEnabled = m_controller->isFastPlaybackEnabled();
         auto* toggleMuteAction = menu.addAction(muted ? QStringLiteral("Unmute") : QStringLiteral("Mute"));
+        auto* fastPlaybackAction = menu.addAction(QStringLiteral("Fast Playback"));
+        fastPlaybackAction->setCheckable(true);
+        fastPlaybackAction->setChecked(fastPlaybackEnabled);
 
         const auto popupWidth = menu.sizeHint().width();
         auto popupPoint = m_videoAudioMuteButton->mapToGlobal(
@@ -1714,9 +1733,14 @@ void MainWindow::buildUi()
             popupPoint.setX(std::max(screenRect.left(), popupPoint.x()));
         }
 
-        if (menu.exec(popupPoint) == toggleMuteAction)
+        const auto* chosenAction = menu.exec(popupPoint);
+        if (chosenAction == toggleMuteAction)
         {
             m_controller->toggleEmbeddedVideoAudioMuted();
+        }
+        else if (chosenAction == fastPlaybackAction)
+        {
+            m_controller->setFastPlaybackEnabled(!fastPlaybackEnabled);
         }
     });
 
@@ -1986,20 +2010,30 @@ void MainWindow::tryOpenLocalDevVideo()
             continue;
         }
 
-        const auto matches = devDir.entryInfoList(
-            QStringList{
-                QStringLiteral("test-video.mov"),
-                QStringLiteral("test-video.MOV")
-            },
-            QDir::Files,
-            QDir::Name);
+        const QStringList preferredVideoNames{
+            QStringLiteral("test-video-2.mp4"),
+            QStringLiteral("test-video-2.MP4"),
+            QStringLiteral("test-video.mov"),
+            QStringLiteral("test-video.MOV")
+        };
 
-        if (matches.isEmpty())
+        QString selectedVideoPath;
+        for (const auto& fileName : preferredVideoNames)
+        {
+            const auto candidatePath = devDir.filePath(fileName);
+            if (QFileInfo::exists(candidatePath))
+            {
+                selectedVideoPath = candidatePath;
+                break;
+            }
+        }
+
+        if (selectedVideoPath.isEmpty())
         {
             continue;
         }
 
-        if (m_controller->openVideo(matches.front().absoluteFilePath()))
+        if (m_controller->openVideo(selectedVideoPath))
         {
             populateAudioPoolFromLocalDevDirectory();
         }

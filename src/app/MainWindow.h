@@ -110,6 +110,8 @@ private:
     QAction* m_playAction = nullptr;
     QAction* m_stepForwardAction = nullptr;
     QAction* m_stepBackAction = nullptr;
+    QAction* m_stepFastForwardAction = nullptr;
+    QAction* m_stepFastBackAction = nullptr;
     QAction* m_insertionFollowsPlaybackAction = nullptr;
     QAction* m_copyAction = nullptr;
     QAction* m_pasteAction = nullptr;
@@ -142,6 +144,8 @@ private:
     QShortcut* m_numpadStartShortcut = nullptr;
     QShortcut* m_stepBackShortcut = nullptr;
     QShortcut* m_stepForwardShortcut = nullptr;
+    QShortcut* m_stepFastForwardShortcut = nullptr;
+    QShortcut* m_stepFastBackShortcut = nullptr;
     QShortcut* m_insertionFollowsPlaybackShortcut = nullptr;
     QShortcut* m_copyShortcut = nullptr;
     QShortcut* m_pasteShortcut = nullptr;
