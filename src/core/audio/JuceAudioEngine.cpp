@@ -251,19 +251,23 @@ public:
         return m_level.load();
     }
 
+    void reset()
+    {
+        m_smoothedMeanSquare = 0.0F;
+        m_level.store(0.0F);
+    }
+
     void prepareToPlay(const int samplesPerBlockExpected, const double sampleRate) override
     {
         m_inputSource.prepareToPlay(samplesPerBlockExpected, sampleRate);
         m_sampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
-        m_smoothedMeanSquare = 0.0F;
-        m_level.store(0.0F);
+        reset();
     }
 
     void releaseResources() override
     {
         m_inputSource.releaseResources();
-        m_smoothedMeanSquare = 0.0F;
-        m_level.store(0.0F);
+        reset();
     }
 
     void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override
@@ -533,9 +537,14 @@ void JuceAudioEngine::stopTrack(const QUuid& trackId)
     if (playback.meterSource)
     {
         m_impl->mixer.removeInputSource(playback.meterSource.get());
+        playback.meterSource->reset();
     }
     playback.transport.setSource(nullptr);
     m_impl->activeTracks.erase(activeIt);
+    if (m_impl->masterMeterSource && m_impl->activeTracks.empty())
+    {
+        m_impl->masterMeterSource->reset();
+    }
 }
 
 void JuceAudioEngine::stopAll()
@@ -555,6 +564,11 @@ void JuceAudioEngine::stopAll()
     for (const auto& trackId : trackIds)
     {
         stopTrack(trackId);
+    }
+
+    if (m_impl->masterMeterSource)
+    {
+        m_impl->masterMeterSource->reset();
     }
 }
 

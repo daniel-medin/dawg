@@ -7,8 +7,6 @@
 #include <QUuid>
 #include <QWidget>
 
-class QuickClipGainWidget;
-
 struct ClipEditorState
 {
     QUuid trackId;
@@ -27,6 +25,10 @@ struct ClipEditorState
     bool loopEnabled = false;
 };
 
+class QQuickView;
+class ClipEditorQuickController;
+class ClipWaveformQuickItem;
+
 class ClipEditorView final : public QWidget
 {
     Q_OBJECT
@@ -44,22 +46,12 @@ signals:
     void attachAudioRequested();
 
 private:
-    class WaveformView;
+    void handleStatusChanged();
+    void syncWaveformItem();
 
-    WaveformView* m_waveformView = nullptr;
-    QWidget* m_editorContent = nullptr;
-    QWidget* m_infoBar = nullptr;
-    QWidget* m_emptyState = nullptr;
-    QWidget* m_emptyStateCard = nullptr;
-    class QLabel* m_titleLabel = nullptr;
-    class QToolButton* m_loopButton = nullptr;
-    QuickClipGainWidget* m_gainStrip = nullptr;
-    class QScrollBar* m_waveformScrollBar = nullptr;
-    class QLabel* m_sourceLabel = nullptr;
-    class QLabel* m_rangeLabel = nullptr;
-    class QLabel* m_durationLabel = nullptr;
-    class QLabel* m_positionLabel = nullptr;
-    class QLabel* m_emptyTitleLabel = nullptr;
-    class QLabel* m_emptyBodyLabel = nullptr;
-    class QLabel* m_emptyActionLabel = nullptr;
+    QQuickView* m_quickView = nullptr;
+    QWidget* m_quickContainer = nullptr;
+    ClipEditorQuickController* m_controller = nullptr;
+    ClipWaveformQuickItem* m_waveformItem = nullptr;
+    std::optional<ClipEditorState> m_state;
 };

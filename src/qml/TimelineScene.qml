@@ -1,0 +1,215 @@
+import QtQuick 2.15
+
+Item {
+    id: timelineRoot
+
+    focus: true
+
+    function rectValue(mapValue, key) {
+        return mapValue && mapValue[key] !== undefined ? mapValue[key] : 0
+    }
+
+    function globalPoint(localX, localY) {
+        var mapped = timelineRoot.mapToGlobal(Qt.point(localX, localY))
+        return mapped ? mapped : Qt.point(0, 0)
+    }
+
+    onWidthChanged: timelineController.setViewportSize(width, height)
+    onHeightChanged: timelineController.setViewportSize(width, height)
+    Component.onCompleted: timelineController.setViewportSize(width, height)
+
+    Rectangle {
+        anchors.fill: parent
+        color: "#050608"
+    }
+
+    Rectangle {
+        x: rectValue(timelineController.timelineRect, "x")
+        y: rectValue(timelineController.timelineRect, "y")
+        width: rectValue(timelineController.timelineRect, "width")
+        height: rectValue(timelineController.timelineRect, "height")
+        color: "#07080a"
+        border.width: 1
+        border.color: "#20242a"
+    }
+
+    Rectangle {
+        x: rectValue(timelineController.loopBarRect, "x")
+        y: rectValue(timelineController.loopBarRect, "y")
+        width: rectValue(timelineController.loopBarRect, "width")
+        height: rectValue(timelineController.loopBarRect, "height")
+        radius: 4
+        color: "#12161b"
+        border.width: 1
+        border.color: "#242930"
+    }
+
+    Rectangle {
+        x: rectValue(timelineController.trackAreaRect, "x")
+        y: rectValue(timelineController.trackAreaRect, "y")
+        width: rectValue(timelineController.trackAreaRect, "width")
+        height: rectValue(timelineController.trackAreaRect, "height")
+        radius: 4
+        color: "#080a0d"
+    }
+
+    Repeater {
+        model: timelineController.gridLines
+
+        Rectangle {
+            property var lineData: modelData
+            x: lineData.x
+            y: rectValue(timelineController.loopBarRect, "y")
+            width: 1
+            height: rectValue(timelineController.trackAreaRect, "y")
+                + rectValue(timelineController.trackAreaRect, "height")
+                - rectValue(timelineController.loopBarRect, "y")
+            color: lineData.major ? "#282c32" : "#1a1d22"
+        }
+    }
+
+    Rectangle {
+        visible: timelineController.loopRangeGeometry.selectionVisible
+        x: rectValue(timelineController.loopRangeGeometry.selectionRect, "x")
+        y: rectValue(timelineController.loopRangeGeometry.selectionRect, "y")
+        width: rectValue(timelineController.loopRangeGeometry.selectionRect, "width")
+        height: rectValue(timelineController.loopRangeGeometry.selectionRect, "height")
+        radius: 3
+        color: timelineController.loopRangeGeometry.selected ? "#5a88ca5c" : "#426eaa48"
+        border.width: timelineController.loopRangeGeometry.selected ? 2 : 1
+        border.color: timelineController.loopRangeGeometry.selected ? "#b4d4ffec" : "#75a5e4dc"
+    }
+
+    Rectangle {
+        visible: timelineController.loopRangeGeometry.startHandleVisible
+        x: rectValue(timelineController.loopRangeGeometry.startHandleRect, "x")
+        y: rectValue(timelineController.loopRangeGeometry.startHandleRect, "y")
+        width: rectValue(timelineController.loopRangeGeometry.startHandleRect, "width")
+        height: rectValue(timelineController.loopRangeGeometry.startHandleRect, "height")
+        radius: 2
+        color: "#e9eff6"
+    }
+
+    Rectangle {
+        visible: timelineController.loopRangeGeometry.endHandleVisible
+        x: rectValue(timelineController.loopRangeGeometry.endHandleRect, "x")
+        y: rectValue(timelineController.loopRangeGeometry.endHandleRect, "y")
+        width: rectValue(timelineController.loopRangeGeometry.endHandleRect, "width")
+        height: rectValue(timelineController.loopRangeGeometry.endHandleRect, "height")
+        radius: 2
+        color: "#e9eff6"
+    }
+
+    Rectangle {
+        visible: timelineController.hasLoopIndicator
+        x: timelineController.loopIndicatorX
+        y: rectValue(timelineController.loopBarRect, "y") + 1
+        width: 1
+        height: rectValue(timelineController.loopBarRect, "height") - 2
+        color: "#dce4ecb0"
+        opacity: 0.9
+    }
+
+    Repeater {
+        model: timelineController.trackGeometries
+
+        Item {
+            property var trackData: modelData
+
+            Rectangle {
+                x: trackData.lineStartX
+                y: trackData.y - (trackData.selected ? 1 : 0.5)
+                width: Math.max(1, trackData.lineEndX - trackData.lineStartX)
+                height: trackData.selected ? 2 : 1
+                color: trackData.color
+                opacity: trackData.selected ? 1.0 : 0.85
+            }
+
+            Rectangle {
+                x: trackData.lineStartX
+                y: trackData.y - trackData.capHeight * 0.5
+                width: trackData.selected ? 2 : 1
+                height: trackData.capHeight
+                color: trackData.color
+                opacity: trackData.selected ? 1.0 : 0.85
+            }
+
+            Rectangle {
+                x: trackData.lineEndX
+                y: trackData.y - trackData.capHeight * 0.5
+                width: trackData.selected ? 2 : 1
+                height: trackData.capHeight
+                color: trackData.color
+                opacity: trackData.selected ? 1.0 : 0.85
+            }
+        }
+    }
+
+    Rectangle {
+        visible: timelineController.hasHoverLine
+        x: timelineController.hoverX
+        y: rectValue(timelineController.loopBarRect, "y")
+        width: 1
+        height: rectValue(timelineController.trackAreaRect, "y")
+            + rectValue(timelineController.trackAreaRect, "height")
+            - rectValue(timelineController.loopBarRect, "y")
+        color: "#d6dce484"
+    }
+
+    Rectangle {
+        x: timelineController.markerX - 1
+        y: rectValue(timelineController.loopBarRect, "y")
+        width: 2
+        height: rectValue(timelineController.trackAreaRect, "y")
+            + rectValue(timelineController.trackAreaRect, "height")
+            - rectValue(timelineController.loopBarRect, "y")
+        color: "#e1e5ea"
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        hoverEnabled: true
+        preventStealing: true
+        cursorShape: timelineController.cursorShape
+
+        onPressed: function(mouse) {
+            timelineRoot.forceActiveFocus()
+            var gp = timelineRoot.globalPoint(mouse.x, mouse.y)
+            timelineController.handleMousePress(mouse.button, mouse.x, mouse.y, mouse.modifiers, gp.x, gp.y)
+            mouse.accepted = true
+        }
+
+        onDoubleClicked: function(mouse) {
+            timelineRoot.forceActiveFocus()
+            timelineController.handleMouseDoubleClick(mouse.button, mouse.x, mouse.y)
+            mouse.accepted = true
+        }
+
+        onPositionChanged: function(mouse) {
+            var gp = timelineRoot.globalPoint(mouse.x, mouse.y)
+            if (mouse.buttons & (Qt.LeftButton | Qt.RightButton)) {
+                timelineController.handleMouseMove(mouse.x, mouse.y, gp.x, gp.y)
+            } else {
+                timelineController.handleHoverMove(mouse.x, mouse.y, gp.x, gp.y)
+            }
+        }
+
+        onReleased: function(mouse) {
+            timelineController.handleMouseRelease(mouse.button)
+            mouse.accepted = true
+        }
+
+        onWheel: function(wheel) {
+            var gp = timelineRoot.globalPoint(wheel.x, wheel.y)
+            timelineController.handleWheel(wheel.x, wheel.y, wheel.angleDelta.y, wheel.modifiers, gp.x, gp.y)
+            wheel.accepted = true
+        }
+
+        onCanceled: {
+            timelineController.handleMouseRelease(Qt.LeftButton)
+        }
+
+        onExited: timelineController.handleHoverLeave()
+    }
+}

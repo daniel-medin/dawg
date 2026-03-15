@@ -103,12 +103,17 @@ add_executable(dawg WIN32
     src/ui/DebugOverlayWindow.h
     src/ui/ClipEditorView.cpp
     src/ui/ClipEditorView.h
-    src/ui/QuickClipGainWidget.cpp
-    src/ui/QuickClipGainWidget.h
+    src/ui/ClipEditorQuickController.cpp
+    src/ui/ClipEditorQuickController.h
+    src/ui/ClipWaveformQuickItem.cpp
+    src/ui/ClipWaveformQuickItem.h
     src/ui/MixView.cpp
     src/ui/MixView.h
     src/ui/QuickMixStripWidget.cpp
     src/ui/QuickMixStripWidget.h
+    src/ui/TimelineQuickController.cpp
+    src/ui/TimelineQuickController.h
+    src/ui/TimelineTypes.h
     src/ui/TimelineView.cpp
     src/ui/TimelineView.h
 )
