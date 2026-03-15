@@ -679,6 +679,7 @@ void PlayerController::seekToFrame(const int frameIndex)
         [this]()
         {
             refreshOverlays();
+            emitCurrentFrame();
         },
         [this]()
         {
