@@ -8,6 +8,7 @@
 #include <QVBoxLayout>
 
 #include "app/MainWindow.h"
+#include "app/PlayerController.h"
 #include "ui/ClipEditorView.h"
 #include "ui/MixView.h"
 #include "ui/NativeVideoViewport.h"
@@ -108,7 +109,7 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
     }
     if (m_window.m_timeline)
     {
-        m_window.m_timeline->setSeekOnClickEnabled(state.timelineClickSeeks);
+        m_window.m_timeline->setSeekOnClickEnabled(state.timelineClickSeeks || !m_window.m_controller->isPlaying());
     }
 
     updateTimelineVisibility(state.timelineVisible);

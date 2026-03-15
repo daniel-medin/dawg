@@ -76,6 +76,7 @@ void ClipWaveformQuickItem::setState(const std::optional<ClipEditorState>& state
         m_horizontalZoom = 1.0;
         m_verticalZoom = 1.0;
         m_viewStartMs = 0.0;
+        invalidateWaveformCache();
         updateScrollMetrics();
         update();
         return;
@@ -87,6 +88,10 @@ void ClipWaveformQuickItem::setState(const std::optional<ClipEditorState>& state
     }
 
     const auto assetChanged = m_loadedAssetPath != state->assetPath;
+    const auto hadPreviousState = m_state.has_value();
+    const auto clipChanged = !hadPreviousState
+        || m_state->clipStartMs != state->clipStartMs
+        || m_state->clipEndMs != state->clipEndMs;
     m_state = state;
     if (assetChanged)
     {
@@ -95,6 +100,11 @@ void ClipWaveformQuickItem::setState(const std::optional<ClipEditorState>& state
         m_horizontalZoom = 1.0;
         m_verticalZoom = 1.0;
         m_viewStartMs = 0.0;
+        invalidateWaveformCache();
+    }
+    else if (clipChanged)
+    {
+        invalidateWaveformCache();
     }
     clampViewWindow();
     updateScrollMetrics();
@@ -136,6 +146,7 @@ void ClipWaveformQuickItem::setViewStartMs(const int viewStartMs)
         return;
     }
 
+    invalidateWaveformCache();
     updateScrollMetrics();
     update();
 }
@@ -143,65 +154,14 @@ void ClipWaveformQuickItem::setViewStartMs(const int viewStartMs)
 void ClipWaveformQuickItem::paint(QPainter* painter)
 {
     painter->setRenderHint(QPainter::Antialiasing, false);
-    painter->fillRect(QRectF{0.0, 0.0, width(), height()}, QColor{10, 13, 18});
-
     const QRectF bounds = QRectF{0.0, 0.0, width(), height()}.adjusted(10.0, 10.0, -10.0, -10.0);
     if (!bounds.isValid())
     {
         return;
     }
 
-    painter->setPen(QPen(QColor{34, 40, 48}, 1.0));
-    painter->setBrush(QColor{14, 18, 24});
-    painter->drawRect(bounds);
-
-    if (!m_state.has_value() || m_state->sourceDurationMs <= 0)
-    {
-        painter->setPen(QColor{126, 136, 148});
-        painter->drawText(bounds, Qt::AlignCenter, QStringLiteral("Select a node with audio."));
-        return;
-    }
-
-    const auto clipRect = selectionRect(bounds);
-    painter->fillRect(bounds, QColor{12, 16, 22});
-    painter->fillRect(clipRect, QColor{24, 34, 46});
-
-    const auto centerY = bounds.center().y();
-    painter->setPen(QPen(QColor{28, 35, 44}, 1.0));
-    painter->drawLine(QPointF{bounds.left(), centerY}, QPointF{bounds.right(), centerY});
-
-    if (!m_peaks.empty())
-    {
-        const auto verticalRadius = std::max(10.0, bounds.height() * 0.45);
-        const auto leftX = static_cast<int>(std::floor(bounds.left()));
-        const auto rightX = static_cast<int>(std::ceil(bounds.right()));
-
-        painter->setPen(Qt::NoPen);
-        for (int pixelX = leftX; pixelX <= rightX; ++pixelX)
-        {
-            const auto timeMs = m_viewStartMs
-                + (((static_cast<double>(pixelX) + 0.5) - bounds.left()) / std::max(1.0, bounds.width()))
-                    * visibleDurationMs();
-            const auto amplitude = interpolatedPeakAtMs(timeMs);
-            const auto halfHeight = std::max(
-                1.0,
-                std::min(bounds.height() * 0.48, amplitude * verticalRadius * m_verticalZoom));
-            const auto active = clipRect.contains(QPointF{static_cast<double>(pixelX), centerY});
-            painter->setBrush(active ? QColor{202, 216, 234} : QColor{92, 102, 114});
-            painter->drawRect(
-                QRectF{
-                    QPointF{static_cast<double>(pixelX), centerY - halfHeight},
-                    QSizeF{1.0, (halfHeight * 2.0) + 1.0}});
-        }
-    }
-    else
-    {
-        painter->setPen(QColor{126, 136, 148});
-        painter->drawText(bounds, Qt::AlignCenter, QStringLiteral("Waveform unavailable."));
-    }
-
-    paintHandle(*painter, bounds, clipStartX(bounds), QColor{224, 230, 236});
-    paintHandle(*painter, bounds, clipEndX(bounds), QColor{224, 230, 236});
+    ensureWaveformCache();
+    painter->drawImage(QPointF{0.0, 0.0}, m_waveformCache);
     paintPlayhead(*painter, bounds, QColor{241, 196, 86});
 }
 
@@ -310,6 +270,7 @@ void ClipWaveformQuickItem::wheelEvent(QWheelEvent* event)
     if (event->modifiers().testFlag(Qt::ShiftModifier))
     {
         m_verticalZoom = std::clamp(m_verticalZoom * std::pow(zoomStepFactor, steps), 0.5, 8.0);
+        invalidateWaveformCache();
         update();
         event->accept();
         return;
@@ -340,6 +301,7 @@ void ClipWaveformQuickItem::wheelEvent(QWheelEvent* event)
     m_horizontalZoom = nextZoom;
     m_viewStartMs = anchorMs - visibleDurationMs() * anchorRatio;
     clampViewWindow();
+    invalidateWaveformCache();
     updateScrollMetrics();
     update();
     event->accept();
@@ -539,6 +501,7 @@ void ClipWaveformQuickItem::applyDragAt(const QPointF& position)
 
     m_state->clipStartMs = clipStartMs;
     m_state->clipEndMs = clipEndMs;
+    invalidateWaveformCache();
     emit clipRangeChanged(clipStartMs, clipEndMs);
     update();
 }
@@ -618,4 +581,99 @@ void ClipWaveformQuickItem::updateScrollMetrics()
     m_scrollPageStep = std::max(1, visibleMs);
     m_scrollValue = std::clamp(viewStartMs, 0, maxStartMs);
     emit scrollMetricsChanged();
+}
+
+void ClipWaveformQuickItem::invalidateWaveformCache()
+{
+    m_waveformCacheDirty = true;
+}
+
+void ClipWaveformQuickItem::ensureWaveformCache()
+{
+    const auto pixelWidth = std::max(1, static_cast<int>(std::ceil(width())));
+    const auto pixelHeight = std::max(1, static_cast<int>(std::ceil(height())));
+    if (m_waveformCache.size() != QSize(pixelWidth, pixelHeight))
+    {
+        m_waveformCache = QImage(QSize(pixelWidth, pixelHeight), QImage::Format_ARGB32_Premultiplied);
+        m_waveformCacheDirty = true;
+    }
+
+    if (m_waveformCacheDirty)
+    {
+        rebuildWaveformCache();
+    }
+}
+
+void ClipWaveformQuickItem::rebuildWaveformCache()
+{
+    if (m_waveformCache.isNull())
+    {
+        return;
+    }
+
+    m_waveformCache.fill(QColor{10, 13, 18}.rgba());
+
+    QPainter painter(&m_waveformCache);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+
+    const QRectF bounds = QRectF{0.0, 0.0, width(), height()}.adjusted(10.0, 10.0, -10.0, -10.0);
+    if (!bounds.isValid())
+    {
+        m_waveformCacheDirty = false;
+        return;
+    }
+
+    painter.setPen(QPen(QColor{34, 40, 48}, 1.0));
+    painter.setBrush(QColor{14, 18, 24});
+    painter.drawRect(bounds);
+
+    if (!m_state.has_value() || m_state->sourceDurationMs <= 0)
+    {
+        painter.setPen(QColor{126, 136, 148});
+        painter.drawText(bounds, Qt::AlignCenter, QStringLiteral("Select a node with audio."));
+        m_waveformCacheDirty = false;
+        return;
+    }
+
+    const auto clipRect = selectionRect(bounds);
+    painter.fillRect(bounds, QColor{12, 16, 22});
+    painter.fillRect(clipRect, QColor{24, 34, 46});
+
+    const auto centerY = bounds.center().y();
+    painter.setPen(QPen(QColor{28, 35, 44}, 1.0));
+    painter.drawLine(QPointF{bounds.left(), centerY}, QPointF{bounds.right(), centerY});
+
+    if (!m_peaks.empty())
+    {
+        const auto verticalRadius = std::max(10.0, bounds.height() * 0.45);
+        const auto leftX = static_cast<int>(std::floor(bounds.left()));
+        const auto rightX = static_cast<int>(std::ceil(bounds.right()));
+
+        painter.setPen(Qt::NoPen);
+        for (int pixelX = leftX; pixelX <= rightX; ++pixelX)
+        {
+            const auto timeMs = m_viewStartMs
+                + (((static_cast<double>(pixelX) + 0.5) - bounds.left()) / std::max(1.0, bounds.width()))
+                    * visibleDurationMs();
+            const auto amplitude = interpolatedPeakAtMs(timeMs);
+            const auto halfHeight = std::max(
+                1.0,
+                std::min(bounds.height() * 0.48, amplitude * verticalRadius * m_verticalZoom));
+            const auto active = clipRect.contains(QPointF{static_cast<double>(pixelX), centerY});
+            painter.setBrush(active ? QColor{202, 216, 234} : QColor{92, 102, 114});
+            painter.drawRect(
+                QRectF{
+                    QPointF{static_cast<double>(pixelX), centerY - halfHeight},
+                    QSizeF{1.0, (halfHeight * 2.0) + 1.0}});
+        }
+    }
+    else
+    {
+        painter.setPen(QColor{126, 136, 148});
+        painter.drawText(bounds, Qt::AlignCenter, QStringLiteral("Waveform unavailable."));
+    }
+
+    paintHandle(painter, bounds, clipStartX(bounds), QColor{224, 230, 236});
+    paintHandle(painter, bounds, clipEndX(bounds), QColor{224, 230, 236});
+    m_waveformCacheDirty = false;
 }

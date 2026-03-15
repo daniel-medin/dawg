@@ -837,7 +837,7 @@ MainWindow::MainWindow(QWidget* parent)
     m_clearAllShortcutTimer.setInterval(1500);
     m_memoryUsageTimer.setInterval(1000);
     m_mixMeterTimer.setInterval(33);
-    m_clipEditorPreviewTimer.setInterval(33);
+    m_clipEditorPreviewTimer.setInterval(16);
     connect(&m_clearAllShortcutTimer, &QTimer::timeout, this, &MainWindow::clearPendingClearAllShortcut);
     connect(&m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsage);
     connect(&m_mixMeterTimer, &QTimer::timeout, this, &MainWindow::refreshMixView);
@@ -905,7 +905,7 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(m_timelineClickSeeksAction, &QAction::toggled, this, [this](const bool enabled)
     {
-        m_timeline->setSeekOnClickEnabled(enabled);
+        m_timeline->setSeekOnClickEnabled(enabled || !m_controller->isPlaying());
         if (!m_projectStateChangeInProgress && hasOpenProject())
         {
             setProjectDirty(true);
@@ -1859,6 +1859,10 @@ void MainWindow::updatePlaybackState(const bool playing)
     if (m_audioPoolPanel && m_audioPoolPanel->isVisible())
     {
         updateAudioPoolPlaybackIndicators();
+    }
+    if (m_timeline && m_timelineClickSeeksAction)
+    {
+        m_timeline->setSeekOnClickEnabled(m_timelineClickSeeksAction->isChecked() || !playing);
     }
     updateDebugText();
 }

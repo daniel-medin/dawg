@@ -3,6 +3,7 @@
 #include <optional>
 #include <vector>
 
+#include <QImage>
 #include <QQuickPaintedItem>
 
 #include "ui/ClipEditorView.h"
@@ -64,6 +65,9 @@ private:
     [[nodiscard]] double maxHorizontalZoom() const;
     void clampViewWindow();
     void updateScrollMetrics();
+    void invalidateWaveformCache();
+    void ensureWaveformCache();
+    void rebuildWaveformCache();
 
     std::optional<ClipEditorState> m_state;
     QString m_loadedAssetPath;
@@ -76,4 +80,6 @@ private:
     int m_scrollMaximum = 0;
     int m_scrollPageStep = 0;
     bool m_scrollVisible = false;
+    QImage m_waveformCache;
+    bool m_waveformCacheDirty = true;
 };
