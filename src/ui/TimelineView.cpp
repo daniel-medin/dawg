@@ -398,6 +398,22 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
         setFocus(Qt::MouseFocusReason);
         emit trackSelected(track->id);
 
+        const auto spanIt = std::find_if(
+            m_trackSpans.cbegin(),
+            m_trackSpans.cend(),
+            [&track](const TimelineTrackSpan& span)
+            {
+                return span.id == track->id;
+            });
+        if ((event->modifiers() & Qt::ControlModifier)
+            && spanIt != m_trackSpans.cend()
+            && spanIt->hasAttachedAudio)
+        {
+            emit trackGainPopupRequested(track->id, event->globalPosition().toPoint());
+            event->accept();
+            return;
+        }
+
         if (track->startHandleRect.contains(event->position()))
         {
             m_trimmedTrack = track;
@@ -414,14 +430,7 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
             return;
         }
 
-        const auto spanIt = std::find_if(
-            m_trackSpans.begin(),
-            m_trackSpans.end(),
-            [&track](const TimelineTrackSpan& span)
-            {
-                return span.id == track->id;
-            });
-        const auto isSelected = spanIt != m_trackSpans.end() && spanIt->isSelected;
+        const auto isSelected = spanIt != m_trackSpans.cend() && spanIt->isSelected;
         if (isSelected)
         {
             if (m_seekOnClickEnabled)

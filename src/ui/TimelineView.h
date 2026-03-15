@@ -52,6 +52,7 @@ signals:
     void trackSpanMoveRequested(const QUuid& trackId, int deltaFrames);
     void trackContextMenuRequested(const QUuid& trackId, const QPoint& globalPosition);
     void trackGainAdjustRequested(const QUuid& trackId, int wheelDelta, const QPoint& globalPosition);
+    void trackGainPopupRequested(const QUuid& trackId, const QPoint& globalPosition);
     void loopContextMenuRequested(const QPoint& globalPosition);
 
 protected:

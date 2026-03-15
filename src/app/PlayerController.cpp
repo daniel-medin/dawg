@@ -1031,34 +1031,38 @@ std::optional<float> PlayerController::adjustMixLaneGainForTrack(const QUuid& tr
         return std::nullopt;
     }
 
-    const auto trackIt = std::find_if(
-        m_tracker.tracks().cbegin(),
-        m_tracker.tracks().cend(),
-        [&trackId](const TrackPoint& track)
-        {
-            return track.id == trackId;
-        });
-    if (trackIt == m_tracker.tracks().cend() || !trackIt->attachedAudio.has_value())
+    const auto laneIndex = mixLaneIndexForTrack(trackId);
+    if (!laneIndex.has_value())
     {
         return std::nullopt;
     }
 
-    const auto spans = timelineTrackSpans();
-    const auto spanIt = std::find_if(
-        spans.cbegin(),
-        spans.cend(),
-        [&trackId](const TimelineTrackSpan& span)
-        {
-            return span.id == trackId;
-        });
-    if (spanIt == spans.cend())
-    {
-        return std::nullopt;
-    }
-
-    const auto nextGainDb = clampMixGainDb(mixLaneGainDb(spanIt->laneIndex) + deltaDb);
-    setMixLaneGainDb(spanIt->laneIndex, nextGainDb);
+    const auto nextGainDb = clampMixGainDb(mixLaneGainDb(*laneIndex) + deltaDb);
+    setMixLaneGainDb(*laneIndex, nextGainDb);
     return nextGainDb;
+}
+
+std::optional<float> PlayerController::mixLaneGainForTrack(const QUuid& trackId) const
+{
+    const auto laneIndex = mixLaneIndexForTrack(trackId);
+    if (!laneIndex.has_value())
+    {
+        return std::nullopt;
+    }
+
+    return mixLaneGainDb(*laneIndex);
+}
+
+bool PlayerController::setMixLaneGainForTrack(const QUuid& trackId, const float gainDb)
+{
+    const auto laneIndex = mixLaneIndexForTrack(trackId);
+    if (!laneIndex.has_value())
+    {
+        return false;
+    }
+
+    setMixLaneGainDb(*laneIndex, gainDb);
+    return true;
 }
 
 void PlayerController::goToStart()
@@ -3109,6 +3113,41 @@ void PlayerController::refreshOverlays()
 bool PlayerController::isTrackSelected(const QUuid& trackId) const
 {
     return std::find(m_selectedTrackIds.begin(), m_selectedTrackIds.end(), trackId) != m_selectedTrackIds.end();
+}
+
+std::optional<int> PlayerController::mixLaneIndexForTrack(const QUuid& trackId) const
+{
+    if (trackId.isNull())
+    {
+        return std::nullopt;
+    }
+
+    const auto trackIt = std::find_if(
+        m_tracker.tracks().cbegin(),
+        m_tracker.tracks().cend(),
+        [&trackId](const TrackPoint& track)
+        {
+            return track.id == trackId;
+        });
+    if (trackIt == m_tracker.tracks().cend() || !trackIt->attachedAudio.has_value())
+    {
+        return std::nullopt;
+    }
+
+    const auto spans = timelineTrackSpans();
+    const auto spanIt = std::find_if(
+        spans.cbegin(),
+        spans.cend(),
+        [&trackId](const TimelineTrackSpan& span)
+        {
+            return span.id == trackId;
+        });
+    if (spanIt == spans.cend())
+    {
+        return std::nullopt;
+    }
+
+    return spanIt->laneIndex;
 }
 
 void PlayerController::setSelectedTrackId(const QUuid& trackId, const bool fadePreviousSelection)

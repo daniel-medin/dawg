@@ -90,6 +90,8 @@ public:
     void setMixLaneGainDb(int laneIndex, float gainDb);
     void setMixLaneMuted(int laneIndex, bool muted);
     void setMixLaneSoloed(int laneIndex, bool soloed);
+    [[nodiscard]] std::optional<float> mixLaneGainForTrack(const QUuid& trackId) const;
+    bool setMixLaneGainForTrack(const QUuid& trackId, float gainDb);
     [[nodiscard]] std::optional<float> adjustMixLaneGainForTrack(const QUuid& trackId, float deltaDb);
     void selectNextVisibleTrack();
     bool startAudioPoolPreview(const QString& filePath);
@@ -186,6 +188,7 @@ private:
     void emitCurrentFrame();
     bool applyPresentationScaleForPlaybackState(bool playbackActive);
     [[nodiscard]] bool isTrackSelected(const QUuid& trackId) const;
+    [[nodiscard]] std::optional<int> mixLaneIndexForTrack(const QUuid& trackId) const;
     [[nodiscard]] float mixLaneGainDb(int laneIndex) const;
     [[nodiscard]] bool isMixLaneMuted(int laneIndex) const;
     [[nodiscard]] bool isMixLaneSoloed(int laneIndex) const;

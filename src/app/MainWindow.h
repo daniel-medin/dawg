@@ -25,6 +25,7 @@ class ClipEditorView;
 class MixView;
 class NativeVideoViewport;
 class QMenu;
+class QSlider;
 class TimelineView;
 class VideoCanvas;
 
@@ -113,6 +114,8 @@ private:
     void clearPendingClearAllShortcut();
     void syncMainVerticalPanelSizes();
     void adjustTrackMixGainFromWheel(const QUuid& trackId, int wheelDelta, const QPoint& globalPosition);
+    void showTrackMixGainPopup(const QUuid& trackId, const QPoint& globalPosition);
+    void updateTrackMixGainPopupValue(float gainDb);
     void updateDetachedVideoUiState();
     [[nodiscard]] std::optional<int> timelineLoopTargetFrame() const;
     [[nodiscard]] bool hasOpenProject() const;
@@ -176,6 +179,10 @@ private:
     QWidget* m_audioPoolListContainer = nullptr;
     QVBoxLayout* m_audioPoolListLayout = nullptr;
     QToolButton* m_audioPoolMenuButton = nullptr;
+    QWidget* m_trackGainPopup = nullptr;
+    QSlider* m_trackGainPopupSlider = nullptr;
+    QLabel* m_trackGainPopupValueLabel = nullptr;
+    QUuid m_trackGainPopupTrackId;
     QAction* m_newProjectAction = nullptr;
     QAction* m_openProjectAction = nullptr;
     QMenu* m_openRecentMenu = nullptr;

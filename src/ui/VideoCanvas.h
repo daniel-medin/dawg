@@ -44,6 +44,7 @@ signals:
     void tracksSelected(const QList<QUuid>& trackIds);
     void selectedTrackMoved(const QPointF& imagePoint);
     void trackGainAdjustRequested(const QUuid& trackId, int wheelDelta, const QPoint& globalPosition);
+    void trackGainPopupRequested(const QUuid& trackId, const QPoint& globalPosition);
     void trackContextMenuRequested(const QUuid& trackId, const QPoint& globalPosition);
 
 protected:

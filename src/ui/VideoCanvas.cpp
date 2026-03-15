@@ -359,6 +359,23 @@ protected:
         const auto trackId = trackAt(event->position());
         if (!trackId.isNull())
         {
+            const auto overlayIt = std::find_if(
+                m_overlays.cbegin(),
+                m_overlays.cend(),
+                [&trackId](const TrackOverlay& overlay)
+                {
+                    return overlay.id == trackId;
+                });
+            if ((event->modifiers() & Qt::ControlModifier)
+                && overlayIt != m_overlays.cend()
+                && overlayIt->hasAttachedAudio)
+            {
+                m_owner->trackSelected(trackId);
+                m_owner->trackGainPopupRequested(trackId, event->globalPosition().toPoint());
+                event->accept();
+                return;
+            }
+
             m_draggedTrackId = trackId;
             m_owner->trackSelected(trackId);
             return;

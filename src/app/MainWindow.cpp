@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 
@@ -35,6 +36,7 @@
 #include <QSizePolicy>
 #include <QShortcut>
 #include <QSignalBlocker>
+#include <QSlider>
 #include <QStandardPaths>
 #include <QResizeEvent>
 #include <QStatusBar>
@@ -66,6 +68,95 @@ namespace
 constexpr auto kLastProjectPathSettingsKey = "project/lastProjectPath";
 constexpr auto kRecentProjectPathsSettingsKey = "project/recentProjectPaths";
 constexpr int kMaxRecentProjectCount = 10;
+constexpr int kMixGainPopupMinValue = -1000;
+constexpr int kMixGainPopupMaxValue = 120;
+
+int mixGainDbToSliderValue(const float gainDb)
+{
+    if (gainDb <= -99.9F)
+    {
+        return kMixGainPopupMinValue;
+    }
+
+    return static_cast<int>(std::lround(std::clamp(gainDb, -100.0F, 12.0F) * 10.0F));
+}
+
+float mixGainSliderValueToDb(const int sliderValue)
+{
+    return sliderValue <= kMixGainPopupMinValue ? -100.0F : static_cast<float>(sliderValue) / 10.0F;
+}
+
+class TrackGainPopup final : public QFrame
+{
+public:
+    explicit TrackGainPopup(QWidget* parent = nullptr)
+        : QFrame(parent, Qt::Popup | Qt::FramelessWindowHint)
+    {
+        setObjectName(QStringLiteral("trackGainPopup"));
+        setAttribute(Qt::WA_ShowWithoutActivating);
+        setFrameShape(QFrame::NoFrame);
+
+        auto* layout = new QVBoxLayout(this);
+        layout->setContentsMargins(10, 10, 10, 10);
+        layout->setSpacing(6);
+
+        m_slider = new QSlider(Qt::Vertical, this);
+        m_slider->setRange(kMixGainPopupMinValue, kMixGainPopupMaxValue);
+        m_slider->setSingleStep(1);
+        m_slider->setPageStep(10);
+        m_slider->setFixedHeight(132);
+        m_slider->setInvertedAppearance(false);
+        m_slider->setStyleSheet(QStringLiteral(
+            "QSlider::groove:vertical {"
+            "  background: #0b1016;"
+            "  border: 1px solid #1d2733;"
+            "  border-radius: 4px;"
+            "  width: 8px;"
+            "}"
+            "QSlider::sub-page:vertical {"
+            "  background: #3d6ea5;"
+            "  border-radius: 3px;"
+            "}"
+            "QSlider::add-page:vertical {"
+            "  background: #111821;"
+            "  border-radius: 3px;"
+            "}"
+            "QSlider::handle:vertical {"
+            "  background: #d7dee7;"
+            "  border: 1px solid #eff3f7;"
+            "  border-radius: 6px;"
+            "  height: 12px;"
+            "  margin: -2px -6px;"
+            "}"));
+        layout->addWidget(m_slider, 0, Qt::AlignHCenter);
+
+        m_valueLabel = new QLabel(this);
+        m_valueLabel->setAlignment(Qt::AlignCenter);
+        m_valueLabel->setStyleSheet(QStringLiteral("color: #eef2f6; font-size: 8pt;"));
+        layout->addWidget(m_valueLabel);
+
+        setStyleSheet(QStringLiteral(
+            "#trackGainPopup {"
+            "  background: rgba(12, 16, 22, 0.97);"
+            "  border: 1px solid #2a3644;"
+            "  border-radius: 8px;"
+            "}"));
+    }
+
+    [[nodiscard]] QSlider* slider() const
+    {
+        return m_slider;
+    }
+
+    [[nodiscard]] QLabel* valueLabel() const
+    {
+        return m_valueLabel;
+    }
+
+private:
+    QSlider* m_slider = nullptr;
+    QLabel* m_valueLabel = nullptr;
+};
 
 Qt::CaseSensitivity projectPathCaseSensitivity()
 {
@@ -869,6 +960,7 @@ MainWindow::MainWindow(QWidget* parent)
         showNodeContextMenu(trackId, globalPosition, true);
     });
     connect(m_canvas, &VideoCanvas::trackGainAdjustRequested, this, &MainWindow::adjustTrackMixGainFromWheel);
+    connect(m_canvas, &VideoCanvas::trackGainPopupRequested, this, &MainWindow::showTrackMixGainPopup);
     connect(m_canvas, &VideoCanvas::selectedTrackMoved, m_controller, &PlayerController::moveSelectedTrack);
     connect(m_timeline, &TimelineView::frameRequested, m_controller, &PlayerController::seekToFrame);
     connect(m_timeline, &TimelineView::loopStartFrameRequested, m_controller, &PlayerController::setLoopStartFrame);
@@ -887,6 +979,7 @@ MainWindow::MainWindow(QWidget* parent)
         showNodeContextMenu(trackId, globalPosition, false);
     });
     connect(m_timeline, &TimelineView::trackGainAdjustRequested, this, &MainWindow::adjustTrackMixGainFromWheel);
+    connect(m_timeline, &TimelineView::trackGainPopupRequested, this, &MainWindow::showTrackMixGainPopup);
     connect(m_timeline, &TimelineView::loopContextMenuRequested, this, [this](const QPoint& globalPosition)
     {
         if (!m_controller->loopStartFrame().has_value() && !m_controller->loopEndFrame().has_value())
@@ -1171,6 +1264,19 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         {
             event->accept();
             return true;
+        }
+    }
+
+    if (event->type() == QEvent::KeyRelease)
+    {
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if (!keyEvent->isAutoRepeat()
+            && keyEvent->key() == Qt::Key_Control
+            && m_trackGainPopup
+            && m_trackGainPopup->isVisible())
+        {
+            m_trackGainPopup->hide();
+            m_trackGainPopupTrackId = {};
         }
     }
 
@@ -3793,6 +3899,64 @@ void MainWindow::adjustTrackMixGainFromWheel(const QUuid& trackId, const int whe
     }
 
     QToolTip::showText(globalPosition, mixGainDisplayText(*nextGainDb), this, {}, 900);
+    if (m_trackGainPopup && m_trackGainPopup->isVisible() && m_trackGainPopupTrackId == trackId && m_trackGainPopupSlider)
+    {
+        const QSignalBlocker blocker{m_trackGainPopupSlider};
+        m_trackGainPopupSlider->setValue(mixGainDbToSliderValue(*nextGainDb));
+        updateTrackMixGainPopupValue(*nextGainDb);
+    }
+}
+
+void MainWindow::showTrackMixGainPopup(const QUuid& trackId, const QPoint& globalPosition)
+{
+    if (trackId.isNull() || !m_trackGainPopup || !m_trackGainPopupSlider || !m_trackGainPopupValueLabel)
+    {
+        return;
+    }
+
+    const auto gainDb = m_controller->mixLaneGainForTrack(trackId);
+    if (!gainDb.has_value())
+    {
+        return;
+    }
+
+    m_trackGainPopupTrackId = trackId;
+    {
+        const QSignalBlocker blocker{m_trackGainPopupSlider};
+        m_trackGainPopupSlider->setValue(mixGainDbToSliderValue(*gainDb));
+    }
+    updateTrackMixGainPopupValue(*gainDb);
+    m_trackGainPopup->adjustSize();
+
+    auto popupPosition = globalPosition + QPoint(14, -(m_trackGainPopup->height() / 2));
+    if (const auto* screen = QApplication::screenAt(globalPosition))
+    {
+        const auto available = screen->availableGeometry();
+        const auto maxX = std::max(available.left(), available.right() - m_trackGainPopup->width() + 1);
+        const auto maxY = std::max(available.top(), available.bottom() - m_trackGainPopup->height() + 1);
+        popupPosition.setX(std::clamp(
+            popupPosition.x(),
+            available.left(),
+            maxX));
+        popupPosition.setY(std::clamp(
+            popupPosition.y(),
+            available.top(),
+            maxY));
+    }
+
+    m_trackGainPopup->move(popupPosition);
+    m_trackGainPopup->show();
+    m_trackGainPopup->raise();
+    m_trackGainPopup->activateWindow();
+    m_trackGainPopupSlider->setFocus(Qt::PopupFocusReason);
+}
+
+void MainWindow::updateTrackMixGainPopupValue(const float gainDb)
+{
+    if (m_trackGainPopupValueLabel)
+    {
+        m_trackGainPopupValueLabel->setText(mixGainDisplayText(gainDb));
+    }
 }
 
 std::optional<int> MainWindow::timelineLoopTargetFrame() const
@@ -4054,6 +4218,7 @@ void MainWindow::buildMenus()
 
     auto* mouseShortcutsMenu = shortcutsMenu->addMenu(QStringLiteral("Mouse"));
     addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Adjust Selected Node Mixer Volume"), QStringLiteral("Ctrl+Mouse Wheel"));
+    addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Open Node Mixer Volume Fader"), QStringLiteral("Ctrl+Click"));
     addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Reset Mixer Or Clip Fader To 0 dB"), QStringLiteral("Ctrl+Click"));
     addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Preview Audio Pool Item"), QStringLiteral("Ctrl+Left Hold"));
     addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Add Audio Pool Item To Stage Center"), QStringLiteral("Double-Click"));
@@ -4462,6 +4627,32 @@ void MainWindow::buildUi()
     m_statusToast->setObjectName(QStringLiteral("statusToast"));
     m_statusToast->setWordWrap(true);
     m_statusToast->hide();
+
+    auto* trackGainPopup = new TrackGainPopup(this);
+    trackGainPopup->hide();
+    m_trackGainPopup = trackGainPopup;
+    m_trackGainPopupSlider = trackGainPopup->slider();
+    m_trackGainPopupValueLabel = trackGainPopup->valueLabel();
+    connect(m_trackGainPopupSlider, &QSlider::valueChanged, this, [this](const int sliderValue)
+    {
+        if (m_trackGainPopupTrackId.isNull())
+        {
+            return;
+        }
+
+        const auto gainDb = mixGainSliderValueToDb(sliderValue);
+        updateTrackMixGainPopupValue(gainDb);
+        if (!m_controller->setMixLaneGainForTrack(m_trackGainPopupTrackId, gainDb))
+        {
+            return;
+        }
+
+        refreshMixView();
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
 
     m_canvasTipsOverlay = new QLabel(m_canvas);
     m_canvasTipsOverlay->setObjectName(QStringLiteral("canvasTipsOverlay"));
