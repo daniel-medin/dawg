@@ -4383,6 +4383,7 @@ void MainWindow::buildUi()
 
     m_canvas = new VideoCanvas(m_canvasPanel);
     m_canvas->setRenderService(m_controller->renderService());
+    m_canvas->setNativePresentationEnabled(true);
     canvasPanelLayout->addWidget(m_canvas, 1);
     m_nativeViewport = new NativeVideoViewport(nullptr);
     m_nativeViewport->setWindowTitle(QStringLiteral("Native Video Viewport Test"));
