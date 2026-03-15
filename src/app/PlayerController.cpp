@@ -116,20 +116,8 @@ PlayerController::PlayerController(QObject* parent)
     connect(&m_clipEditorPreviewStopTimer, &QTimer::timeout, this, &PlayerController::handleClipEditorPreviewTimeout);
 }
 
-bool PlayerController::openVideo(const QString& filePath)
+void PlayerController::clearProjectStateAfterMediaStop()
 {
-    stopAudioPoolPreview();
-    stopSelectedTrackClipPreview();
-    pause(false);
-    m_audioEngine->stopTrack(m_embeddedVideoAudioTrackId);
-    m_videoPlayback.setPresentationScale(1.0);
-
-    if (!m_videoPlayback.open(filePath))
-    {
-        emit statusChanged(QStringLiteral("Failed to open video: %1").arg(filePath));
-        return false;
-    }
-
     m_tracker.reset();
     m_currentOverlays.clear();
     m_selectedTrackIds.clear();
@@ -157,10 +145,56 @@ bool PlayerController::openVideo(const QString& filePath)
     m_clipEditorPreviewClipStartMs = 0;
     m_clipEditorPreviewClipEndMs = 0;
     m_audioEngine->setMasterGain(m_masterMixGainDb);
-    m_loadedPath = filePath;
+    m_loadedPath.clear();
     m_embeddedVideoAudioPath.clear();
     m_embeddedVideoAudioDisplayName.clear();
     m_embeddedVideoAudioMuted = true;
+    m_totalFrames = 0;
+    m_fps = 0.0;
+    m_currentFrame = {};
+    m_currentGrayFrame.release();
+}
+
+void PlayerController::resetProjectState()
+{
+    stopAudioPoolPreview();
+    stopSelectedTrackClipPreview();
+    pause(false);
+    m_audioEngine->stopAll();
+    m_videoPlayback.close();
+    m_videoPlayback.setPresentationScale(1.0);
+    clearProjectStateAfterMediaStop();
+    m_renderService.setFastPlaybackEnabled(false);
+    m_transport.setInsertionFollowsPlayback(false);
+    m_motionTrackingEnabled = false;
+    refreshOverlays();
+    emitCurrentFrame();
+    emit videoLoaded({}, 0, 0.0);
+    emit videoAudioStateChanged();
+    emit loopRangeChanged();
+    emit selectionChanged(false);
+    emit trackAvailabilityChanged(false);
+    emit audioPoolChanged();
+    emit editStateChanged();
+    emit motionTrackingChanged(false);
+}
+
+bool PlayerController::openVideo(const QString& filePath)
+{
+    stopAudioPoolPreview();
+    stopSelectedTrackClipPreview();
+    pause(false);
+    m_audioEngine->stopTrack(m_embeddedVideoAudioTrackId);
+    m_videoPlayback.setPresentationScale(1.0);
+
+    if (!m_videoPlayback.open(filePath))
+    {
+        emit statusChanged(QStringLiteral("Failed to open video: %1").arg(filePath));
+        return false;
+    }
+
+    clearProjectStateAfterMediaStop();
+    m_loadedPath = filePath;
     m_totalFrames = m_videoPlayback.totalFrames();
     m_fps = m_videoPlayback.fps();
     m_currentFrame = m_videoPlayback.currentFrame();
@@ -197,6 +231,223 @@ bool PlayerController::openVideo(const QString& filePath)
             .arg(m_videoPlayback.decoderBackendName())
             .arg(m_renderService.backendName()));
 
+    return true;
+}
+
+dawg::project::ControllerState PlayerController::snapshotProjectState() const
+{
+    dawg::project::ControllerState state;
+    state.videoPath = m_loadedPath;
+    state.audioPoolAssetPaths = m_audioPool.assetPaths();
+    state.trackerState = m_tracker.snapshotState();
+    state.selectedTrackIds = m_selectedTrackIds;
+    state.currentFrameIndex = m_currentFrame.index;
+    state.motionTrackingEnabled = m_motionTrackingEnabled;
+    state.insertionFollowsPlayback = m_transport.insertionFollowsPlayback();
+    state.fastPlaybackEnabled = m_renderService.fastPlaybackEnabled();
+    state.embeddedVideoAudioMuted = m_embeddedVideoAudioMuted;
+    state.loopStartFrame = m_loopStartFrame;
+    state.loopEndFrame = m_loopEndFrame;
+    state.masterMixGainDb = m_masterMixGainDb;
+    state.masterMixMuted = m_masterMixMuted;
+
+    std::vector<int> laneIndices;
+    laneIndices.reserve(
+        m_mixLaneGainDbByLane.size()
+        + m_mixLaneMutedByLane.size()
+        + m_mixLaneSoloByLane.size());
+    for (const auto& [laneIndex, _] : m_mixLaneGainDbByLane)
+    {
+        laneIndices.push_back(laneIndex);
+    }
+    for (const auto& [laneIndex, _] : m_mixLaneMutedByLane)
+    {
+        laneIndices.push_back(laneIndex);
+    }
+    for (const auto& [laneIndex, _] : m_mixLaneSoloByLane)
+    {
+        laneIndices.push_back(laneIndex);
+    }
+    std::sort(laneIndices.begin(), laneIndices.end());
+    laneIndices.erase(std::unique(laneIndices.begin(), laneIndices.end()), laneIndices.end());
+    for (const auto laneIndex : laneIndices)
+    {
+        state.mixLanes.push_back(dawg::project::MixLaneState{
+            .laneIndex = laneIndex,
+            .gainDb = mixLaneGainDb(laneIndex),
+            .muted = isMixLaneMuted(laneIndex),
+            .soloed = isMixLaneSoloed(laneIndex)
+        });
+    }
+
+    state.clipEditorPlayheads.reserve(m_clipEditorPlayheadMsByTrack.size());
+    for (auto it = m_clipEditorPlayheadMsByTrack.cbegin(); it != m_clipEditorPlayheadMsByTrack.cend(); ++it)
+    {
+        state.clipEditorPlayheads.emplace_back(it.key(), it.value());
+    }
+    std::sort(
+        state.clipEditorPlayheads.begin(),
+        state.clipEditorPlayheads.end(),
+        [](const auto& left, const auto& right)
+        {
+            return left.first.toString(QUuid::WithoutBraces) < right.first.toString(QUuid::WithoutBraces);
+        });
+
+    return state;
+}
+
+bool PlayerController::restoreProjectState(const dawg::project::ControllerState& state, QString* errorMessage)
+{
+    for (const auto& assetPath : state.audioPoolAssetPaths)
+    {
+        if (!assetPath.isEmpty() && !QFileInfo::exists(assetPath))
+        {
+            if (errorMessage)
+            {
+                *errorMessage = QStringLiteral("Project audio file is missing: %1").arg(assetPath);
+            }
+            return false;
+        }
+    }
+
+    for (const auto& track : state.trackerState.tracks)
+    {
+        if (track.attachedAudio.has_value()
+            && !track.attachedAudio->assetPath.isEmpty()
+            && !QFileInfo::exists(track.attachedAudio->assetPath))
+        {
+            if (errorMessage)
+            {
+                *errorMessage = QStringLiteral("Attached audio file is missing: %1")
+                    .arg(track.attachedAudio->assetPath);
+            }
+            return false;
+        }
+    }
+
+    if (!state.videoPath.isEmpty() && !QFileInfo::exists(state.videoPath))
+    {
+        if (errorMessage)
+        {
+            *errorMessage = QStringLiteral("Project video file is missing: %1").arg(state.videoPath);
+        }
+        return false;
+    }
+
+    if (state.videoPath.isEmpty() && !state.trackerState.tracks.empty())
+    {
+        if (errorMessage)
+        {
+            *errorMessage = QStringLiteral("Project contains nodes but no video file.");
+        }
+        return false;
+    }
+
+    if (state.videoPath.isEmpty())
+    {
+        resetProjectState();
+    }
+    else if (!openVideo(state.videoPath))
+    {
+        if (errorMessage)
+        {
+            *errorMessage = QStringLiteral("Failed to open project video: %1").arg(state.videoPath);
+        }
+        return false;
+    }
+
+    m_audioPool.setAssetPaths(state.audioPoolAssetPaths);
+    m_tracker.restoreState(state.trackerState);
+    m_loopStartFrame = state.loopStartFrame;
+    m_loopEndFrame = state.loopEndFrame;
+    m_masterMixGainDb = clampMixGainDb(state.masterMixGainDb);
+    m_masterMixMuted = state.masterMixMuted;
+    m_mixLaneGainDbByLane.clear();
+    m_mixLaneMutedByLane.clear();
+    m_mixLaneSoloByLane.clear();
+    for (const auto& lane : state.mixLanes)
+    {
+        if (lane.laneIndex < 0)
+        {
+            continue;
+        }
+        if (std::abs(lane.gainDb) >= 0.001F)
+        {
+            m_mixLaneGainDbByLane[lane.laneIndex] = clampMixGainDb(lane.gainDb);
+        }
+        if (lane.muted)
+        {
+            m_mixLaneMutedByLane[lane.laneIndex] = true;
+        }
+        if (lane.soloed)
+        {
+            m_mixLaneSoloByLane[lane.laneIndex] = true;
+        }
+    }
+    m_clipEditorPlayheadMsByTrack.clear();
+    for (const auto& [trackId, playheadMs] : state.clipEditorPlayheads)
+    {
+        if (!trackId.isNull())
+        {
+            m_clipEditorPlayheadMsByTrack.insert(trackId, playheadMs);
+        }
+    }
+
+    m_motionTrackingEnabled = state.motionTrackingEnabled;
+    m_transport.setInsertionFollowsPlayback(state.insertionFollowsPlayback);
+    m_renderService.setFastPlaybackEnabled(state.fastPlaybackEnabled);
+    m_embeddedVideoAudioMuted = state.embeddedVideoAudioMuted;
+    m_audioEngine->setMasterGain(m_masterMixMuted ? kSilentMixGainDb : m_masterMixGainDb);
+
+    std::vector<QUuid> validSelection;
+    validSelection.reserve(state.selectedTrackIds.size());
+    for (const auto& selectedTrackId : state.selectedTrackIds)
+    {
+        const auto trackIt = std::find_if(
+            m_tracker.tracks().cbegin(),
+            m_tracker.tracks().cend(),
+            [&selectedTrackId](const TrackPoint& track)
+            {
+                return track.id == selectedTrackId;
+            });
+        if (trackIt != m_tracker.tracks().cend())
+        {
+            validSelection.push_back(selectedTrackId);
+        }
+    }
+    m_selectedTrackIds = validSelection;
+    m_selectedTrackId = validSelection.empty() ? QUuid{} : validSelection.front();
+    m_fadingDeselectedTrackId = {};
+    m_fadingDeselectedTrackOpacity = 0.0F;
+    m_selectionFadeTimer.stop();
+
+    updateCurrentGrayFrameIfNeeded();
+    refreshOverlays();
+    if (hasVideoLoaded())
+    {
+        const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
+        const auto clampedFrameIndex = std::clamp(state.currentFrameIndex, 0, maxFrameIndex);
+        if (!loadFrameAt(clampedFrameIndex))
+        {
+            if (errorMessage)
+            {
+                *errorMessage = QStringLiteral("Failed to restore project frame %1.").arg(clampedFrameIndex);
+            }
+            return false;
+        }
+    }
+    else
+    {
+        emitCurrentFrame();
+    }
+
+    emit videoAudioStateChanged();
+    emit loopRangeChanged();
+    emit selectionChanged(!m_selectedTrackIds.empty());
+    emit trackAvailabilityChanged(hasTracks());
+    emit audioPoolChanged();
+    emit editStateChanged();
+    emit motionTrackingChanged(m_motionTrackingEnabled);
     return true;
 }
 
@@ -242,7 +493,7 @@ bool PlayerController::setSelectedTrackClipPlayheadMs(const int playheadMs)
 
     const auto clipStartMs = audioClipStartMs(*trackIt->attachedAudio);
     const auto clipEndMs = audioClipEndMs(*trackIt->attachedAudio, *sourceDurationMs);
-    const auto clampedPlayheadMs = std::clamp(playheadMs, clipStartMs, std::max(clipStartMs, clipEndMs - 1));
+    const auto clampedPlayheadMs = std::clamp(playheadMs, 0, std::max(0, *sourceDurationMs - 1));
     const auto currentIt = m_clipEditorPlayheadMsByTrack.constFind(m_selectedTrackId);
     const auto changed =
         currentIt == m_clipEditorPlayheadMsByTrack.cend() || currentIt.value() != clampedPlayheadMs;
@@ -260,18 +511,22 @@ bool PlayerController::setSelectedTrackClipPlayheadMs(const int playheadMs)
         return changed;
     }
 
-    if (!m_audioEngine->playTrack(m_clipEditorPreviewTrackId, trackIt->attachedAudio->assetPath, clampedPlayheadMs))
+    const auto previewStartMs = std::clamp(
+        clampedPlayheadMs,
+        clipStartMs,
+        std::max(clipStartMs, clipEndMs - 1));
+    if (!m_audioEngine->playTrack(m_clipEditorPreviewTrackId, trackIt->attachedAudio->assetPath, previewStartMs))
     {
         return changed;
     }
 
-    m_clipEditorPreviewStartMs = clampedPlayheadMs;
+    m_clipEditorPreviewStartMs = previewStartMs;
     m_clipEditorPreviewClipStartMs = clipStartMs;
     m_clipEditorPreviewClipEndMs = clipEndMs;
     m_clipEditorPreviewElapsedTimer.restart();
     m_audioEngine->setTrackGain(m_clipEditorPreviewTrackId, trackIt->attachedAudio->gainDb);
     m_audioEngine->setTrackPan(m_clipEditorPreviewTrackId, 0.0F);
-    m_clipEditorPreviewStopTimer.start(std::max(1, clipEndMs - clampedPlayheadMs));
+    m_clipEditorPreviewStopTimer.start(std::max(1, clipEndMs - previewStartMs));
     return true;
 }
 
@@ -572,32 +827,18 @@ bool PlayerController::setSelectedTrackClipRangeMs(const int clipStartMs, const 
         return false;
     }
 
-    const auto updatedTrackIt = std::find_if(
-        m_tracker.tracks().begin(),
-        m_tracker.tracks().end(),
-        [this](const TrackPoint& track)
-        {
-            return track.id == m_selectedTrackId;
-        });
-    if (updatedTrackIt != m_tracker.tracks().end())
-    {
-        if (const auto endFrame = trimmedEndFrameForTrack(*updatedTrackIt); endFrame.has_value())
-        {
-            m_tracker.setTrackEndFrame(m_selectedTrackId, *endFrame);
-        }
-    }
-
-    const auto clampedPlayheadMs = std::clamp(
-        playheadBeforeChange,
-        clampedClipStartMs,
-        std::max(clampedClipStartMs, clampedClipEndMs - 1));
+    const auto storedPlayheadMs = std::clamp(playheadBeforeChange, 0, std::max(0, *sourceDurationMs - 1));
     if (previewWasPlaying)
     {
-        static_cast<void>(setSelectedTrackClipPlayheadMs(clampedPlayheadMs));
+        const auto previewPlayheadMs = std::clamp(
+            storedPlayheadMs,
+            clampedClipStartMs,
+            std::max(clampedClipStartMs, clampedClipEndMs - 1));
+        static_cast<void>(setSelectedTrackClipPlayheadMs(previewPlayheadMs));
     }
     else
     {
-        m_clipEditorPlayheadMsByTrack.insert(m_selectedTrackId, clampedPlayheadMs);
+        m_clipEditorPlayheadMsByTrack.insert(m_selectedTrackId, storedPlayheadMs);
     }
     refreshOverlays();
     emit editStateChanged();
@@ -781,6 +1022,43 @@ void PlayerController::setMixLaneSoloed(const int laneIndex, const bool soloed)
     {
         applyLiveMixStateToCurrentPlayback();
     }
+}
+
+std::optional<float> PlayerController::adjustMixLaneGainForTrack(const QUuid& trackId, const float deltaDb)
+{
+    if (trackId.isNull() || std::abs(deltaDb) < 0.001F)
+    {
+        return std::nullopt;
+    }
+
+    const auto trackIt = std::find_if(
+        m_tracker.tracks().cbegin(),
+        m_tracker.tracks().cend(),
+        [&trackId](const TrackPoint& track)
+        {
+            return track.id == trackId;
+        });
+    if (trackIt == m_tracker.tracks().cend() || !trackIt->attachedAudio.has_value())
+    {
+        return std::nullopt;
+    }
+
+    const auto spans = timelineTrackSpans();
+    const auto spanIt = std::find_if(
+        spans.cbegin(),
+        spans.cend(),
+        [&trackId](const TimelineTrackSpan& span)
+        {
+            return span.id == trackId;
+        });
+    if (spanIt == spans.cend())
+    {
+        return std::nullopt;
+    }
+
+    const auto nextGainDb = clampMixGainDb(mixLaneGainDb(spanIt->laneIndex) + deltaDb);
+    setMixLaneGainDb(spanIt->laneIndex, nextGainDb);
+    return nextGainDb;
 }
 
 void PlayerController::goToStart()
@@ -1027,6 +1305,7 @@ void PlayerController::seedTrack(const QPointF& imagePoint)
             .arg(m_currentFrame.index)
             .arg(track.motionTracked ? QStringLiteral("tracked") : QStringLiteral("manual")));
     emit trackAvailabilityChanged(true);
+    emit editStateChanged();
 }
 
 bool PlayerController::createTrackWithAudioAtCurrentFrame(const QString& filePath)
@@ -1086,6 +1365,7 @@ bool PlayerController::createTrackWithAudioAtCurrentFrame(const QString& filePat
     refreshOverlays();
     emit audioPoolChanged();
     emit trackAvailabilityChanged(true);
+    emit editStateChanged();
     emit statusChanged(
         QStringLiteral("Added %1 at frame %2.")
             .arg(QFileInfo(filePath).fileName())
@@ -1126,6 +1406,7 @@ bool PlayerController::importSoundForSelectedTrack(const QString& filePath)
 
     refreshOverlays();
     emit audioPoolChanged();
+    emit editStateChanged();
     emit statusChanged(QStringLiteral("Attached %1 to the selected node.").arg(QFileInfo(filePath).fileName()));
     return true;
 }
@@ -2276,7 +2557,7 @@ std::optional<ClipEditorState> PlayerController::selectedClipEditorState() const
         const auto elapsedSeconds = frameTimestampSeconds(m_currentFrame.index) - frameTimestampSeconds(state.nodeStartFrame);
         playheadMs = state.clipStartMs + std::max(0, static_cast<int>(std::lround(elapsedSeconds * 1000.0)));
     }
-    state.playheadMs = std::clamp(playheadMs, state.clipStartMs, std::max(state.clipStartMs, state.clipEndMs - 1));
+    state.playheadMs = std::clamp(playheadMs, 0, std::max(0, state.sourceDurationMs - 1));
 
     return state;
 }
@@ -2527,6 +2808,7 @@ std::vector<TimelineTrackSpan> PlayerController::timelineTrackSpans() const
             .startFrame = candidate.startFrame,
             .endFrame = candidate.endFrame,
             .laneIndex = laneIndex,
+            .hasAttachedAudio = candidate.track->attachedAudio.has_value(),
             .isSelected = isTrackSelected(candidate.track->id)
         });
     }
@@ -2766,16 +3048,11 @@ std::optional<int> PlayerController::trimmedEndFrameForTrack(const TrackPoint& t
     const auto clipDurationMs = audioClipDurationMs(*track.attachedAudio, *durationMs);
     const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
     const auto startFrame = std::clamp(track.startFrame, 0, maxFrameIndex);
-    const auto endExclusiveSeconds = frameTimestampSeconds(startFrame) + (clipDurationMs / 1000.0);
-    int endFrame = startFrame;
-
     const auto safeFps = m_fps > 0.0 ? m_fps : 30.0;
-    const auto coveredFrames = std::max(1, static_cast<int>(std::lround((clipDurationMs * safeFps) / 1000.0)));
-    endFrame = std::clamp(
-        m_videoPlayback.frameIndexForPresentationTime(endExclusiveSeconds, startFrame),
-        startFrame,
-        startFrame + coveredFrames);
-
+    const auto coveredFrames = std::max(
+        1,
+        static_cast<int>(std::ceil((static_cast<double>(clipDurationMs) * safeFps) / 1000.0)));
+    const auto endFrame = startFrame + coveredFrames - 1;
     return std::clamp(endFrame, startFrame, maxFrameIndex);
 }
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <functional>
 
 #include <QApplication>
@@ -12,28 +13,34 @@
 #include <QEnterEvent>
 #include <QEvent>
 #include <QFileDialog>
+#include <QFile>
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QLineEdit>
 #include <QMenuBar>
 #include <QMenu>
 #include <QMimeData>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
 #include <QScrollArea>
 #include <QScreen>
+#include <QSettings>
 #include <QSizePolicy>
 #include <QShortcut>
 #include <QSignalBlocker>
+#include <QStandardPaths>
 #include <QResizeEvent>
 #include <QStatusBar>
 #include <QStyle>
 #include <QToolButton>
+#include <QToolTip>
 #include <QWidgetAction>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -46,6 +53,7 @@
 #endif
 
 #include "app/PlayerController.h"
+#include "app/ProjectDocument.h"
 #include "ui/ClipEditorView.h"
 #include "ui/DebugOverlayWindow.h"
 #include "ui/MixView.h"
@@ -55,6 +63,134 @@
 
 namespace
 {
+constexpr auto kLastProjectPathSettingsKey = "project/lastProjectPath";
+constexpr auto kRecentProjectPathsSettingsKey = "project/recentProjectPaths";
+constexpr int kMaxRecentProjectCount = 10;
+
+Qt::CaseSensitivity projectPathCaseSensitivity()
+{
+#ifdef Q_OS_WIN
+    return Qt::CaseInsensitive;
+#else
+    return Qt::CaseSensitive;
+#endif
+}
+
+QString normalizeProjectFilePath(const QString& path)
+{
+    if (path.isEmpty())
+    {
+        return {};
+    }
+
+    return QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath()));
+}
+
+bool projectPathMatches(const QString& left, const QString& right)
+{
+    return QString::compare(left, right, projectPathCaseSensitivity()) == 0;
+}
+
+const QStringList& projectVideoExtensions()
+{
+    static const QStringList kExtensions{
+        QStringLiteral("mp4"),
+        QStringLiteral("mov"),
+        QStringLiteral("mkv"),
+        QStringLiteral("avi")
+    };
+    return kExtensions;
+}
+
+const QStringList& projectAudioExtensions()
+{
+    static const QStringList kExtensions{
+        QStringLiteral("wav"),
+        QStringLiteral("mp3"),
+        QStringLiteral("flac"),
+        QStringLiteral("aif"),
+        QStringLiteral("aiff"),
+        QStringLiteral("m4a"),
+        QStringLiteral("aac"),
+        QStringLiteral("ogg")
+    };
+    return kExtensions;
+}
+
+QStringList projectMediaFilesInDirectory(const QString& directoryPath, const QStringList& extensions)
+{
+    const QDir directory(directoryPath);
+    if (!directory.exists())
+    {
+        return {};
+    }
+
+    QStringList files;
+    const auto entries = directory.entryInfoList(QDir::Files, QDir::Name | QDir::IgnoreCase);
+    files.reserve(entries.size());
+    for (const auto& entry : entries)
+    {
+        if (extensions.contains(entry.suffix().toLower()))
+        {
+            files.push_back(QDir::cleanPath(entry.absoluteFilePath()));
+        }
+    }
+    return files;
+}
+
+bool controllerStateHasSavedMedia(const dawg::project::ControllerState& state)
+{
+    return !state.videoPath.isEmpty()
+        || !state.audioPoolAssetPaths.empty()
+        || !state.trackerState.tracks.empty();
+}
+
+bool recoverProjectMediaFromFolders(
+    dawg::project::ControllerState* state,
+    const QString& projectRootPath,
+    QString* message)
+{
+    if (!state || controllerStateHasSavedMedia(*state))
+    {
+        return false;
+    }
+
+    bool recovered = false;
+    const auto videoFiles = projectMediaFilesInDirectory(
+        QDir(projectRootPath).filePath(QStringLiteral("video")),
+        projectVideoExtensions());
+    if (videoFiles.size() == 1)
+    {
+        state->videoPath = videoFiles.front();
+        recovered = true;
+    }
+
+    const auto audioFiles = projectMediaFilesInDirectory(
+        QDir(projectRootPath).filePath(QStringLiteral("audio")),
+        projectAudioExtensions());
+    if (!audioFiles.isEmpty())
+    {
+        state->audioPoolAssetPaths.assign(audioFiles.cbegin(), audioFiles.cend());
+        recovered = true;
+    }
+
+    if (recovered && message)
+    {
+        QStringList recoveredParts;
+        if (!state->videoPath.isEmpty())
+        {
+            recoveredParts.push_back(QStringLiteral("video"));
+        }
+        if (!state->audioPoolAssetPaths.empty())
+        {
+            recoveredParts.push_back(QStringLiteral("audio pool"));
+        }
+        *message = QStringLiteral("Recovered %1 from project folders. Save the project to persist the recovered state.")
+            .arg(recoveredParts.join(QStringLiteral(" and ")));
+    }
+    return recovered;
+}
+
 QString currentMemoryUsageText()
 {
 #ifdef Q_OS_WIN
@@ -198,6 +334,105 @@ QCursor audioPoolPreviewCursor()
         return QCursor(pixmap, 10, 10);
     }();
     return cursor;
+}
+
+QString uniqueTargetFilePath(
+    const QString& targetDirectoryPath,
+    const QString& sourceFilePath)
+{
+    const QFileInfo sourceInfo(sourceFilePath);
+    const auto completeBaseName = sourceInfo.completeBaseName();
+    const auto suffix = sourceInfo.suffix();
+    const auto extension = suffix.isEmpty() ? QString{} : QStringLiteral(".") + suffix;
+    QDir targetDirectory(targetDirectoryPath);
+
+    auto candidatePath = targetDirectory.filePath(sourceInfo.fileName());
+    if (!QFileInfo::exists(candidatePath))
+    {
+        return candidatePath;
+    }
+
+    for (int index = 2;; ++index)
+    {
+        candidatePath = targetDirectory.filePath(
+            QStringLiteral("%1 (%2)%3").arg(completeBaseName).arg(index).arg(extension));
+        if (!QFileInfo::exists(candidatePath))
+        {
+            return candidatePath;
+        }
+    }
+}
+
+bool pathIsInsideRoot(const QString& rootPath, const QString& candidatePath)
+{
+    const auto cleanedRoot = QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(rootPath).absoluteFilePath()));
+    const auto cleanedCandidate = QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(candidatePath).absoluteFilePath()));
+#ifdef Q_OS_WIN
+    const auto compareSensitivity = Qt::CaseInsensitive;
+#else
+    const auto compareSensitivity = Qt::CaseSensitive;
+#endif
+    const auto rootPrefix = cleanedRoot.endsWith(QLatin1Char('/'))
+        ? cleanedRoot
+        : (cleanedRoot + QLatin1Char('/'));
+    return QString::compare(cleanedCandidate, cleanedRoot, compareSensitivity) == 0
+        || cleanedCandidate.startsWith(rootPrefix, compareSensitivity);
+}
+
+QString mixGainDisplayText(const float gainDb)
+{
+    if (gainDb <= -99.9F)
+    {
+        return QStringLiteral("-inf");
+    }
+
+    return QStringLiteral("%1 dB").arg(gainDb, 0, 'f', 1);
+}
+
+QString formatAudioPoolDuration(const int durationMs)
+{
+    if (durationMs <= 0)
+    {
+        return QStringLiteral("--");
+    }
+
+    const auto totalSeconds = std::max(0, static_cast<int>(std::lround(durationMs / 1000.0)));
+    const auto hours = totalSeconds / 3600;
+    const auto minutes = (totalSeconds / 60) % 60;
+    const auto seconds = totalSeconds % 60;
+    if (hours > 0)
+    {
+        return QStringLiteral("%1:%2:%3")
+            .arg(hours)
+            .arg(minutes, 2, 10, QLatin1Char('0'))
+            .arg(seconds, 2, 10, QLatin1Char('0'));
+    }
+
+    return QStringLiteral("%1:%2")
+        .arg(totalSeconds / 60)
+        .arg(seconds, 2, 10, QLatin1Char('0'));
+}
+
+QString formatAudioPoolSize(const std::int64_t fileSizeBytes)
+{
+    if (fileSizeBytes < 0)
+    {
+        return QStringLiteral("--");
+    }
+
+    constexpr std::array<const char*, 4> units{"B", "KB", "MB", "GB"};
+    double size = static_cast<double>(fileSizeBytes);
+    std::size_t unitIndex = 0;
+    while (size >= 1024.0 && unitIndex + 1 < units.size())
+    {
+        size /= 1024.0;
+        ++unitIndex;
+    }
+
+    const auto decimals = unitIndex == 0 ? 0 : 1;
+    return QStringLiteral("%1 %2")
+        .arg(size, 0, 'f', decimals)
+        .arg(QString::fromLatin1(units[unitIndex]));
 }
 
 class AudioPoolRow final : public QWidget
@@ -445,6 +680,8 @@ MainWindow::MainWindow(QWidget* parent)
 {
     buildUi();
     buildMenus();
+    rebuildRecentProjectsMenu();
+    updateDetachedVideoUiState();
     qApp->installEventFilter(this);
     m_clearAllShortcutTimer.setSingleShot(true);
     m_clearAllShortcutTimer.setInterval(1500);
@@ -471,26 +708,58 @@ MainWindow::MainWindow(QWidget* parent)
     m_nodeNudgeTimer.setInterval(220);
     connect(&m_nodeNudgeTimer, &QTimer::timeout, this, &MainWindow::applyHeldNodeNudge);
 
+    connect(m_newProjectAction, &QAction::triggered, this, &MainWindow::newProject);
+    connect(m_openProjectAction, &QAction::triggered, this, &MainWindow::openProject);
+    connect(m_saveProjectAction, &QAction::triggered, this, &MainWindow::saveProject);
+    connect(m_saveProjectAsAction, &QAction::triggered, this, &MainWindow::saveProjectAs);
     connect(m_openAction, &QAction::triggered, this, &MainWindow::openVideo);
+    connect(m_quitAction, &QAction::triggered, this, &QWidget::close);
     connect(m_importSoundAction, &QAction::triggered, this, &MainWindow::importSound);
+    connect(m_detachVideoAction, &QAction::triggered, this, [this]()
+    {
+        if (m_videoDetached)
+        {
+            attachVideo();
+        }
+        else
+        {
+            detachVideo();
+        }
+    });
     connect(m_showTimelineAction, &QAction::toggled, this, [this](const bool visible)
     {
         updateTimelineVisibility(visible);
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
         showStatus(visible ? QStringLiteral("Timeline shown.") : QStringLiteral("Timeline hidden."));
     });
     connect(m_showClipEditorAction, &QAction::toggled, this, [this](const bool visible)
     {
         updateClipEditorVisibility(visible);
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
         showStatus(visible ? QStringLiteral("Clip editor shown.") : QStringLiteral("Clip editor hidden."));
     });
     connect(m_showMixAction, &QAction::toggled, this, [this](const bool visible)
     {
         updateMixVisibility(visible);
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
         showStatus(visible ? QStringLiteral("Mix window shown.") : QStringLiteral("Mix window hidden."));
     });
     connect(m_timelineClickSeeksAction, &QAction::toggled, this, [this](const bool enabled)
     {
         m_timeline->setSeekOnClickEnabled(enabled);
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
         showStatus(
             enabled
                 ? QStringLiteral("Timeline click seek enabled.")
@@ -499,6 +768,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_audioPoolAction, &QAction::toggled, this, [this](const bool visible)
     {
         updateAudioPoolVisibility(visible);
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
         showStatus(visible ? QStringLiteral("Audio Pool shown.") : QStringLiteral("Audio Pool hidden."));
     });
     connect(m_showNativeViewportAction, &QAction::toggled, this, [this](const bool visible)
@@ -567,6 +840,10 @@ MainWindow::MainWindow(QWidget* parent)
         {
             m_nativeViewport->setShowAllLabels(enabled);
         }
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
         showStatus(
             enabled
                 ? QStringLiteral("Node names always visible.")
@@ -574,6 +851,7 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(m_deleteNodeAction, &QAction::triggered, m_controller, &PlayerController::deleteSelectedTrack);
     connect(m_clearAllAction, &QAction::triggered, m_controller, &PlayerController::clearAllTracks);
+    connect(m_canvas, &VideoCanvas::importVideoRequested, this, &MainWindow::openVideo);
     connect(m_canvas, &VideoCanvas::seedPointRequested, m_controller, &PlayerController::seedTrack);
     connect(m_canvas, &VideoCanvas::audioDropped, this, [this](const QString& assetPath, const QPointF& imagePoint)
     {
@@ -590,6 +868,7 @@ MainWindow::MainWindow(QWidget* parent)
     {
         showNodeContextMenu(trackId, globalPosition, true);
     });
+    connect(m_canvas, &VideoCanvas::trackGainAdjustRequested, this, &MainWindow::adjustTrackMixGainFromWheel);
     connect(m_canvas, &VideoCanvas::selectedTrackMoved, m_controller, &PlayerController::moveSelectedTrack);
     connect(m_timeline, &TimelineView::frameRequested, m_controller, &PlayerController::seekToFrame);
     connect(m_timeline, &TimelineView::loopStartFrameRequested, m_controller, &PlayerController::setLoopStartFrame);
@@ -606,6 +885,21 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_timeline, &TimelineView::trackContextMenuRequested, this, [this](const QUuid& trackId, const QPoint& globalPosition)
     {
         showNodeContextMenu(trackId, globalPosition, false);
+    });
+    connect(m_timeline, &TimelineView::trackGainAdjustRequested, this, &MainWindow::adjustTrackMixGainFromWheel);
+    connect(m_timeline, &TimelineView::loopContextMenuRequested, this, [this](const QPoint& globalPosition)
+    {
+        if (!m_controller->loopStartFrame().has_value() && !m_controller->loopEndFrame().has_value())
+        {
+            return;
+        }
+
+        QMenu menu(this);
+        auto* deleteAction = menu.addAction(QStringLiteral("Delete"));
+        if (menu.exec(globalPosition) == deleteAction)
+        {
+            clearLoopRange();
+        }
     });
     connect(m_toggleDebugAction, &QAction::toggled, this, [this](const bool enabled)
     {
@@ -671,12 +965,58 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_controller, &PlayerController::videoLoaded, this, &MainWindow::handleVideoLoaded);
     connect(m_controller, &PlayerController::videoAudioStateChanged, this, &MainWindow::updateVideoAudioRow);
     connect(m_controller, &PlayerController::statusChanged, this, &MainWindow::showStatus);
+    connect(m_controller, &PlayerController::editStateChanged, this, [this]()
+    {
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
+    connect(m_controller, &PlayerController::audioPoolChanged, this, [this]()
+    {
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
+    connect(m_controller, &PlayerController::loopRangeChanged, this, [this]()
+    {
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
+    connect(m_controller, &PlayerController::videoAudioStateChanged, this, [this]()
+    {
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
+    connect(m_controller, &PlayerController::motionTrackingChanged, this, [this]()
+    {
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
+    connect(m_controller, &PlayerController::insertionFollowsPlaybackChanged, this, [this]()
+    {
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
     connect(m_showMixShortcut, &QShortcut::activated, m_showMixAction, &QAction::trigger);
     connect(m_clipEditorView, &ClipEditorView::clipRangeChanged, m_controller, &PlayerController::setSelectedTrackClipRangeMs);
     connect(m_clipEditorView, &ClipEditorView::playheadChanged, this, [this](const int playheadMs)
     {
         if (m_controller->setSelectedTrackClipPlayheadMs(playheadMs))
         {
+            if (!m_projectStateChangeInProgress && hasOpenProject())
+            {
+                setProjectDirty(true);
+            }
             refreshClipEditor();
         }
     });
@@ -687,6 +1027,7 @@ MainWindow::MainWindow(QWidget* parent)
             refreshClipEditor();
         }
     });
+    connect(m_clipEditorView, &ClipEditorView::attachAudioRequested, this, &MainWindow::importSound);
     connect(m_clipEditorView, &ClipEditorView::loopSoundChanged, this, [this](const bool enabled)
     {
         if (m_controller->setSelectedTrackLoopEnabled(enabled))
@@ -699,6 +1040,41 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_mixView, &MixView::laneGainChanged, m_controller, &PlayerController::setMixLaneGainDb);
     connect(m_mixView, &MixView::laneMutedChanged, m_controller, &PlayerController::setMixLaneMuted);
     connect(m_mixView, &MixView::laneSoloChanged, m_controller, &PlayerController::setMixLaneSoloed);
+    connect(m_mixView, &MixView::masterGainChanged, this, [this](float)
+    {
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
+    connect(m_mixView, &MixView::masterMutedChanged, this, [this](bool)
+    {
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
+    connect(m_mixView, &MixView::laneGainChanged, this, [this](int, float)
+    {
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
+    connect(m_mixView, &MixView::laneMutedChanged, this, [this](int, bool)
+    {
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
+    connect(m_mixView, &MixView::laneSoloChanged, this, [this](int, bool)
+    {
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+    });
 
     updatePlaybackState(false);
     updateInsertionFollowsPlaybackState(m_controller->isInsertionFollowsPlayback());
@@ -720,12 +1096,33 @@ MainWindow::MainWindow(QWidget* parent)
     refreshAudioPool();
     updateVideoAudioRow();
     m_memoryUsageTimer.start();
-    showStatus(QStringLiteral("Open a clip to start adding nodes."));
-    tryOpenLocalDevVideo();
+    clearCurrentProject();
+    restoreLastProjectOnStartup();
+    if (!hasOpenProject())
+    {
+        showStatus(QStringLiteral("Create or open a project to start adding nodes."));
+    }
+}
+
+bool MainWindow::openProjectFilePath(const QString& projectFilePath)
+{
+    if (projectFilePath.isEmpty())
+    {
+        return false;
+    }
+
+    return loadProjectFile(projectFilePath);
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if (watched == m_detachedVideoWindow && event && event->type() == QEvent::Close && m_videoDetached && !m_shuttingDown)
+    {
+        attachVideo();
+        event->ignore();
+        return true;
+    }
+
     const auto clipEditorFocused = [this]() -> bool
     {
         if (!m_clipEditorView)
@@ -864,7 +1261,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 
             if (key == Qt::Key_Backspace
                 && m_timeline
-                && m_timeline->loopShortcutFrame().has_value()
+                && m_timeline->hasSelectedLoopRange()
                 && (m_controller->loopStartFrame().has_value() || m_controller->loopEndFrame().has_value()))
             {
                 clearLoopRange();
@@ -891,12 +1288,1124 @@ void MainWindow::resizeEvent(QResizeEvent* event)
     updateOverlayPositions();
 }
 
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (!promptToSaveIfDirty(QStringLiteral("close the app")))
+    {
+        event->ignore();
+        return;
+    }
+
+    if (hasOpenProject() && !m_projectDirty && !saveProjectToCurrentPath())
+    {
+        event->ignore();
+        return;
+    }
+
+    m_shuttingDown = true;
+    QMainWindow::closeEvent(event);
+    if (event->isAccepted())
+    {
+        return;
+    }
+
+    m_shuttingDown = false;
+}
+
+bool MainWindow::hasOpenProject() const
+{
+    return !m_currentProjectFilePath.isEmpty();
+}
+
+void MainWindow::clearCurrentProject()
+{
+    m_currentProjectFilePath.clear();
+    m_currentProjectRootPath.clear();
+    m_currentProjectName.clear();
+    m_projectDirty = false;
+    if (m_saveProjectAction)
+    {
+        m_saveProjectAction->setEnabled(false);
+    }
+    if (m_saveProjectAsAction)
+    {
+        m_saveProjectAsAction->setEnabled(false);
+    }
+    updateWindowTitle();
+}
+
+void MainWindow::setCurrentProject(const QString& projectFilePath, const QString& projectName)
+{
+    m_currentProjectFilePath = normalizeProjectFilePath(projectFilePath);
+    m_currentProjectRootPath = QFileInfo(m_currentProjectFilePath).absolutePath();
+    m_currentProjectName = dawg::project::sanitizeProjectName(projectName);
+    m_projectDirty = false;
+    if (m_saveProjectAction)
+    {
+        m_saveProjectAction->setEnabled(false);
+    }
+    if (m_saveProjectAsAction)
+    {
+        m_saveProjectAsAction->setEnabled(true);
+    }
+
+    QSettings settings;
+    settings.setValue(QString::fromLatin1(kLastProjectPathSettingsKey), m_currentProjectFilePath);
+    updateWindowTitle();
+}
+
+QStringList MainWindow::recentProjectPaths() const
+{
+    QSettings settings;
+    const auto storedPaths = settings.value(QString::fromLatin1(kRecentProjectPathsSettingsKey)).toStringList();
+    QStringList normalizedPaths;
+    normalizedPaths.reserve(static_cast<qsizetype>(std::min(storedPaths.size(), static_cast<qsizetype>(kMaxRecentProjectCount))));
+    for (const auto& storedPath : storedPaths)
+    {
+        const auto normalizedPath = normalizeProjectFilePath(storedPath);
+        if (normalizedPath.isEmpty())
+        {
+            continue;
+        }
+
+        const auto duplicateIt = std::find_if(
+            normalizedPaths.cbegin(),
+            normalizedPaths.cend(),
+            [&normalizedPath](const QString& existingPath)
+            {
+                return projectPathMatches(existingPath, normalizedPath);
+            });
+        if (duplicateIt != normalizedPaths.cend())
+        {
+            continue;
+        }
+
+        normalizedPaths.push_back(normalizedPath);
+        if (normalizedPaths.size() >= kMaxRecentProjectCount)
+        {
+            break;
+        }
+    }
+    return normalizedPaths;
+}
+
+void MainWindow::storeRecentProjectPaths(const QStringList& projectPaths)
+{
+    QSettings settings;
+    if (projectPaths.isEmpty())
+    {
+        settings.remove(QString::fromLatin1(kRecentProjectPathsSettingsKey));
+        return;
+    }
+
+    settings.setValue(QString::fromLatin1(kRecentProjectPathsSettingsKey), projectPaths);
+}
+
+void MainWindow::addRecentProjectPath(const QString& projectFilePath)
+{
+    const auto normalizedPath = normalizeProjectFilePath(projectFilePath);
+    if (normalizedPath.isEmpty())
+    {
+        return;
+    }
+
+    auto updatedPaths = recentProjectPaths();
+    updatedPaths.erase(
+        std::remove_if(
+            updatedPaths.begin(),
+            updatedPaths.end(),
+            [&normalizedPath](const QString& existingPath)
+            {
+                return projectPathMatches(existingPath, normalizedPath);
+            }),
+        updatedPaths.end());
+    updatedPaths.push_front(normalizedPath);
+    while (updatedPaths.size() > kMaxRecentProjectCount)
+    {
+        updatedPaths.removeLast();
+    }
+
+    storeRecentProjectPaths(updatedPaths);
+    rebuildRecentProjectsMenu();
+}
+
+void MainWindow::removeRecentProjectPath(const QString& projectFilePath)
+{
+    const auto normalizedPath = normalizeProjectFilePath(projectFilePath);
+    if (normalizedPath.isEmpty())
+    {
+        return;
+    }
+
+    auto updatedPaths = recentProjectPaths();
+    const auto originalSize = updatedPaths.size();
+    updatedPaths.erase(
+        std::remove_if(
+            updatedPaths.begin(),
+            updatedPaths.end(),
+            [&normalizedPath](const QString& existingPath)
+            {
+                return projectPathMatches(existingPath, normalizedPath);
+            }),
+        updatedPaths.end());
+    if (updatedPaths.size() == originalSize)
+    {
+        return;
+    }
+
+    storeRecentProjectPaths(updatedPaths);
+    rebuildRecentProjectsMenu();
+}
+
+void MainWindow::rebuildRecentProjectsMenu()
+{
+    if (!m_openRecentMenu)
+    {
+        return;
+    }
+
+    m_openRecentMenu->clear();
+    m_openRecentMenu->setToolTipsVisible(true);
+
+    const auto storedPaths = recentProjectPaths();
+    QStringList existingPaths;
+    existingPaths.reserve(storedPaths.size());
+    for (const auto& storedPath : storedPaths)
+    {
+        if (QFileInfo::exists(storedPath))
+        {
+            existingPaths.push_back(storedPath);
+        }
+    }
+
+    if (existingPaths != storedPaths)
+    {
+        storeRecentProjectPaths(existingPaths);
+    }
+
+    if (existingPaths.isEmpty())
+    {
+        auto* placeholderAction = m_openRecentMenu->addAction(QStringLiteral("No Recent Projects"));
+        placeholderAction->setEnabled(false);
+        return;
+    }
+
+    for (const auto& projectPath : existingPaths)
+    {
+        const QFileInfo projectInfo(projectPath);
+        const auto displayName = projectInfo.completeBaseName().isEmpty()
+            ? projectInfo.fileName()
+            : projectInfo.completeBaseName();
+        const auto parentPath = QDir::toNativeSeparators(projectInfo.absolutePath());
+        auto* recentAction = m_openRecentMenu->addAction(
+            QStringLiteral("%1  -  %2").arg(displayName, parentPath));
+        recentAction->setToolTip(QDir::toNativeSeparators(projectPath));
+        recentAction->setStatusTip(QDir::toNativeSeparators(projectPath));
+        connect(recentAction, &QAction::triggered, this, [this, projectPath]()
+        {
+            static_cast<void>(openProjectFileWithPrompt(projectPath, QStringLiteral("open another project")));
+        });
+    }
+}
+
+void MainWindow::setProjectDirty(const bool dirty)
+{
+    if (!hasOpenProject() || m_projectDirty == dirty)
+    {
+        return;
+    }
+
+    m_projectDirty = dirty;
+    if (m_saveProjectAction)
+    {
+        m_saveProjectAction->setEnabled(m_projectDirty);
+    }
+    updateWindowTitle();
+}
+
+void MainWindow::updateWindowTitle()
+{
+    QStringList parts{QStringLiteral("dawg")};
+    if (!m_currentProjectName.isEmpty())
+    {
+        parts.push_back(m_currentProjectName + (m_projectDirty ? QStringLiteral("*") : QString{}));
+    }
+    if (!m_clipName.isEmpty())
+    {
+        parts.push_back(m_clipName);
+    }
+    setWindowTitle(parts.join(QStringLiteral(" - ")));
+
+    if (m_detachedVideoWindow)
+    {
+        QStringList detachedParts{QStringLiteral("Detached Video"), QStringLiteral("dawg")};
+        if (!m_currentProjectName.isEmpty())
+        {
+            detachedParts.push_back(m_currentProjectName);
+        }
+        m_detachedVideoWindow->setWindowTitle(detachedParts.join(QStringLiteral(" - ")));
+        m_detachedVideoWindow->setWindowIcon(windowIcon());
+    }
+}
+
+bool MainWindow::promptToSaveIfDirty(const QString& actionLabel)
+{
+    if (!hasOpenProject() || !m_projectDirty)
+    {
+        return true;
+    }
+
+    QMessageBox messageBox(this);
+    messageBox.setIcon(QMessageBox::Warning);
+    messageBox.setWindowTitle(QStringLiteral("Unsaved Changes"));
+    const auto projectLabel = m_currentProjectName.isEmpty() ? m_currentProjectFilePath : m_currentProjectName;
+    messageBox.setText(QStringLiteral("Do you want to save the changes made to \"%1\"?").arg(projectLabel));
+    messageBox.setInformativeText(QStringLiteral("Your changes will be lost if you don't save them before you %1.").arg(actionLabel));
+    messageBox.setStandardButtons(QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    messageBox.setDefaultButton(QMessageBox::Save);
+    const auto result = messageBox.exec();
+
+    if (result == QMessageBox::Save)
+    {
+        return saveProjectToCurrentPath();
+    }
+
+    return result == QMessageBox::Discard;
+}
+
+bool MainWindow::ensureProjectForMediaAction(const QString& actionLabel)
+{
+    if (hasOpenProject())
+    {
+        return true;
+    }
+
+    QMessageBox messageBox(this);
+    messageBox.setIcon(QMessageBox::Information);
+    messageBox.setWindowTitle(QStringLiteral("Project Required"));
+    messageBox.setText(QStringLiteral("Create or open a project before you %1.").arg(actionLabel));
+    auto* newButton = messageBox.addButton(QStringLiteral("New Project"), QMessageBox::AcceptRole);
+    auto* openButton = messageBox.addButton(QStringLiteral("Open Project"), QMessageBox::ActionRole);
+    messageBox.addButton(QStringLiteral("Cancel"), QMessageBox::RejectRole);
+    messageBox.exec();
+
+    if (messageBox.clickedButton() == newButton)
+    {
+        newProject();
+    }
+    else if (messageBox.clickedButton() == openButton)
+    {
+        openProject();
+    }
+
+    return hasOpenProject();
+}
+
+void MainWindow::applyFileDialogChrome(QFileDialog& dialog) const
+{
+    dialog.setOption(QFileDialog::DontUseNativeDialog, true);
+
+    QList<QUrl> sidebarUrls;
+    const auto addSidebarUrl = [&sidebarUrls](const QUrl& url)
+    {
+        if (!url.isValid() || sidebarUrls.contains(url))
+        {
+            return;
+        }
+
+        sidebarUrls.push_back(url);
+    };
+    const auto addSidebarLocation = [&addSidebarUrl](const QStandardPaths::StandardLocation location)
+    {
+        const auto path = QStandardPaths::writableLocation(location);
+        if (path.isEmpty())
+        {
+            return;
+        }
+
+        addSidebarUrl(QUrl::fromLocalFile(path));
+    };
+
+    addSidebarUrl(QUrl(QStringLiteral("file:///")));
+    addSidebarLocation(QStandardPaths::DesktopLocation);
+    addSidebarLocation(QStandardPaths::HomeLocation);
+    addSidebarLocation(QStandardPaths::DocumentsLocation);
+    addSidebarLocation(QStandardPaths::MoviesLocation);
+    addSidebarLocation(QStandardPaths::MusicLocation);
+    for (const auto& url : dialog.sidebarUrls())
+    {
+        addSidebarUrl(url);
+    }
+
+    if (!sidebarUrls.isEmpty())
+    {
+        dialog.setSidebarUrls(sidebarUrls);
+    }
+}
+
+QString MainWindow::chooseOpenFileName(
+    const QString& title,
+    const QString& directory,
+    const QString& filter) const
+{
+    const auto initialDirectory = directory.isEmpty() ? QString{} : directory;
+    QFileDialog dialog(const_cast<MainWindow*>(this), title, initialDirectory, filter);
+    dialog.setAcceptMode(QFileDialog::AcceptOpen);
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    applyFileDialogChrome(dialog);
+    if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty())
+    {
+        return {};
+    }
+
+    return dialog.selectedFiles().constFirst();
+}
+
+QString MainWindow::chooseExistingDirectory(const QString& title, const QString& directory) const
+{
+    const auto initialDirectory = directory.isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::DesktopLocation)
+        : directory;
+    QFileDialog dialog(const_cast<MainWindow*>(this), title, initialDirectory);
+    dialog.setAcceptMode(QFileDialog::AcceptOpen);
+    dialog.setFileMode(QFileDialog::Directory);
+    dialog.setOption(QFileDialog::ShowDirsOnly, true);
+    applyFileDialogChrome(dialog);
+    if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty())
+    {
+        return {};
+    }
+
+    return dialog.selectedFiles().constFirst();
+}
+
+std::optional<QString> MainWindow::copyMediaIntoProject(
+    const QString& sourcePath,
+    const QString& subdirectory,
+    QString* errorMessage) const
+{
+    if (!hasOpenProject())
+    {
+        if (errorMessage)
+        {
+            *errorMessage = QStringLiteral("No project is open.");
+        }
+        return std::nullopt;
+    }
+
+    const QFileInfo sourceInfo(sourcePath);
+    if (!sourceInfo.exists() || !sourceInfo.isFile())
+    {
+        if (errorMessage)
+        {
+            *errorMessage = QStringLiteral("Media file does not exist: %1").arg(sourcePath);
+        }
+        return std::nullopt;
+    }
+
+    const auto targetDirectoryPath = QDir(m_currentProjectRootPath).filePath(subdirectory);
+    QDir rootDirectory(m_currentProjectRootPath);
+    if (!rootDirectory.mkpath(subdirectory))
+    {
+        if (errorMessage)
+        {
+            *errorMessage = QStringLiteral("Failed to create project folder %1.").arg(targetDirectoryPath);
+        }
+        return std::nullopt;
+    }
+
+    if (pathIsInsideRoot(targetDirectoryPath, sourceInfo.absoluteFilePath()))
+    {
+        return QDir::cleanPath(sourceInfo.absoluteFilePath());
+    }
+
+    const auto targetPath = uniqueTargetFilePath(targetDirectoryPath, sourceInfo.absoluteFilePath());
+    if (!QFile::copy(sourceInfo.absoluteFilePath(), targetPath))
+    {
+        if (errorMessage)
+        {
+            *errorMessage = QStringLiteral("Failed to copy %1 into the project.")
+                .arg(sourceInfo.fileName());
+        }
+        return std::nullopt;
+    }
+
+    return QDir::cleanPath(targetPath);
+}
+
+dawg::project::UiState MainWindow::snapshotProjectUiState() const
+{
+    dawg::project::UiState state;
+    state.videoDetached = m_videoDetached;
+    state.detachedVideoWindowGeometry = m_videoDetached && m_detachedVideoWindow
+                                            ? m_detachedVideoWindow->saveGeometry()
+                                            : m_detachedVideoWindowGeometry;
+    state.timelineVisible = m_timelinePanel && m_timelinePanel->isVisible();
+    state.clipEditorVisible = m_clipEditorPanel && m_clipEditorPanel->isVisible();
+    state.mixVisible = m_mixPanel && m_mixPanel->isVisible();
+    state.audioPoolVisible = m_audioPoolPanel && m_audioPoolPanel->isVisible();
+    state.audioPoolShowLength = m_audioPoolShowLength;
+    state.audioPoolShowSize = m_audioPoolShowSize;
+    state.showAllNodeNames = m_showAllNodeNamesAction && m_showAllNodeNamesAction->isChecked();
+    state.timelineClickSeeks = m_timelineClickSeeksAction && m_timelineClickSeeksAction->isChecked();
+    state.audioPoolPreferredWidth = m_audioPoolPreferredWidth;
+    state.timelinePreferredHeight = m_timelinePreferredHeight;
+    state.clipEditorPreferredHeight = m_clipEditorPreferredHeight;
+    state.mixPreferredHeight = m_mixPreferredHeight;
+    state.windowGeometry = saveGeometry();
+    state.windowMaximized = isMaximized();
+    if (m_contentSplitter)
+    {
+        const auto sizes = m_contentSplitter->sizes();
+        state.contentSplitterSizes.reserve(static_cast<std::size_t>(sizes.size()));
+        for (const auto size : sizes)
+        {
+            state.contentSplitterSizes.push_back(size);
+        }
+    }
+    if (m_mainVerticalSplitter)
+    {
+        const auto sizes = m_mainVerticalSplitter->sizes();
+        state.mainVerticalSplitterSizes.reserve(static_cast<std::size_t>(sizes.size()));
+        auto persistedSizes = sizes;
+        if (m_videoDetached && persistedSizes.size() == 4)
+        {
+            persistedSizes[0] = std::max(400, m_canvasPanel ? m_canvasPanel->height() : 400);
+        }
+        for (const auto size : persistedSizes)
+        {
+            state.mainVerticalSplitterSizes.push_back(size);
+        }
+    }
+    return state;
+}
+
+void MainWindow::applyProjectUiState(const dawg::project::UiState& state)
+{
+    m_projectStateChangeInProgress = true;
+    m_detachedVideoWindowGeometry = state.detachedVideoWindowGeometry;
+    m_audioPoolPreferredWidth = std::max(240, state.audioPoolPreferredWidth);
+    m_audioPoolShowLength = state.audioPoolShowLength;
+    m_audioPoolShowSize = state.audioPoolShowSize;
+    m_timelinePreferredHeight = std::max(96, state.timelinePreferredHeight);
+    m_clipEditorPreferredHeight = std::max(148, state.clipEditorPreferredHeight);
+    m_mixPreferredHeight = std::max(132, state.mixPreferredHeight);
+
+    if (!state.windowGeometry.isEmpty())
+    {
+        restoreGeometry(state.windowGeometry);
+    }
+    if (state.windowMaximized)
+    {
+        showMaximized();
+    }
+    else if (isMaximized())
+    {
+        showNormal();
+    }
+
+    if (m_showAllNodeNamesAction)
+    {
+        const QSignalBlocker blocker{m_showAllNodeNamesAction};
+        m_showAllNodeNamesAction->setChecked(state.showAllNodeNames);
+    }
+    m_canvas->setShowAllLabels(state.showAllNodeNames);
+    if (m_nativeViewport)
+    {
+        m_nativeViewport->setShowAllLabels(state.showAllNodeNames);
+    }
+
+    if (m_timelineClickSeeksAction)
+    {
+        const QSignalBlocker blocker{m_timelineClickSeeksAction};
+        m_timelineClickSeeksAction->setChecked(state.timelineClickSeeks);
+    }
+    if (m_timeline)
+    {
+        m_timeline->setSeekOnClickEnabled(state.timelineClickSeeks);
+    }
+
+    updateTimelineVisibility(state.timelineVisible);
+    updateClipEditorVisibility(state.clipEditorVisible);
+    updateMixVisibility(state.mixVisible);
+    updateAudioPoolVisibility(state.audioPoolVisible);
+    refreshAudioPool();
+
+    if (m_contentSplitter && state.contentSplitterSizes.size() == 2)
+    {
+        QList<int> sizes;
+        for (const auto size : state.contentSplitterSizes)
+        {
+            sizes.push_back(size);
+        }
+        m_contentSplitter->setSizes(sizes);
+    }
+    if (m_mainVerticalSplitter && state.mainVerticalSplitterSizes.size() == 4)
+    {
+        QList<int> sizes;
+        for (const auto size : state.mainVerticalSplitterSizes)
+        {
+            sizes.push_back(size);
+        }
+        m_mainVerticalSplitter->setSizes(sizes);
+    }
+    else
+    {
+        syncMainVerticalPanelSizes();
+    }
+
+    if (state.videoDetached != m_videoDetached)
+    {
+        if (state.videoDetached)
+        {
+            detachVideo();
+        }
+        else
+        {
+            attachVideo();
+        }
+    }
+
+    m_projectStateChangeInProgress = false;
+}
+
+bool MainWindow::saveProjectToPath(const QString& projectFilePath, const QString& projectName)
+{
+    if (projectFilePath.isEmpty())
+    {
+        return false;
+    }
+
+    auto controllerState = m_controller->snapshotProjectState();
+    const auto projectRootPath = QFileInfo(projectFilePath).absolutePath();
+    const QDir projectRoot(projectRootPath);
+
+    const auto makeRelativePath = [&projectRootPath, &projectRoot](const QString& path, QString* errorMessage) -> std::optional<QString>
+    {
+        if (path.isEmpty())
+        {
+            return QString{};
+        }
+
+        const auto cleanedPath = QDir::cleanPath(QDir::fromNativeSeparators(path));
+        const auto absolutePath = QFileInfo(cleanedPath).isAbsolute()
+            ? QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(cleanedPath).absoluteFilePath()))
+            : QDir::cleanPath(QDir::fromNativeSeparators(projectRoot.absoluteFilePath(cleanedPath)));
+        const auto relativePath = QDir::cleanPath(QDir::fromNativeSeparators(projectRoot.relativeFilePath(absolutePath)));
+        const auto escapesProjectRoot =
+            relativePath == QStringLiteral("..")
+            || relativePath.startsWith(QStringLiteral("../"))
+            || QDir::isAbsolutePath(relativePath);
+        if (escapesProjectRoot)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = QStringLiteral("Project media is outside the project folder: %1").arg(absolutePath);
+            }
+            return std::nullopt;
+        }
+        return relativePath;
+    };
+
+    QString errorMessage;
+    if (const auto relativeVideoPath = makeRelativePath(controllerState.videoPath, &errorMessage); relativeVideoPath.has_value())
+    {
+        controllerState.videoPath = *relativeVideoPath;
+    }
+    else
+    {
+        QMessageBox::warning(this, QStringLiteral("Save Project"), errorMessage);
+        return false;
+    }
+
+    for (auto& assetPath : controllerState.audioPoolAssetPaths)
+    {
+        const auto relativeAssetPath = makeRelativePath(assetPath, &errorMessage);
+        if (!relativeAssetPath.has_value())
+        {
+            QMessageBox::warning(this, QStringLiteral("Save Project"), errorMessage);
+            return false;
+        }
+        assetPath = *relativeAssetPath;
+    }
+
+    for (auto& track : controllerState.trackerState.tracks)
+    {
+        if (!track.attachedAudio.has_value())
+        {
+            continue;
+        }
+        const auto relativeAssetPath = makeRelativePath(track.attachedAudio->assetPath, &errorMessage);
+        if (!relativeAssetPath.has_value())
+        {
+            QMessageBox::warning(this, QStringLiteral("Save Project"), errorMessage);
+            return false;
+        }
+        track.attachedAudio->assetPath = *relativeAssetPath;
+    }
+
+    const dawg::project::Document document{
+        .name = dawg::project::sanitizeProjectName(projectName),
+        .controller = controllerState,
+        .ui = snapshotProjectUiState()
+    };
+
+    if (!dawg::project::saveDocument(projectFilePath, document, &errorMessage))
+    {
+        QMessageBox::warning(this, QStringLiteral("Save Project"), errorMessage);
+        return false;
+    }
+
+    setCurrentProject(projectFilePath, document.name);
+    addRecentProjectPath(projectFilePath);
+    setProjectDirty(false);
+    showStatus(QStringLiteral("Saved project %1.").arg(document.name));
+    return true;
+}
+
+bool MainWindow::saveProjectToCurrentPath()
+{
+    if (!hasOpenProject())
+    {
+        return false;
+    }
+
+    return saveProjectToPath(m_currentProjectFilePath, m_currentProjectName);
+}
+
+bool MainWindow::createProjectAt(const QString& projectName, const QString& parentDirectory)
+{
+    const auto sanitizedProjectName = dawg::project::sanitizeProjectName(projectName);
+    const auto projectRootPath = QDir(parentDirectory).filePath(sanitizedProjectName);
+    QDir projectRoot(projectRootPath);
+    if (projectRoot.exists() && !projectRoot.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty())
+    {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("New Project"),
+            QStringLiteral("Project folder already exists and is not empty:\n%1").arg(projectRootPath));
+        return false;
+    }
+
+    if (!QDir().mkpath(projectRoot.filePath(QStringLiteral("audio")))
+        || !QDir().mkpath(projectRoot.filePath(QStringLiteral("video")))
+        || !QDir().mkpath(projectRoot.filePath(QStringLiteral("settings"))))
+    {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("New Project"),
+            QStringLiteral("Failed to create project folders in:\n%1").arg(projectRootPath));
+        return false;
+    }
+
+    const auto projectFilePath = projectRoot.filePath(dawg::project::projectFileNameForName(sanitizedProjectName));
+    m_projectStateChangeInProgress = true;
+    m_controller->resetProjectState();
+    m_projectStateChangeInProgress = false;
+    setCurrentProject(projectFilePath, sanitizedProjectName);
+    if (!saveProjectToPath(projectFilePath, sanitizedProjectName))
+    {
+        clearCurrentProject();
+        return false;
+    }
+    return true;
+}
+
+bool MainWindow::openProjectFileWithPrompt(const QString& projectFilePath, const QString& actionLabel)
+{
+    const auto normalizedProjectPath = normalizeProjectFilePath(projectFilePath);
+    if (normalizedProjectPath.isEmpty())
+    {
+        return false;
+    }
+
+    if (!promptToSaveIfDirty(actionLabel))
+    {
+        return false;
+    }
+
+    if (hasOpenProject() && !m_projectDirty && !saveProjectToCurrentPath())
+    {
+        return false;
+    }
+
+    if (!QFileInfo::exists(normalizedProjectPath))
+    {
+        removeRecentProjectPath(normalizedProjectPath);
+        QMessageBox::warning(
+            this,
+            QStringLiteral("Open Project"),
+            QStringLiteral("Project file not found:\n%1").arg(QDir::toNativeSeparators(normalizedProjectPath)));
+        return false;
+    }
+
+    return loadProjectFile(normalizedProjectPath);
+}
+
+bool MainWindow::loadProjectFile(const QString& projectFilePath)
+{
+    QString errorMessage;
+    const auto document = dawg::project::loadDocument(projectFilePath, &errorMessage);
+    if (!document.has_value())
+    {
+        QMessageBox::warning(this, QStringLiteral("Open Project"), errorMessage);
+        return false;
+    }
+
+    auto absoluteControllerState = document->controller;
+    const auto projectRootPath = QFileInfo(projectFilePath).absolutePath();
+    const QDir projectRoot(projectRootPath);
+
+    const auto makeAbsolutePath = [&projectRoot](const QString& relativePath) -> QString
+    {
+        if (relativePath.isEmpty())
+        {
+            return {};
+        }
+        return QDir::cleanPath(projectRoot.absoluteFilePath(relativePath));
+    };
+
+    absoluteControllerState.videoPath = makeAbsolutePath(absoluteControllerState.videoPath);
+    for (auto& assetPath : absoluteControllerState.audioPoolAssetPaths)
+    {
+        assetPath = makeAbsolutePath(assetPath);
+    }
+    for (auto& track : absoluteControllerState.trackerState.tracks)
+    {
+        if (track.attachedAudio.has_value())
+        {
+            track.attachedAudio->assetPath = makeAbsolutePath(track.attachedAudio->assetPath);
+        }
+    }
+
+    QString recoveryMessage;
+    const auto recoveredMediaFromFolders =
+        recoverProjectMediaFromFolders(&absoluteControllerState, projectRootPath, &recoveryMessage);
+
+    m_projectStateChangeInProgress = true;
+    const auto restored = m_controller->restoreProjectState(absoluteControllerState, &errorMessage);
+    if (restored)
+    {
+        applyProjectUiState(document->ui);
+        setCurrentProject(projectFilePath, document->name);
+        addRecentProjectPath(projectFilePath);
+        setProjectDirty(false);
+        if (recoveredMediaFromFolders)
+        {
+            setProjectDirty(true);
+        }
+    }
+    m_projectStateChangeInProgress = false;
+
+    if (!restored)
+    {
+        QMessageBox::warning(this, QStringLiteral("Open Project"), errorMessage);
+        return false;
+    }
+
+    showStatus(
+        recoveredMediaFromFolders
+            ? QStringLiteral("Opened project %1. %2").arg(document->name, recoveryMessage)
+            : QStringLiteral("Opened project %1.").arg(document->name));
+    return true;
+}
+
+bool MainWindow::saveProjectAsNewCopy()
+{
+    if (!hasOpenProject())
+    {
+        return false;
+    }
+
+    bool ok = false;
+    const auto projectName = QInputDialog::getText(
+        this,
+        QStringLiteral("Save Project As"),
+        QStringLiteral("Project name:"),
+        QLineEdit::Normal,
+        m_currentProjectName,
+        &ok);
+    if (!ok)
+    {
+        return false;
+    }
+
+    const auto sanitizedProjectName = dawg::project::sanitizeProjectName(projectName);
+    const auto parentDirectory = chooseExistingDirectory(QStringLiteral("Choose Destination Folder"));
+    if (parentDirectory.isEmpty())
+    {
+        return false;
+    }
+
+    const auto targetRootPath = QDir(parentDirectory).filePath(sanitizedProjectName);
+    QDir targetRoot(targetRootPath);
+    if (targetRoot.exists() && !targetRoot.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty())
+    {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("Save Project As"),
+            QStringLiteral("Destination folder already exists and is not empty:\n%1").arg(targetRootPath));
+        return false;
+    }
+
+    if (!QDir().mkpath(targetRoot.filePath(QStringLiteral("audio")))
+        || !QDir().mkpath(targetRoot.filePath(QStringLiteral("video")))
+        || !QDir().mkpath(targetRoot.filePath(QStringLiteral("settings"))))
+    {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("Save Project As"),
+            QStringLiteral("Failed to create destination project folders."));
+        return false;
+    }
+
+    auto controllerState = m_controller->snapshotProjectState();
+    QHash<QString, QString> copiedAudioPaths;
+    QString errorMessage;
+
+    const auto copyIntoTargetProject = [&targetRootPath](const QString& sourcePath, const QString& subdirectory, QString* error) -> std::optional<QString>
+    {
+        if (sourcePath.isEmpty())
+        {
+            return QString{};
+        }
+
+        const QFileInfo sourceInfo(sourcePath);
+        if (!sourceInfo.exists() || !sourceInfo.isFile())
+        {
+            if (error)
+            {
+                *error = QStringLiteral("Missing project media: %1").arg(sourcePath);
+            }
+            return std::nullopt;
+        }
+
+        const auto targetDirectoryPath = QDir(targetRootPath).filePath(subdirectory);
+        const auto targetPath = uniqueTargetFilePath(targetDirectoryPath, sourceInfo.absoluteFilePath());
+        if (!QFile::copy(sourceInfo.absoluteFilePath(), targetPath))
+        {
+            if (error)
+            {
+                *error = QStringLiteral("Failed to copy %1 to the new project.").arg(sourceInfo.fileName());
+            }
+            return std::nullopt;
+        }
+        return QDir::cleanPath(targetPath);
+    };
+
+    if (!controllerState.videoPath.isEmpty())
+    {
+        const auto copiedVideoPath = copyIntoTargetProject(controllerState.videoPath, QStringLiteral("video"), &errorMessage);
+        if (!copiedVideoPath.has_value())
+        {
+            QMessageBox::warning(this, QStringLiteral("Save Project As"), errorMessage);
+            return false;
+        }
+        controllerState.videoPath = *copiedVideoPath;
+    }
+
+    for (auto& assetPath : controllerState.audioPoolAssetPaths)
+    {
+        const auto existingIt = copiedAudioPaths.constFind(assetPath);
+        if (existingIt != copiedAudioPaths.cend())
+        {
+            assetPath = existingIt.value();
+            continue;
+        }
+
+        const auto copiedAudioPath = copyIntoTargetProject(assetPath, QStringLiteral("audio"), &errorMessage);
+        if (!copiedAudioPath.has_value())
+        {
+            QMessageBox::warning(this, QStringLiteral("Save Project As"), errorMessage);
+            return false;
+        }
+        copiedAudioPaths.insert(assetPath, *copiedAudioPath);
+        assetPath = *copiedAudioPath;
+    }
+
+    for (auto& track : controllerState.trackerState.tracks)
+    {
+        if (!track.attachedAudio.has_value())
+        {
+            continue;
+        }
+
+        const auto existingIt = copiedAudioPaths.constFind(track.attachedAudio->assetPath);
+        if (existingIt != copiedAudioPaths.cend())
+        {
+            track.attachedAudio->assetPath = existingIt.value();
+            continue;
+        }
+
+        const auto copiedAudioPath = copyIntoTargetProject(track.attachedAudio->assetPath, QStringLiteral("audio"), &errorMessage);
+        if (!copiedAudioPath.has_value())
+        {
+            QMessageBox::warning(this, QStringLiteral("Save Project As"), errorMessage);
+            return false;
+        }
+        copiedAudioPaths.insert(track.attachedAudio->assetPath, *copiedAudioPath);
+        track.attachedAudio->assetPath = *copiedAudioPath;
+    }
+
+    const auto targetProjectFilePath = targetRoot.filePath(dawg::project::projectFileNameForName(sanitizedProjectName));
+    const auto currentUiState = snapshotProjectUiState();
+    const auto relativeRoot = QDir(targetRootPath);
+    auto relativeControllerState = controllerState;
+    relativeControllerState.videoPath = controllerState.videoPath.isEmpty()
+        ? QString{}
+        : QDir::cleanPath(relativeRoot.relativeFilePath(controllerState.videoPath));
+    for (auto& assetPath : relativeControllerState.audioPoolAssetPaths)
+    {
+        assetPath = QDir::cleanPath(relativeRoot.relativeFilePath(assetPath));
+    }
+    for (auto& track : relativeControllerState.trackerState.tracks)
+    {
+        if (track.attachedAudio.has_value())
+        {
+            track.attachedAudio->assetPath = QDir::cleanPath(relativeRoot.relativeFilePath(track.attachedAudio->assetPath));
+        }
+    }
+
+    const dawg::project::Document document{
+        .name = sanitizedProjectName,
+        .controller = relativeControllerState,
+        .ui = currentUiState
+    };
+    if (!dawg::project::saveDocument(targetProjectFilePath, document, &errorMessage))
+    {
+        QMessageBox::warning(this, QStringLiteral("Save Project As"), errorMessage);
+        return false;
+    }
+
+    m_projectStateChangeInProgress = true;
+    const auto restored = m_controller->restoreProjectState(controllerState, &errorMessage);
+    m_projectStateChangeInProgress = false;
+    if (!restored)
+    {
+        QMessageBox::warning(this, QStringLiteral("Save Project As"), errorMessage);
+        return false;
+    }
+
+    setCurrentProject(targetProjectFilePath, sanitizedProjectName);
+    addRecentProjectPath(targetProjectFilePath);
+    setProjectDirty(false);
+    showStatus(QStringLiteral("Saved project copy as %1.").arg(sanitizedProjectName));
+    return true;
+}
+
+void MainWindow::restoreLastProjectOnStartup()
+{
+    QSettings settings;
+    const auto lastProjectPath = settings.value(QString::fromLatin1(kLastProjectPathSettingsKey)).toString();
+    if (lastProjectPath.isEmpty())
+    {
+        updateWindowTitle();
+        return;
+    }
+
+    if (!QFileInfo::exists(lastProjectPath) || !loadProjectFile(lastProjectPath))
+    {
+        settings.remove(QString::fromLatin1(kLastProjectPathSettingsKey));
+        removeRecentProjectPath(lastProjectPath);
+        clearCurrentProject();
+    }
+}
+
+void MainWindow::newProject()
+{
+    if (!promptToSaveIfDirty(QStringLiteral("create a new project")))
+    {
+        return;
+    }
+
+    if (hasOpenProject() && !m_projectDirty && !saveProjectToCurrentPath())
+    {
+        return;
+    }
+
+    bool ok = false;
+    const auto projectName = QInputDialog::getText(
+        this,
+        QStringLiteral("New Project"),
+        QStringLiteral("Project name:"),
+        QLineEdit::Normal,
+        QStringLiteral("Untitled Project"),
+        &ok);
+    if (!ok)
+    {
+        return;
+    }
+
+    const auto parentDirectory = chooseExistingDirectory(QStringLiteral("Choose Project Location"));
+    if (parentDirectory.isEmpty())
+    {
+        return;
+    }
+
+    static_cast<void>(createProjectAt(projectName, parentDirectory));
+}
+
+void MainWindow::openProject()
+{
+    if (!promptToSaveIfDirty(QStringLiteral("open another project")))
+    {
+        return;
+    }
+
+    if (hasOpenProject() && !m_projectDirty && !saveProjectToCurrentPath())
+    {
+        return;
+    }
+
+    const auto projectFilePath = chooseOpenFileName(
+        QStringLiteral("Open Project"),
+        {},
+        QStringLiteral("DAWG Projects (*%1)").arg(QString::fromLatin1(dawg::project::kProjectFileSuffix)));
+    if (projectFilePath.isEmpty())
+    {
+        return;
+    }
+
+    static_cast<void>(openProjectFileWithPrompt(projectFilePath, QStringLiteral("open another project")));
+}
+
+void MainWindow::saveProject()
+{
+    static_cast<void>(saveProjectToCurrentPath());
+}
+
+void MainWindow::saveProjectAs()
+{
+    static_cast<void>(saveProjectAsNewCopy());
+}
+
 void MainWindow::openVideo()
 {
-    const auto filePath = QFileDialog::getOpenFileName(
-        this,
-        QStringLiteral("Open Video"),
-        {},
+    if (!ensureProjectForMediaAction(QStringLiteral("import a video")))
+    {
+        return;
+    }
+
+    const auto currentProjectState = m_controller->snapshotProjectState();
+    if (m_controller->hasVideoLoaded()
+        || !currentProjectState.audioPoolAssetPaths.empty()
+        || !currentProjectState.trackerState.tracks.empty())
+    {
+        const auto choice = QMessageBox::question(
+            this,
+            QStringLiteral("Replace Project Video"),
+            QStringLiteral("Opening a new video will clear the current nodes and audio pool for this project. Continue?"),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (choice != QMessageBox::Yes)
+        {
+            return;
+        }
+    }
+
+    const auto filePath = chooseOpenFileName(
+        QStringLiteral("Import Video"),
+        QStandardPaths::writableLocation(QStandardPaths::MoviesLocation),
         QStringLiteral("Video Files (*.mp4 *.mov *.mkv *.avi);;All Files (*.*)"));
 
     if (filePath.isEmpty())
@@ -904,24 +2413,39 @@ void MainWindow::openVideo()
         return;
     }
 
-    if (m_controller->openVideo(filePath))
+    QString errorMessage;
+    const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("video"), &errorMessage);
+    if (!copiedFilePath.has_value())
     {
-        populateAudioPoolFromLocalDevDirectory();
+        QMessageBox::warning(this, QStringLiteral("Import Video"), errorMessage);
+        return;
+    }
+
+    m_projectStateChangeInProgress = true;
+    const auto opened = m_controller->openVideo(*copiedFilePath);
+    m_projectStateChangeInProgress = false;
+    if (opened)
+    {
+        setProjectDirty(true);
     }
 }
 
 void MainWindow::importSound()
 {
-    if (!m_controller->hasSelection())
+    if (!ensureProjectForMediaAction(QStringLiteral("import audio")))
     {
-        showStatus(QStringLiteral("Select a node before importing sound."));
         return;
     }
 
-    const auto filePath = QFileDialog::getOpenFileName(
-        this,
-        QStringLiteral("Import Sound"),
-        {},
+    if (!m_controller->hasSelection())
+    {
+        showStatus(QStringLiteral("Select a node before importing audio."));
+        return;
+    }
+
+    const auto filePath = chooseOpenFileName(
+        QStringLiteral("Import Audio"),
+        QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
         QStringLiteral("Audio Files (*.wav *.mp3 *.flac *.aif *.aiff *.m4a *.aac *.ogg);;All Files (*.*)"));
 
     if (filePath.isEmpty())
@@ -929,15 +2453,27 @@ void MainWindow::importSound()
         return;
     }
 
-    m_controller->importSoundForSelectedTrack(filePath);
+    QString errorMessage;
+    const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("audio"), &errorMessage);
+    if (!copiedFilePath.has_value())
+    {
+        QMessageBox::warning(this, QStringLiteral("Import Audio"), errorMessage);
+        return;
+    }
+
+    m_controller->importSoundForSelectedTrack(*copiedFilePath);
 }
 
 void MainWindow::importAudioToPool()
 {
-    const auto filePath = QFileDialog::getOpenFileName(
-        this,
-        QStringLiteral("Import Audio To Pool"),
-        {},
+    if (!ensureProjectForMediaAction(QStringLiteral("import audio")))
+    {
+        return;
+    }
+
+    const auto filePath = chooseOpenFileName(
+        QStringLiteral("Import Audio"),
+        QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
         QStringLiteral("Audio Files (*.wav *.mp3 *.flac *.aif *.aiff *.m4a *.aac *.ogg);;All Files (*.*)"));
 
     if (filePath.isEmpty())
@@ -945,9 +2481,17 @@ void MainWindow::importAudioToPool()
         return;
     }
 
-    if (m_controller->importAudioToPool(filePath))
+    QString errorMessage;
+    const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("audio"), &errorMessage);
+    if (!copiedFilePath.has_value())
     {
-        showStatus(QStringLiteral("Imported %1 to the audio pool.").arg(QFileInfo(filePath).fileName()));
+        QMessageBox::warning(this, QStringLiteral("Import Audio"), errorMessage);
+        return;
+    }
+
+    if (m_controller->importAudioToPool(*copiedFilePath))
+    {
+        showStatus(QStringLiteral("Imported %1 to the audio pool.").arg(QFileInfo(*copiedFilePath).fileName()));
     }
 }
 
@@ -1118,11 +2662,13 @@ void MainWindow::updateFrame(const QImage& image, const int frameIndex, const do
     {
         m_nativeViewport->setPresentedFrame(image, m_controller->currentVideoFrame(), m_controller->videoFrameSize());
     }
-    m_timeline->setCurrentFrame(frameIndex);
+    const auto displayFrameIndex = std::max(0, frameIndex);
+    const auto displayTimestampSeconds = std::max(0.0, timestampSeconds);
+    m_timeline->setCurrentFrame(displayFrameIndex);
     m_frameLabel->setText(
         QStringLiteral("Frame %1  |  %2 s")
-            .arg(frameIndex)
-            .arg(timestampSeconds, 0, 'f', 2));
+            .arg(displayFrameIndex)
+            .arg(displayTimestampSeconds, 0, 'f', 2));
     if (m_audioPoolPanel && m_audioPoolPanel->isVisible())
     {
         updateAudioPoolPlaybackIndicators();
@@ -1286,7 +2832,14 @@ void MainWindow::handleVideoLoaded(const QString& filePath, const int totalFrame
 {
     const QFileInfo fileInfo{filePath};
     m_clipName = fileInfo.fileName();
-    m_timeline->setTimeline(totalFrames, fps);
+    if (filePath.isEmpty())
+    {
+        m_timeline->clear();
+    }
+    else
+    {
+        m_timeline->setTimeline(totalFrames, fps);
+    }
     if (m_nativeViewportWindow)
     {
         m_nativeViewportWindow->setWindowTitle(QStringLiteral("Native Video Viewport Test - %1").arg(m_clipName));
@@ -1298,8 +2851,12 @@ void MainWindow::handleVideoLoaded(const QString& filePath, const int totalFrame
     }
     refreshTimeline();
     refreshClipEditor();
-    showCanvasTipsOverlay();
+    if (!filePath.isEmpty())
+    {
+        showCanvasTipsOverlay();
+    }
     updateDebugText();
+    updateWindowTitle();
 }
 
 void MainWindow::updateDebugVisibility(const bool enabled)
@@ -1454,6 +3011,93 @@ void MainWindow::updateMixVisibility(const bool visible)
     }
 }
 
+void MainWindow::detachVideo()
+{
+    if (m_videoDetached || !m_canvas || !m_canvasPanel || !m_detachedVideoWindow)
+    {
+        return;
+    }
+
+    if (auto* panelLayout = qobject_cast<QVBoxLayout*>(m_canvasPanel->layout()))
+    {
+        panelLayout->removeWidget(m_canvas);
+    }
+    if (auto* detachedLayout = qobject_cast<QVBoxLayout*>(m_detachedVideoWindow->layout()))
+    {
+        detachedLayout->addWidget(m_canvas, 1);
+    }
+
+    if (!m_detachedVideoWindowGeometry.isEmpty())
+    {
+        m_detachedVideoWindow->restoreGeometry(m_detachedVideoWindowGeometry);
+    }
+    else
+    {
+        const auto canvasSize = m_canvasPanel->size().isValid() ? m_canvasPanel->size() : QSize{960, 540};
+        m_detachedVideoWindow->resize(canvasSize.expandedTo(QSize{640, 360}));
+    }
+    m_canvasPanel->hide();
+    m_videoDetached = true;
+    updateDetachedVideoUiState();
+    syncMainVerticalPanelSizes();
+    m_detachedVideoWindow->show();
+    m_detachedVideoWindow->raise();
+    m_detachedVideoWindow->activateWindow();
+    if (!m_projectStateChangeInProgress && hasOpenProject())
+    {
+        setProjectDirty(true);
+    }
+    if (!m_projectStateChangeInProgress)
+    {
+        showStatus(QStringLiteral("Video detached."));
+    }
+}
+
+void MainWindow::attachVideo()
+{
+    if (!m_videoDetached || !m_canvas || !m_canvasPanel || !m_detachedVideoWindow)
+    {
+        return;
+    }
+
+    m_detachedVideoWindowGeometry = m_detachedVideoWindow->saveGeometry();
+
+    if (auto* detachedLayout = qobject_cast<QVBoxLayout*>(m_detachedVideoWindow->layout()))
+    {
+        detachedLayout->removeWidget(m_canvas);
+    }
+    if (auto* panelLayout = qobject_cast<QVBoxLayout*>(m_canvasPanel->layout()))
+    {
+        panelLayout->addWidget(m_canvas, 1);
+    }
+
+    m_detachedVideoWindow->hide();
+    m_canvasPanel->show();
+    m_videoDetached = false;
+    updateDetachedVideoUiState();
+    syncMainVerticalPanelSizes();
+    m_canvas->setFocus(Qt::OtherFocusReason);
+    if (!m_projectStateChangeInProgress && hasOpenProject())
+    {
+        setProjectDirty(true);
+    }
+    if (!m_projectStateChangeInProgress)
+    {
+        showStatus(QStringLiteral("Video attached."));
+    }
+}
+
+void MainWindow::updateDetachedVideoUiState()
+{
+    if (m_detachVideoAction)
+    {
+        m_detachVideoAction->setText(m_videoDetached
+                                        ? QStringLiteral("Attach Video")
+                                        : QStringLiteral("Detach Video"));
+        m_detachVideoAction->setEnabled(m_canvas != nullptr);
+    }
+}
+
 void MainWindow::syncMainVerticalPanelSizes()
 {
     if (!m_mainVerticalSplitter)
@@ -1479,7 +3123,8 @@ void MainWindow::syncMainVerticalPanelSizes()
         PanelTarget{mixVisible, m_mixPreferredHeight, 132, 0}
     }};
 
-    const auto canvasMinimum = 220;
+    const auto videoAttached = m_canvasPanel && m_canvasPanel->isVisible() && !m_videoDetached;
+    const auto canvasMinimum = videoAttached ? 220 : 0;
     const auto availableForPanels = std::max(0, totalHeight - canvasMinimum);
     int assignedTotal = 0;
     for (auto& panel : panels)
@@ -1519,9 +3164,9 @@ void MainWindow::syncMainVerticalPanelSizes()
         }
     }
 
-    const auto canvasHeight = std::max(
-        200,
-        totalHeight - panels[0].assigned - panels[1].assigned - panels[2].assigned);
+    const auto canvasHeight = videoAttached
+        ? std::max(200, totalHeight - panels[0].assigned - panels[1].assigned - panels[2].assigned)
+        : 0;
     m_mainVerticalSplitter->setSizes({canvasHeight, panels[0].assigned, panels[1].assigned, panels[2].assigned});
 }
 
@@ -1608,6 +3253,20 @@ void MainWindow::refreshAudioPool()
                 : QStringLiteral("color: #9ea9b7; font-size: 8.5pt; padding: 0; margin: 0;"));
         nameLabel->setToolTip(item.connectionSummary);
 
+        auto* lengthLabel = new QLabel(formatAudioPoolDuration(item.durationMs), row);
+        lengthLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+        lengthLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        lengthLabel->setFixedWidth(56);
+        lengthLabel->setVisible(m_audioPoolShowLength);
+        lengthLabel->setStyleSheet(QStringLiteral("color: #91a0b1; font-size: 8pt; padding: 0; margin: 0;"));
+
+        auto* sizeLabel = new QLabel(formatAudioPoolSize(item.fileSizeBytes), row);
+        sizeLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+        sizeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        sizeLabel->setFixedWidth(64);
+        sizeLabel->setVisible(m_audioPoolShowSize);
+        sizeLabel->setStyleSheet(QStringLiteral("color: #91a0b1; font-size: 8pt; padding: 0; margin: 0;"));
+
         auto* editButton = new QToolButton(row);
         editButton->setCursor(Qt::PointingHandCursor);
         editButton->setText(QStringLiteral("\u2630"));
@@ -1660,6 +3319,8 @@ void MainWindow::refreshAudioPool()
 
         rowLayout->addWidget(statusDot, 0, Qt::AlignVCenter);
         rowLayout->addWidget(nameLabel, 1);
+        rowLayout->addWidget(lengthLabel, 0, Qt::AlignVCenter);
+        rowLayout->addWidget(sizeLabel, 0, Qt::AlignVCenter);
         rowLayout->addWidget(editButton, 0, Qt::AlignVCenter);
         m_audioPoolListLayout->addWidget(row);
     }
@@ -2111,6 +3772,29 @@ bool MainWindow::shouldApplyNodeShortcutToAll() const
         && m_controller->hasTracks();
 }
 
+void MainWindow::adjustTrackMixGainFromWheel(const QUuid& trackId, const int wheelDelta, const QPoint& globalPosition)
+{
+    if (trackId.isNull() || wheelDelta == 0)
+    {
+        return;
+    }
+
+    const auto deltaDb = static_cast<float>(wheelDelta) / 120.0F;
+    const auto nextGainDb = m_controller->adjustMixLaneGainForTrack(trackId, deltaDb);
+    if (!nextGainDb.has_value())
+    {
+        return;
+    }
+
+    refreshMixView();
+    if (!m_projectStateChangeInProgress && hasOpenProject())
+    {
+        setProjectDirty(true);
+    }
+
+    QToolTip::showText(globalPosition, mixGainDisplayText(*nextGainDb), this, {}, 900);
+}
+
 std::optional<int> MainWindow::timelineLoopTargetFrame() const
 {
     if (!m_controller || !m_controller->hasVideoLoaded())
@@ -2128,8 +3812,19 @@ std::optional<int> MainWindow::timelineLoopTargetFrame() const
 
 void MainWindow::buildMenus()
 {
-    m_openAction = new QAction(QStringLiteral("Open Video"), this);
-    m_openAction->setShortcut(QKeySequence::Open);
+    m_newProjectAction = new QAction(QStringLiteral("New Project..."), this);
+    m_newProjectAction->setShortcut(QKeySequence::New);
+    m_openProjectAction = new QAction(QStringLiteral("Open Project..."), this);
+    m_openProjectAction->setShortcut(QKeySequence::Open);
+    m_saveProjectAction = new QAction(QStringLiteral("Save Project"), this);
+    m_saveProjectAction->setShortcut(QKeySequence::Save);
+    m_saveProjectAsAction = new QAction(QStringLiteral("Save Project As..."), this);
+    m_saveProjectAsAction->setShortcut(QKeySequence::SaveAs);
+    m_openAction = new QAction(QStringLiteral("Import Video..."), this);
+    m_openAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_I));
+    m_quitAction = new QAction(QStringLiteral("Quit (Ctrl+Q)"), this);
+    m_quitAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Q")));
+    m_quitAction->setShortcutContext(Qt::ApplicationShortcut);
 
     m_goToStartAction = new QAction(QStringLiteral("Jump to Start (Enter)"), this);
     m_playAction = new QAction(QStringLiteral("Play (Space)"), this);
@@ -2161,7 +3856,8 @@ void MainWindow::buildMenus()
     m_loopSoundAction = new QAction(QStringLiteral("Loop Sound"), this);
     m_toggleNodeNameAction = new QAction(QStringLiteral("Toggle Node Name (E)"), this);
     m_showAllNodeNamesAction = new QAction(QStringLiteral("Node Name Always On"), this);
-    m_importSoundAction = new QAction(QStringLiteral("Import Sound (Shift+Ctrl+I)"), this);
+    m_importSoundAction = new QAction(QStringLiteral("Import Audio..."), this);
+    m_detachVideoAction = new QAction(QStringLiteral("Detach Video"), this);
     m_showClipEditorAction = new QAction(QStringLiteral("Toggle Clip Editor (Ctrl+-)"), this);
     m_showTimelineAction = new QAction(QStringLiteral("Show Timeline (T)"), this);
     m_showMixAction = new QAction(QStringLiteral("Toggle Mix Window (Ctrl++)"), this);
@@ -2218,9 +3914,21 @@ void MainWindow::buildMenus()
     m_selectAllAction->setEnabled(false);
     m_unselectAllAction->setEnabled(false);
     m_clearAllAction->setEnabled(false);
+    m_saveProjectAction->setEnabled(false);
+    m_saveProjectAsAction->setEnabled(false);
 
     auto* fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
+    fileMenu->addAction(m_newProjectAction);
+    fileMenu->addAction(m_openProjectAction);
+    m_openRecentMenu = fileMenu->addMenu(QStringLiteral("Open Recent..."));
+    connect(m_openRecentMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildRecentProjectsMenu);
+    fileMenu->addAction(m_saveProjectAction);
+    fileMenu->addAction(m_saveProjectAsAction);
+    fileMenu->addSeparator();
     fileMenu->addAction(m_openAction);
+    fileMenu->addSeparator();
+    fileMenu->addAction(m_quitAction);
+    addAction(m_quitAction);
 
     auto* editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
     editMenu->addAction(m_copyAction);
@@ -2251,10 +3959,10 @@ void MainWindow::buildMenus()
     auto* motionMenu = menuBar()->addMenu(QStringLiteral("&Motion"));
     motionMenu->addAction(m_motionTrackingAction);
 
-    auto* soundMenu = menuBar()->addMenu(QStringLiteral("&Sound"));
-    soundMenu->addAction(m_importSoundAction);
-    soundMenu->addAction(m_loopSoundAction);
-    soundMenu->addAction(m_autoPanAction);
+    auto* audioMenu = menuBar()->addMenu(QStringLiteral("&Audio"));
+    audioMenu->addAction(m_importSoundAction);
+    audioMenu->addAction(m_loopSoundAction);
+    audioMenu->addAction(m_autoPanAction);
 
     auto* timelineMenu = menuBar()->addMenu(QStringLiteral("&Timeline"));
     timelineMenu->addAction(m_goToStartAction);
@@ -2272,6 +3980,8 @@ void MainWindow::buildMenus()
     timelineMenu->addAction(m_timelineClickSeeksAction);
 
     auto* viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
+    viewMenu->addAction(m_detachVideoAction);
+    viewMenu->addSeparator();
     viewMenu->addAction(m_showTimelineAction);
     viewMenu->addAction(m_showClipEditorAction);
     viewMenu->addAction(m_showMixAction);
@@ -2279,6 +3989,77 @@ void MainWindow::buildMenus()
     viewMenu->addSeparator();
     viewMenu->addAction(m_toggleNodeNameAction);
     viewMenu->addAction(m_showAllNodeNamesAction);
+
+    auto* shortcutsMenu = menuBar()->addMenu(QStringLiteral("&Shortcuts"));
+    const auto addShortcutEntry = [](QMenu* menu, const QString& label, const QString& shortcutText)
+    {
+        menu->addAction(QStringLiteral("%1\t%2").arg(label, shortcutText));
+    };
+    auto* fileShortcutsMenu = shortcutsMenu->addMenu(QStringLiteral("File"));
+    addShortcutEntry(fileShortcutsMenu, QStringLiteral("New Project"), m_newProjectAction->shortcut().toString(QKeySequence::NativeText));
+    addShortcutEntry(fileShortcutsMenu, QStringLiteral("Open Project"), m_openProjectAction->shortcut().toString(QKeySequence::NativeText));
+    addShortcutEntry(fileShortcutsMenu, QStringLiteral("Save Project"), m_saveProjectAction->shortcut().toString(QKeySequence::NativeText));
+    addShortcutEntry(fileShortcutsMenu, QStringLiteral("Save Project As"), m_saveProjectAsAction->shortcut().toString(QKeySequence::NativeText));
+    addShortcutEntry(fileShortcutsMenu, QStringLiteral("Import Video"), m_openAction->shortcut().toString(QKeySequence::NativeText));
+    addShortcutEntry(fileShortcutsMenu, QStringLiteral("Import Audio"), m_importSoundAction->shortcut().toString(QKeySequence::NativeText));
+    addShortcutEntry(fileShortcutsMenu, QStringLiteral("Quit"), m_quitAction->shortcut().toString(QKeySequence::NativeText));
+
+    auto* playbackShortcutsMenu = shortcutsMenu->addMenu(QStringLiteral("Playback"));
+    addShortcutEntry(playbackShortcutsMenu, QStringLiteral("Play / Pause"), m_playPauseShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(
+        playbackShortcutsMenu,
+        QStringLiteral("Jump to Start"),
+        QStringLiteral("%1 / %2")
+            .arg(m_startShortcut->key().toString(QKeySequence::NativeText))
+            .arg(m_numpadStartShortcut->key().toString(QKeySequence::NativeText)));
+    addShortcutEntry(playbackShortcutsMenu, QStringLiteral("Step Back"), m_stepBackShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(playbackShortcutsMenu, QStringLiteral("Step Forward"), m_stepForwardShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(playbackShortcutsMenu, QStringLiteral("Step Fast Forward"), m_stepFastForwardShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(playbackShortcutsMenu, QStringLiteral("Step Fast Backward"), m_stepFastBackShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(
+        playbackShortcutsMenu,
+        QStringLiteral("Insertion Follows Playback"),
+        m_insertionFollowsPlaybackShortcut->key().toString(QKeySequence::NativeText));
+
+    auto* editShortcutsMenu = shortcutsMenu->addMenu(QStringLiteral("Edit"));
+    addShortcutEntry(editShortcutsMenu, QStringLiteral("Copy"), m_copyShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(editShortcutsMenu, QStringLiteral("Paste"), m_pasteShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(editShortcutsMenu, QStringLiteral("Cut"), m_cutShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(editShortcutsMenu, QStringLiteral("Undo"), m_undoShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(editShortcutsMenu, QStringLiteral("Redo"), m_redoShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(editShortcutsMenu, QStringLiteral("Select All Visible Nodes"), m_selectAllShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(editShortcutsMenu, QStringLiteral("Clear Selection"), m_unselectAllShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(editShortcutsMenu, QStringLiteral("Delete Selected Node"), m_deleteShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(editShortcutsMenu, QStringLiteral("Clear All Nodes"), QStringLiteral("Ctrl+Shift+A, then Backspace"));
+
+    auto* nodeShortcutsMenu = shortcutsMenu->addMenu(QStringLiteral("Node And Timeline"));
+    addShortcutEntry(nodeShortcutsMenu, QStringLiteral("Set Start / Loop Start"), m_nodeStartShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(nodeShortcutsMenu, QStringLiteral("Set End / Loop End"), m_nodeEndShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(nodeShortcutsMenu, QStringLiteral("Select Next Node"), m_selectNextNodeShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(nodeShortcutsMenu, QStringLiteral("Move Selected Node"), QStringLiteral("Arrow Keys"));
+    addShortcutEntry(nodeShortcutsMenu, QStringLiteral("Trim Node To Sound"), m_trimNodeShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(nodeShortcutsMenu, QStringLiteral("Toggle Auto Pan"), m_autoPanShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(nodeShortcutsMenu, QStringLiteral("Toggle Node Name"), m_toggleNodeNameShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(nodeShortcutsMenu, QStringLiteral("Show Timeline"), m_showTimelineShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(nodeShortcutsMenu, QStringLiteral("Toggle Clip Editor"), m_showClipEditorShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(nodeShortcutsMenu, QStringLiteral("Toggle Mix Window"), m_showMixShortcut->key().toString(QKeySequence::NativeText));
+    addShortcutEntry(nodeShortcutsMenu, QStringLiteral("Toggle Audio Pool"), m_audioPoolShortcut->key().toString(QKeySequence::NativeText));
+
+    auto* clipShortcutsMenu = shortcutsMenu->addMenu(QStringLiteral("Clip Editor"));
+    addShortcutEntry(clipShortcutsMenu, QStringLiteral("Play / Stop Clip Preview"), QStringLiteral("Space"));
+    addShortcutEntry(clipShortcutsMenu, QStringLiteral("Set Clip In"), QStringLiteral("A"));
+    addShortcutEntry(clipShortcutsMenu, QStringLiteral("Set Clip Out"), QStringLiteral("S"));
+    addShortcutEntry(clipShortcutsMenu, QStringLiteral("Waveform Zoom Horizontal"), QStringLiteral("Mouse Wheel"));
+    addShortcutEntry(clipShortcutsMenu, QStringLiteral("Waveform Zoom Vertical"), QStringLiteral("Shift+Mouse Wheel"));
+
+    auto* mouseShortcutsMenu = shortcutsMenu->addMenu(QStringLiteral("Mouse"));
+    addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Adjust Selected Node Mixer Volume"), QStringLiteral("Ctrl+Mouse Wheel"));
+    addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Reset Mixer Or Clip Fader To 0 dB"), QStringLiteral("Ctrl+Click"));
+    addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Preview Audio Pool Item"), QStringLiteral("Ctrl+Left Hold"));
+    addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Add Audio Pool Item To Stage Center"), QStringLiteral("Double-Click"));
+    addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Open Clip Editor For Node"), QStringLiteral("Double-Click Node"));
+    addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Create Loop Range"), QStringLiteral("Drag In Loop Bar"));
+    addShortcutEntry(mouseShortcutsMenu, QStringLiteral("Timeline Zoom Horizontal"), QStringLiteral("Mouse Wheel"));
 
     auto* debugMenu = menuBar()->addMenu(QStringLiteral("&Debug"));
     debugMenu->addAction(m_toggleDebugAction);
@@ -2363,8 +4144,16 @@ void MainWindow::buildUi()
     m_mainVerticalSplitter->setChildrenCollapsible(false);
     m_mainVerticalSplitter->setHandleWidth(6);
 
-    m_canvas = new VideoCanvas(m_mainVerticalSplitter);
+    m_canvasPanel = new QFrame(m_mainVerticalSplitter);
+    m_canvasPanel->setObjectName(QStringLiteral("canvasPanel"));
+    m_canvasPanel->setFrameShape(QFrame::NoFrame);
+    auto* canvasPanelLayout = new QVBoxLayout(m_canvasPanel);
+    canvasPanelLayout->setContentsMargins(0, 0, 0, 0);
+    canvasPanelLayout->setSpacing(0);
+
+    m_canvas = new VideoCanvas(m_canvasPanel);
     m_canvas->setRenderService(m_controller->renderService());
+    canvasPanelLayout->addWidget(m_canvas, 1);
     m_nativeViewport = new NativeVideoViewport(nullptr);
     m_nativeViewport->setWindowTitle(QStringLiteral("Native Video Viewport Test"));
     m_nativeViewport->resize(960, 540);
@@ -2373,6 +4162,15 @@ void MainWindow::buildUi()
     m_nativeViewport->setRenderService(nullptr);
     m_nativeViewportWindow = m_nativeViewport;
     connect(this, &QObject::destroyed, m_nativeViewportWindow, &QObject::deleteLater);
+    m_detachedVideoWindow = new QWidget(this, Qt::Window);
+    m_detachedVideoWindow->setWindowTitle(QStringLiteral("Detached Video"));
+    m_detachedVideoWindow->setWindowIcon(windowIcon());
+    m_detachedVideoWindow->setAttribute(Qt::WA_DeleteOnClose, false);
+    m_detachedVideoWindow->hide();
+    m_detachedVideoWindow->installEventFilter(this);
+    auto* detachedVideoLayout = new QVBoxLayout(m_detachedVideoWindow);
+    detachedVideoLayout->setContentsMargins(0, 0, 0, 0);
+    detachedVideoLayout->setSpacing(0);
     m_timelinePanel = new QFrame(m_mainVerticalSplitter);
     m_timelinePanel->setObjectName(QStringLiteral("timelinePanel"));
     m_timelinePanel->setFrameShape(QFrame::NoFrame);
@@ -2541,7 +4339,15 @@ void MainWindow::buildUi()
             "QMenu::item { padding: 6px 14px; }"
             "QMenu::item:selected { background: #1a2028; }"));
 
-        auto* importAction = menu.addAction(QStringLiteral("Import (Shift+Ctrl+I)"));
+        auto* importAction = menu.addAction(QStringLiteral("Import Audio... (Ctrl+Shift+I)"));
+        menu.addSeparator();
+        auto* showLengthAction = menu.addAction(QStringLiteral("Show Length"));
+        showLengthAction->setCheckable(true);
+        showLengthAction->setChecked(m_audioPoolShowLength);
+        auto* showSizeAction = menu.addAction(QStringLiteral("Show Size"));
+        showSizeAction->setCheckable(true);
+        showSizeAction->setChecked(m_audioPoolShowSize);
+        menu.addSeparator();
         auto* closeAction = menu.addAction(QStringLiteral("Close (P)"));
 
         const auto popupWidth = menu.sizeHint().width();
@@ -2562,6 +4368,24 @@ void MainWindow::buildUi()
         {
             importAudioToPool();
         }
+        else if (chosenAction == showLengthAction)
+        {
+            m_audioPoolShowLength = showLengthAction->isChecked();
+            refreshAudioPool();
+            if (!m_projectStateChangeInProgress && hasOpenProject())
+            {
+                setProjectDirty(true);
+            }
+        }
+        else if (chosenAction == showSizeAction)
+        {
+            m_audioPoolShowSize = showSizeAction->isChecked();
+            refreshAudioPool();
+            if (!m_projectStateChangeInProgress && hasOpenProject())
+            {
+                setProjectDirty(true);
+            }
+        }
         else if (chosenAction == closeAction)
         {
             updateAudioPoolVisibility(false);
@@ -2569,7 +4393,7 @@ void MainWindow::buildUi()
         }
     });
 
-    m_mainVerticalSplitter->addWidget(m_canvas);
+    m_mainVerticalSplitter->addWidget(m_canvasPanel);
     m_mainVerticalSplitter->addWidget(m_timelinePanel);
     m_mainVerticalSplitter->addWidget(m_clipEditorPanel);
     m_mainVerticalSplitter->addWidget(m_mixPanel);
@@ -2592,6 +4416,10 @@ void MainWindow::buildUi()
         {
             m_mixPreferredHeight = std::max(132, m_mixPanel->height());
         }
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
     });
 
     layout->addWidget(m_mainVerticalSplitter, 1);
@@ -2606,6 +4434,10 @@ void MainWindow::buildUi()
         if (m_audioPoolPanel && m_audioPoolPanel->isVisible())
         {
             m_audioPoolPreferredWidth = std::max(240, m_audioPoolPanel->width());
+        }
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
         }
     });
 
@@ -2639,9 +4471,12 @@ void MainWindow::buildUi()
     m_canvasTipsOverlay->hide();
     updateOverlayPositions();
 
-    setStyleSheet(R"(
+    qApp->setStyleSheet(R"(
         QMainWindow {
             background: #0d1014;
+        }
+        QDialog, QMessageBox, QInputDialog, QFileDialog {
+            background: #0f141b;
         }
         QSplitter::handle {
             background: #050608;
@@ -2662,6 +4497,10 @@ void MainWindow::buildUi()
             background: transparent;
             padding: 6px 10px;
         }
+        QMenuBar::item:disabled {
+            color: #6b7683;
+            background: transparent;
+        }
         QMenuBar::item:selected {
             background: #223146;
         }
@@ -2677,11 +4516,48 @@ void MainWindow::buildUi()
             border-radius: 8px;
             font-size: 8.5pt;
         }
+        QMenu::item:disabled {
+            color: #687380;
+            background: transparent;
+        }
         QMenu::item:selected {
             background: #223146;
         }
         QLabel {
             color: #d8dde4;
+        }
+        QMessageBox QLabel, QInputDialog QLabel, QFileDialog QLabel {
+            color: #d8dde4;
+            background: transparent;
+        }
+        QDialogButtonBox {
+            background: transparent;
+        }
+        QDialogButtonBox QPushButton, QMessageBox QPushButton, QInputDialog QPushButton, QFileDialog QPushButton {
+            background: #1a232d;
+            color: #eef2f6;
+            border: 1px solid #324155;
+            border-radius: 6px;
+            padding: 5px 12px;
+            min-height: 26px;
+        }
+        QDialogButtonBox QPushButton:disabled, QMessageBox QPushButton:disabled, QInputDialog QPushButton:disabled, QFileDialog QPushButton:disabled {
+            background: #11161d;
+            color: #728090;
+            border: 1px solid #26313e;
+        }
+        QDialogButtonBox QPushButton:hover, QMessageBox QPushButton:hover, QInputDialog QPushButton:hover, QFileDialog QPushButton:hover {
+            background: #223146;
+        }
+        QLineEdit, QFileDialog QLineEdit, QInputDialog QLineEdit {
+            background: #0b0f14;
+            color: #eef2f6;
+            border: 1px solid #324155;
+            border-radius: 6px;
+            padding: 4px 8px;
+        }
+        QFileDialog QListView, QFileDialog QTreeView, QFileDialog QComboBox, QFileDialog QSplitter, QFileDialog QWidget {
+            background: #0f141b;
         }
         QStatusBar {
             background: #121720;
@@ -2762,8 +4638,29 @@ void MainWindow::buildUi()
             border-radius: 6px;
             padding: 4px 10px;
         }
+        QPushButton:disabled {
+            background: #10151c;
+            color: #728090;
+            border: 1px solid #24303d;
+        }
         QPushButton:hover {
             background: #223146;
+        }
+        QToolButton:disabled {
+            color: #6e7a88;
+            background: rgba(255, 255, 255, 0.02);
+            border-color: rgba(255, 255, 255, 0.04);
+        }
+        QLineEdit {
+            background: #0a0d12;
+            color: #eef2f6;
+            border: 1px solid #324155;
+            border-radius: 6px;
+            padding: 4px 8px;
+            selection-background-color: #29415d;
+        }
+        QLineEdit:focus {
+            border: 1px solid #4a698c;
         }
     )");
 }

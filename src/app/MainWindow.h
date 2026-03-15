@@ -3,6 +3,7 @@
 #include <optional>
 
 #include <QAction>
+#include <QCloseEvent>
 #include <QFrame>
 #include <QImage>
 #include <QLabel>
@@ -16,11 +17,14 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include "app/ProjectDocument.h"
+
 class PlayerController;
 class DebugOverlayWindow;
 class ClipEditorView;
 class MixView;
 class NativeVideoViewport;
+class QMenu;
 class TimelineView;
 class VideoCanvas;
 
@@ -30,12 +34,18 @@ class MainWindow final : public QMainWindow
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+    [[nodiscard]] bool openProjectFilePath(const QString& projectFilePath);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void closeEvent(QCloseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 
 private slots:
+    void newProject();
+    void openProject();
+    void saveProject();
+    void saveProjectAs();
     void openVideo();
     void importSound();
     void importAudioToPool();
@@ -71,6 +81,8 @@ private slots:
     void updateTimelineVisibility(bool visible);
     void updateClipEditorVisibility(bool visible);
     void updateMixVisibility(bool visible);
+    void detachVideo();
+    void attachVideo();
     void refreshAudioPool();
     void updateAudioPoolPlaybackIndicators();
     void updateVideoAudioRow();
@@ -100,7 +112,42 @@ private:
     void armClearAllShortcut();
     void clearPendingClearAllShortcut();
     void syncMainVerticalPanelSizes();
+    void adjustTrackMixGainFromWheel(const QUuid& trackId, int wheelDelta, const QPoint& globalPosition);
+    void updateDetachedVideoUiState();
     [[nodiscard]] std::optional<int> timelineLoopTargetFrame() const;
+    [[nodiscard]] bool hasOpenProject() const;
+    [[nodiscard]] bool ensureProjectForMediaAction(const QString& actionLabel);
+    [[nodiscard]] bool promptToSaveIfDirty(const QString& actionLabel);
+    [[nodiscard]] bool saveProjectToCurrentPath();
+    [[nodiscard]] bool saveProjectToPath(const QString& projectFilePath, const QString& projectName);
+    [[nodiscard]] bool saveProjectAsNewCopy();
+    [[nodiscard]] bool loadProjectFile(const QString& projectFilePath);
+    [[nodiscard]] bool openProjectFileWithPrompt(const QString& projectFilePath, const QString& actionLabel);
+    [[nodiscard]] bool createProjectAt(const QString& projectName, const QString& parentDirectory);
+    [[nodiscard]] std::optional<QString> copyMediaIntoProject(
+        const QString& sourcePath,
+        const QString& subdirectory,
+        QString* errorMessage = nullptr) const;
+    [[nodiscard]] dawg::project::UiState snapshotProjectUiState() const;
+    void applyProjectUiState(const dawg::project::UiState& state);
+    void setCurrentProject(const QString& projectFilePath, const QString& projectName);
+    void clearCurrentProject();
+    void setProjectDirty(bool dirty);
+    void updateWindowTitle();
+    void restoreLastProjectOnStartup();
+    [[nodiscard]] QStringList recentProjectPaths() const;
+    void storeRecentProjectPaths(const QStringList& projectPaths);
+    void addRecentProjectPath(const QString& projectFilePath);
+    void removeRecentProjectPath(const QString& projectFilePath);
+    void rebuildRecentProjectsMenu();
+    void applyFileDialogChrome(class QFileDialog& dialog) const;
+    [[nodiscard]] QString chooseOpenFileName(
+        const QString& title,
+        const QString& directory,
+        const QString& filter) const;
+    [[nodiscard]] QString chooseExistingDirectory(
+        const QString& title,
+        const QString& directory = {}) const;
 
     PlayerController* m_controller = nullptr;
     VideoCanvas* m_canvas = nullptr;
@@ -110,6 +157,7 @@ private:
     QSplitter* m_contentSplitter = nullptr;
     QSplitter* m_mainVerticalSplitter = nullptr;
     QWidget* m_mainContent = nullptr;
+    QFrame* m_canvasPanel = nullptr;
     QFrame* m_timelinePanel = nullptr;
     QFrame* m_clipEditorPanel = nullptr;
     QFrame* m_mixPanel = nullptr;
@@ -119,6 +167,8 @@ private:
     DebugOverlayWindow* m_debugOverlay = nullptr;
     QWidget* m_nativeViewportWindow = nullptr;
     NativeVideoViewport* m_nativeViewport = nullptr;
+    QWidget* m_detachedVideoWindow = nullptr;
+    QByteArray m_detachedVideoWindowGeometry;
     QFrame* m_audioPoolPanel = nullptr;
     QWidget* m_videoAudioRow = nullptr;
     QLabel* m_videoAudioLabel = nullptr;
@@ -126,7 +176,13 @@ private:
     QWidget* m_audioPoolListContainer = nullptr;
     QVBoxLayout* m_audioPoolListLayout = nullptr;
     QToolButton* m_audioPoolMenuButton = nullptr;
+    QAction* m_newProjectAction = nullptr;
+    QAction* m_openProjectAction = nullptr;
+    QMenu* m_openRecentMenu = nullptr;
+    QAction* m_saveProjectAction = nullptr;
+    QAction* m_saveProjectAsAction = nullptr;
     QAction* m_openAction = nullptr;
+    QAction* m_quitAction = nullptr;
     QAction* m_goToStartAction = nullptr;
     QAction* m_playAction = nullptr;
     QAction* m_stepForwardAction = nullptr;
@@ -157,6 +213,7 @@ private:
     QAction* m_toggleNodeNameAction = nullptr;
     QAction* m_showAllNodeNamesAction = nullptr;
     QAction* m_importSoundAction = nullptr;
+    QAction* m_detachVideoAction = nullptr;
     QAction* m_showClipEditorAction = nullptr;
     QAction* m_showTimelineAction = nullptr;
     QAction* m_showMixAction = nullptr;
@@ -196,6 +253,8 @@ private:
     bool m_clearAllShortcutArmed = false;
     bool m_debugVisible = true;
     int m_audioPoolPreferredWidth = 320;
+    bool m_audioPoolShowLength = true;
+    bool m_audioPoolShowSize = true;
     int m_timelinePreferredHeight = 148;
     int m_clipEditorPreferredHeight = 224;
     int m_mixPreferredHeight = 368;
@@ -214,4 +273,11 @@ private:
     int m_activeNodeNudgeKey = 0;
     QPointF m_activeNodeNudgeDelta;
     bool m_nodeNudgeFastMode = false;
+    bool m_videoDetached = false;
+    bool m_shuttingDown = false;
+    QString m_currentProjectFilePath;
+    QString m_currentProjectRootPath;
+    QString m_currentProjectName;
+    bool m_projectDirty = false;
+    bool m_projectStateChangeInProgress = false;
 };

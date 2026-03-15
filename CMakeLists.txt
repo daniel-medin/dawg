@@ -23,11 +23,14 @@ endif()
 
 add_executable(dawg WIN32
     src/main.cpp
+    src/app_icon.rc
     src/resources.qrc
     src/app/MainWindow.cpp
     src/app/MainWindow.h
     src/app/AudioPoolService.cpp
     src/app/AudioPoolService.h
+    src/app/ProjectDocument.cpp
+    src/app/ProjectDocument.h
     src/app/PerformanceLogger.cpp
     src/app/PerformanceLogger.h
     src/app/PlayerController.cpp

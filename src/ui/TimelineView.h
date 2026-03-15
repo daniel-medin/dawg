@@ -18,6 +18,7 @@ struct TimelineTrackSpan
     int startFrame = 0;
     int endFrame = 0;
     int laneIndex = 0;
+    bool hasAttachedAudio = false;
     bool isSelected = false;
 };
 
@@ -36,6 +37,7 @@ public:
     void setSeekOnClickEnabled(bool enabled);
     [[nodiscard]] std::optional<int> loopEditFrame() const;
     [[nodiscard]] std::optional<int> loopShortcutFrame() const;
+    [[nodiscard]] bool hasSelectedLoopRange() const;
     [[nodiscard]] QSize sizeHint() const override;
     [[nodiscard]] QSize minimumSizeHint() const override;
 
@@ -49,6 +51,8 @@ signals:
     void trackEndFrameRequested(const QUuid& trackId, int frameIndex);
     void trackSpanMoveRequested(const QUuid& trackId, int deltaFrames);
     void trackContextMenuRequested(const QUuid& trackId, const QPoint& globalPosition);
+    void trackGainAdjustRequested(const QUuid& trackId, int wheelDelta, const QPoint& globalPosition);
+    void loopContextMenuRequested(const QPoint& globalPosition);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -117,6 +121,7 @@ private:
     std::optional<int> m_loopStartFrame;
     std::optional<int> m_loopEndFrame;
     std::optional<int> m_loopEditFrame;
+    bool m_loopSelected = false;
     std::optional<int> m_hoveredLoopFrame;
     std::optional<double> m_hoveredTimelineX;
     bool m_trimmingStart = false;

@@ -46,6 +46,7 @@ void TimelineView::clear()
     m_loopStartFrame.reset();
     m_loopEndFrame.reset();
     m_loopEditFrame.reset();
+    m_loopSelected = false;
     m_hoveredLoopFrame.reset();
     m_hoveredTimelineX.reset();
     m_trimmingStart = false;
@@ -79,6 +80,7 @@ void TimelineView::setTimeline(const int totalFrames, const double fps)
         m_loopStartFrame.reset();
         m_loopEndFrame.reset();
         m_loopEditFrame.reset();
+        m_loopSelected = false;
         m_hoveredLoopFrame.reset();
         m_hoveredTimelineX.reset();
     }
@@ -124,6 +126,10 @@ void TimelineView::setLoopRange(const std::optional<int> startFrame, const std::
 
     m_loopStartFrame = startFrame;
     m_loopEndFrame = endFrame;
+    if (!m_loopStartFrame.has_value() && !m_loopEndFrame.has_value())
+    {
+        m_loopSelected = false;
+    }
     update();
 }
 
@@ -152,6 +158,11 @@ std::optional<int> TimelineView::loopShortcutFrame() const
     }
 
     return m_hoveredLoopFrame;
+}
+
+bool TimelineView::hasSelectedLoopRange() const
+{
+    return m_loopSelected && (m_loopStartFrame.has_value() || m_loopEndFrame.has_value());
 }
 
 QSize TimelineView::sizeHint() const
@@ -213,8 +224,8 @@ void TimelineView::paintEvent(QPaintEvent* event)
     {
         if (loopGeometry->selectionRect.width() > 0.0)
         {
-            painter.setPen(QPen(QColor{117, 165, 228, 220}, 1.0));
-            painter.setBrush(QColor{66, 110, 170, 72});
+            painter.setPen(QPen(m_loopSelected ? QColor{180, 212, 255, 236} : QColor{117, 165, 228, 220}, m_loopSelected ? 1.5 : 1.0));
+            painter.setBrush(m_loopSelected ? QColor{88, 136, 202, 92} : QColor{66, 110, 170, 72});
             painter.drawRoundedRect(loopGeometry->selectionRect, 3.0, 3.0);
         }
 
@@ -287,6 +298,24 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
 
     if (event->button() == Qt::RightButton)
     {
+        if (const auto loopGeometry = loopRangeGeometry(); loopGeometry.has_value()
+            && (loopGeometry->selectionRect.contains(event->position())
+                || loopGeometry->startHandleRect.contains(event->position())
+                || loopGeometry->endHandleRect.contains(event->position())))
+        {
+            m_trimmedTrack.reset();
+            m_draggedTrack.reset();
+            m_dragging = false;
+            m_loopEditFrame = frameForPosition(event->position().x());
+            m_loopSelected = true;
+            m_hoveredLoopFrame = m_loopEditFrame;
+            m_hoveredTimelineX = event->position().x();
+            setFocus(Qt::MouseFocusReason);
+            update();
+            emit loopContextMenuRequested(event->globalPosition().toPoint());
+            return;
+        }
+
         if (const auto track = trackAt(event->position()); track.has_value())
         {
             setFocus(Qt::MouseFocusReason);
@@ -311,15 +340,22 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
         m_hoveredTimelineX = event->position().x();
         m_loopHandleDragMode = LoopHandleDragMode::None;
         m_loopDragAnchorFrame = *m_loopEditFrame;
+        m_loopSelected = false;
         if (const auto loopGeometry = loopRangeGeometry(); loopGeometry.has_value())
         {
             if (m_loopStartFrame.has_value() && loopGeometry->startHandleRect.contains(event->position()))
             {
+                m_loopSelected = true;
                 m_loopHandleDragMode = LoopHandleDragMode::Start;
             }
             else if (m_loopEndFrame.has_value() && loopGeometry->endHandleRect.contains(event->position()))
             {
+                m_loopSelected = true;
                 m_loopHandleDragMode = LoopHandleDragMode::End;
+            }
+            else if (loopGeometry->selectionRect.contains(event->position()))
+            {
+                m_loopSelected = true;
             }
         }
         if (m_loopHandleDragMode == LoopHandleDragMode::None)
@@ -343,8 +379,9 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
     if (m_loopEditFrame.has_value())
     {
         m_loopEditFrame.reset();
-        update();
     }
+    m_loopSelected = false;
+    update();
     m_hoveredLoopFrame.reset();
     if (trackAreaRect().contains(event->position()))
     {
@@ -357,6 +394,7 @@ void TimelineView::mousePressEvent(QMouseEvent* event)
 
     if (const auto track = trackAt(event->position()); track.has_value())
     {
+        m_loopSelected = false;
         setFocus(Qt::MouseFocusReason);
         emit trackSelected(track->id);
 
@@ -416,6 +454,7 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent* event)
 
     if (const auto track = trackAt(event->position()); track.has_value())
     {
+        m_loopSelected = false;
         setFocus(Qt::MouseFocusReason);
         emit trackSelected(track->id);
         emit trackActivated(track->id);
@@ -465,7 +504,7 @@ void TimelineView::mouseMoveEvent(QMouseEvent* event)
         }
         else
         {
-            unsetCursor();
+            setCursor(Qt::PointingHandCursor);
         }
     }
     else
@@ -520,6 +559,26 @@ void TimelineView::mouseReleaseEvent(QMouseEvent* event)
 
 void TimelineView::wheelEvent(QWheelEvent* event)
 {
+    if ((event->modifiers() & Qt::ControlModifier) && event->angleDelta().y() != 0)
+    {
+        if (const auto track = trackAt(event->position()); track.has_value())
+        {
+            const auto spanIt = std::find_if(
+                m_trackSpans.cbegin(),
+                m_trackSpans.cend(),
+                [&track](const TimelineTrackSpan& span)
+                {
+                    return span.id == track->id;
+                });
+            if (spanIt != m_trackSpans.cend() && spanIt->isSelected && spanIt->hasAttachedAudio)
+            {
+                emit trackGainAdjustRequested(track->id, event->angleDelta().y(), event->globalPosition().toPoint());
+                event->accept();
+                return;
+            }
+        }
+    }
+
     if (m_totalFrames <= 1)
     {
         QWidget::wheelEvent(event);

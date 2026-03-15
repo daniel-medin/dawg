@@ -39,6 +39,16 @@ bool AudioPoolService::remove(const QString& filePath)
     return true;
 }
 
+void AudioPoolService::setAssetPaths(const std::vector<QString>& assetPaths)
+{
+    m_assetPaths = assetPaths;
+}
+
+const std::vector<QString>& AudioPoolService::assetPaths() const
+{
+    return m_assetPaths;
+}
+
 std::vector<AudioPoolItem> AudioPoolService::items(
     const std::vector<TrackPoint>& tracks,
     const AudioEngine& audioEngine,
@@ -50,6 +60,9 @@ std::vector<AudioPoolItem> AudioPoolService::items(
     for (const auto& assetPath : m_assetPaths)
     {
         const auto isPreviewPlaying = !previewAssetPath.isEmpty() && previewAssetPath == assetPath;
+        const QFileInfo assetInfo(assetPath);
+        const auto assetDurationMs = audioEngine.durationMs(assetPath).value_or(-1);
+        const auto assetSizeBytes = static_cast<std::int64_t>(assetInfo.exists() ? assetInfo.size() : -1);
 
         struct ConnectedTrackInfo
         {
@@ -87,7 +100,9 @@ std::vector<AudioPoolItem> AudioPoolService::items(
                 .isPlaying = isPreviewPlaying,
                 .connectionSummary = isPreviewPlaying
                     ? QStringLiteral("Previewing")
-                    : QStringLiteral("Not connected")
+                    : QStringLiteral("Not connected"),
+                .durationMs = assetDurationMs,
+                .fileSizeBytes = assetSizeBytes
             });
             continue;
         }
@@ -112,7 +127,9 @@ std::vector<AudioPoolItem> AudioPoolService::items(
                     ? QStringLiteral("Playing on %1").arg(connectedTrack.label)
                     : (isPreviewPlaying
                         ? QStringLiteral("Previewing")
-                        : QStringLiteral("Connected to %1").arg(connectedTrack.label))
+                        : QStringLiteral("Connected to %1").arg(connectedTrack.label)),
+                .durationMs = assetDurationMs,
+                .fileSizeBytes = assetSizeBytes
             });
         }
     }

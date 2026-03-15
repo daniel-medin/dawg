@@ -21,6 +21,7 @@
 #include "app/TransportController.h"
 #include "app/AudioPoolService.h"
 #include "app/PerformanceLogger.h"
+#include "app/ProjectDocument.h"
 #include "core/audio/AudioEngine.h"
 #include "core/render/RenderService.h"
 #include "core/tracking/MotionTracker.h"
@@ -89,11 +90,14 @@ public:
     void setMixLaneGainDb(int laneIndex, float gainDb);
     void setMixLaneMuted(int laneIndex, bool muted);
     void setMixLaneSoloed(int laneIndex, bool soloed);
+    [[nodiscard]] std::optional<float> adjustMixLaneGainForTrack(const QUuid& trackId, float deltaDb);
     void selectNextVisibleTrack();
     bool startAudioPoolPreview(const QString& filePath);
     void stopAudioPoolPreview();
     bool startSelectedTrackClipPreview();
     void stopSelectedTrackClipPreview();
+    void resetProjectState();
+    bool restoreProjectState(const dawg::project::ControllerState& state, QString* errorMessage = nullptr);
     bool setSelectedTrackClipRangeMs(int clipStartMs, int clipEndMs);
     bool setSelectedTrackClipPlayheadMs(int playheadMs);
     bool setSelectedTrackAudioGainDb(float gainDb);
@@ -141,6 +145,7 @@ public:
     bool removeAudioFromPool(const QString& filePath);
     bool removeAudioAndConnectedNodesFromPool(const QString& filePath);
     [[nodiscard]] std::vector<AudioPoolItem> audioPoolItems() const;
+    [[nodiscard]] dawg::project::ControllerState snapshotProjectState() const;
     [[nodiscard]] std::vector<MixLaneStrip> mixLaneStrips() const;
     [[nodiscard]] std::vector<TimelineTrackSpan> timelineTrackSpans() const;
     [[nodiscard]] const std::vector<TrackOverlay>& currentOverlays() const;
@@ -175,6 +180,7 @@ private:
     [[nodiscard]] std::optional<int> audioDurationMs(const QString& filePath) const;
     void saveUndoState();
     void restoreTrackEditState(const MotionTrackerState& trackerState, const std::vector<QUuid>& selectedTrackIds);
+    void clearProjectStateAfterMediaStop();
     void syncAttachedAudioForCurrentFrame();
     void refreshOverlays();
     void emitCurrentFrame();

@@ -1,7 +1,6 @@
 #include "ui/ClipEditorView.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <functional>
 #include <memory>
@@ -85,10 +84,10 @@ QString gainLabelText(const float gainDb)
 {
     if (gainDb <= kClipSilentGainDb + 0.001F)
     {
-        return QStringLiteral("Gain  -inf");
+        return QStringLiteral("-inf");
     }
 
-    return QStringLiteral("Gain  %1 dB").arg(gainDb, 0, 'f', 1);
+    return QStringLiteral("%1 dB").arg(gainDb, 0, 'f', 1);
 }
 
 float meterLevelToDb(const float level)
@@ -164,53 +163,6 @@ protected:
     }
 };
 
-class ClipGainScaleWidget final : public QWidget
-{
-public:
-    explicit ClipGainScaleWidget(QWidget* parent = nullptr)
-        : QWidget(parent)
-    {
-        setFixedWidth(28);
-        setAttribute(Qt::WA_TransparentForMouseEvents);
-    }
-
-protected:
-    void paintEvent(QPaintEvent* event) override
-    {
-        Q_UNUSED(event);
-
-        static const std::array<std::pair<float, QString>, 7> markers{{
-            {12.0F, QStringLiteral("+12")},
-            {0.0F, QStringLiteral("0")},
-            {-12.0F, QStringLiteral("-12")},
-            {-24.0F, QStringLiteral("-24")},
-            {-48.0F, QStringLiteral("-48")},
-            {-72.0F, QStringLiteral("-72")},
-            {kClipSilentGainDb, QStringLiteral("-inf")}
-        }};
-
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::TextAntialiasing, true);
-        painter.setPen(QColor{124, 137, 152});
-        auto font = painter.font();
-        font.setPointSizeF(7.0);
-        painter.setFont(font);
-
-        const auto bounds = rect().adjusted(0, 8, 0, -8);
-        for (const auto& [gainDb, label] : markers)
-        {
-            const auto normalized = gainDb <= kClipSilentGainDb + 0.001F
-                ? 1.0
-                : 1.0 - ((std::clamp(gainDb, kClipSilentGainDb, 12.0F) - kClipSilentGainDb)
-                    / (12.0F - kClipSilentGainDb));
-            const auto y = bounds.top() + (normalized * bounds.height());
-            painter.drawText(
-                QRectF{0.0, y - 8.0, static_cast<double>(width()), 16.0},
-                Qt::AlignLeft | Qt::AlignVCenter,
-                label);
-        }
-    }
-};
 }
 
 class ClipEditorView::WaveformView final : public QWidget
@@ -719,8 +671,8 @@ private:
         const QRectF bounds = QRectF(rect()).adjusted(10.0, 10.0, -10.0, -10.0);
         const auto nextPlayheadMs = std::clamp(
             msForX(bounds, position.x()),
-            m_state->clipStartMs,
-            std::max(m_state->clipStartMs, m_state->clipEndMs - 1));
+            0,
+            std::max(0, m_state->sourceDurationMs - 1));
         if (m_state->playheadMs.has_value() && *m_state->playheadMs == nextPlayheadMs)
         {
             return;
@@ -842,7 +794,8 @@ ClipEditorView::ClipEditorView(QWidget* parent)
     headerLayout->addWidget(m_loopButton, 0, Qt::AlignVCenter);
     rootLayout->addLayout(headerLayout);
 
-    auto* infoLayout = new QHBoxLayout();
+    m_infoBar = new QWidget(this);
+    auto* infoLayout = new QHBoxLayout(m_infoBar);
     infoLayout->setContentsMargins(0, 0, 0, 0);
     infoLayout->setSpacing(18);
 
@@ -850,14 +803,13 @@ ClipEditorView::ClipEditorView(QWidget* parent)
     m_rangeLabel = new QLabel(this);
     m_durationLabel = new QLabel(this);
     m_positionLabel = new QLabel(this);
-    m_gainLabel = new QLabel(this);
-    for (auto* label : {m_sourceLabel, m_rangeLabel, m_durationLabel, m_positionLabel, m_gainLabel})
+    for (auto* label : {m_sourceLabel, m_rangeLabel, m_durationLabel, m_positionLabel})
     {
         label->setStyleSheet(QStringLiteral("color: #aeb8c4; font-size: 8.5pt;"));
         infoLayout->addWidget(label);
     }
     infoLayout->addStretch(1);
-    rootLayout->addLayout(infoLayout);
+    rootLayout->addWidget(m_infoBar);
 
     m_editorContent = new QWidget(this);
     auto* editorLayout = new QHBoxLayout(m_editorContent);
@@ -869,9 +821,14 @@ ClipEditorView::ClipEditorView(QWidget* parent)
     stripWidget->setFixedWidth(92);
     stripWidget->setStyleSheet(QStringLiteral(
         "QFrame#clipEditorStrip { background: #0f141b; border: 1px solid #1b2430; border-radius: 8px; }"));
-    auto* stripLayout = new QHBoxLayout(stripWidget);
+    auto* stripLayout = new QVBoxLayout(stripWidget);
     stripLayout->setContentsMargins(8, 12, 8, 12);
     stripLayout->setSpacing(6);
+
+    auto* stripFaderRow = new QHBoxLayout();
+    stripFaderRow->setContentsMargins(0, 0, 0, 0);
+    stripFaderRow->setSpacing(6);
+    stripFaderRow->addStretch(1);
 
     m_levelMeter = new QProgressBar(stripWidget);
     m_levelMeter->setRange(0, 1000);
@@ -881,21 +838,22 @@ ClipEditorView::ClipEditorView(QWidget* parent)
     m_levelMeter->setFixedWidth(12);
     m_levelMeter->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
     m_levelMeter->setStyleSheet(meterStyleSheet());
-    stripLayout->addWidget(m_levelMeter, 0);
+    stripFaderRow->addWidget(m_levelMeter, 0);
 
     m_gainSlider = new ClipGainSlider(stripWidget);
     m_gainSlider->setRange(kClipGainMinValue, kClipGainMaxValue);
     m_gainSlider->setValue(0);
-    m_gainSlider->setTickInterval(60);
-    m_gainSlider->setTickPosition(QSlider::TicksLeft);
     m_gainSlider->setMinimumHeight(128);
     m_gainSlider->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
     m_gainSlider->setStyleSheet(gainSliderStyleSheet());
-    stripLayout->addWidget(m_gainSlider, 0);
+    stripFaderRow->addWidget(m_gainSlider, 0);
+    stripFaderRow->addStretch(1);
+    stripLayout->addLayout(stripFaderRow, 1);
 
-    auto* gainScale = new ClipGainScaleWidget(stripWidget);
-    gainScale->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-    stripLayout->addWidget(gainScale, 0);
+    m_gainLabel = new QLabel(stripWidget);
+    m_gainLabel->setAlignment(Qt::AlignCenter);
+    m_gainLabel->setStyleSheet(QStringLiteral("color: #cad3dc; font-size: 7.5pt;"));
+    stripLayout->addWidget(m_gainLabel);
 
     editorLayout->addWidget(stripWidget, 0);
 
@@ -948,9 +906,19 @@ ClipEditorView::ClipEditorView(QWidget* parent)
     m_emptyBodyLabel = new QLabel(QStringLiteral("Select a node with attached audio to edit its clip."), m_emptyStateCard);
     m_emptyBodyLabel->setWordWrap(true);
     m_emptyBodyLabel->setStyleSheet(QStringLiteral("color: #9ca8b6; font-size: 8.75pt;"));
+    m_emptyActionLabel = new QLabel(m_emptyStateCard);
+    m_emptyActionLabel->setTextFormat(Qt::RichText);
+    m_emptyActionLabel->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    m_emptyActionLabel->setOpenExternalLinks(false);
+    m_emptyActionLabel->setVisible(false);
+    m_emptyActionLabel->setStyleSheet(QStringLiteral(
+        "QLabel { color: #dfe7ef; font-size: 8.75pt; font-weight: 600; }"
+        "QLabel a { color: #eef3f8; text-decoration: underline; }"
+        "QLabel a:hover { color: #ffffff; }"));
 
     cardLayout->addWidget(m_emptyTitleLabel);
     cardLayout->addWidget(m_emptyBodyLabel);
+    cardLayout->addWidget(m_emptyActionLabel);
     emptyLayout->addWidget(m_emptyStateCard);
     emptyLayout->addStretch(1);
     rootLayout->addWidget(m_emptyState, 1);
@@ -996,6 +964,10 @@ ClipEditorView::ClipEditorView(QWidget* parent)
         emit gainChanged(sliderValueToClipGainDb(value));
     });
     connect(m_loopButton, &QToolButton::toggled, this, &ClipEditorView::loopSoundChanged);
+    connect(m_emptyActionLabel, &QLabel::linkActivated, this, [this](const QString&)
+    {
+        emit attachAudioRequested();
+    });
 
     setState(std::nullopt);
 }
@@ -1007,6 +979,10 @@ void ClipEditorView::setState(const std::optional<ClipEditorState>& state)
 
     m_editorContent->setVisible(hasAttachedAudio);
     m_emptyState->setVisible(!hasAttachedAudio);
+    if (m_infoBar)
+    {
+        m_infoBar->setVisible(hasAttachedAudio);
+    }
 
     if (!hasSelection)
     {
@@ -1016,6 +992,7 @@ void ClipEditorView::setState(const std::optional<ClipEditorState>& state)
             const QSignalBlocker blocker{m_loopButton};
             m_loopButton->setChecked(false);
             m_loopButton->setEnabled(false);
+            m_loopButton->setVisible(false);
         }
         m_sourceLabel->clear();
         m_rangeLabel->clear();
@@ -1041,6 +1018,11 @@ void ClipEditorView::setState(const std::optional<ClipEditorState>& state)
         }
         m_emptyTitleLabel->setText(QStringLiteral("Select a node"));
         m_emptyBodyLabel->setText(QStringLiteral("Select a node with attached audio to edit its clip."));
+        if (m_emptyActionLabel)
+        {
+            m_emptyActionLabel->clear();
+            m_emptyActionLabel->setVisible(false);
+        }
         m_waveformView->setState(std::nullopt);
         return;
     }
@@ -1051,11 +1033,12 @@ void ClipEditorView::setState(const std::optional<ClipEditorState>& state)
         const QSignalBlocker blocker{m_loopButton};
         m_loopButton->setEnabled(hasAttachedAudio);
         m_loopButton->setChecked(state->loopEnabled);
+        m_loopButton->setVisible(hasAttachedAudio);
     }
 
     if (!hasAttachedAudio)
     {
-        m_sourceLabel->setText(QStringLiteral("No audio attached"));
+        m_sourceLabel->clear();
         m_rangeLabel->clear();
         m_durationLabel->clear();
         m_positionLabel->clear();
@@ -1077,10 +1060,21 @@ void ClipEditorView::setState(const std::optional<ClipEditorState>& state)
             m_waveformScrollBar->setRange(0, 0);
             m_waveformScrollBar->setValue(0);
         }
-        m_emptyTitleLabel->setText(state->label.isEmpty() ? QStringLiteral("No audio attached") : state->label);
-        m_emptyBodyLabel->setText(QStringLiteral("Import or drag audio onto this node to edit its waveform."));
+        m_emptyTitleLabel->setText(state->label.isEmpty() ? QStringLiteral("Node") : state->label);
+        m_emptyBodyLabel->setText(QStringLiteral("No audio attached"));
+        if (m_emptyActionLabel)
+        {
+            m_emptyActionLabel->setText(QStringLiteral("<a href=\"attach\">Attach Audio...</a>"));
+            m_emptyActionLabel->setVisible(true);
+        }
         m_waveformView->setState(std::nullopt);
         return;
+    }
+
+    if (m_emptyActionLabel)
+    {
+        m_emptyActionLabel->clear();
+        m_emptyActionLabel->setVisible(false);
     }
 
     m_sourceLabel->setText(QStringLiteral("Source  %1").arg(QFileInfo(state->assetPath).fileName()));

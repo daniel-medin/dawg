@@ -36,12 +36,14 @@ public:
     void setShowAllLabels(bool enabled);
 
 signals:
+    void importVideoRequested();
     void seedPointRequested(const QPointF& imagePoint);
     void audioDropped(const QString& assetPath, const QPointF& imagePoint);
     void trackSelected(const QUuid& trackId);
     void trackActivated(const QUuid& trackId);
     void tracksSelected(const QList<QUuid>& trackIds);
     void selectedTrackMoved(const QPointF& imagePoint);
+    void trackGainAdjustRequested(const QUuid& trackId, int wheelDelta, const QPoint& globalPosition);
     void trackContextMenuRequested(const QUuid& trackId, const QPoint& globalPosition);
 
 protected:

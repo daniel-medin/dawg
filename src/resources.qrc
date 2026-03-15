@@ -1,5 +1,7 @@
 <RCC>
     <qresource prefix="/">
+        <file alias="branding/dawg.png">../assets/dawg.png</file>
         <file alias="branding/logo.png">../assets/logo.png</file>
+        <file alias="branding/logo-transparent.png">../assets/logo_transparent.png</file>
     </qresource>
 </RCC>

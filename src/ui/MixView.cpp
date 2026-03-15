@@ -222,15 +222,6 @@ public:
         buttonRow->setContentsMargins(0, 0, 0, 0);
         buttonRow->setSpacing(4);
 
-        m_muteButton = new QToolButton(this);
-        m_muteButton->setText(QStringLiteral("M"));
-        m_muteButton->setCheckable(true);
-        m_muteButton->setChecked(muted);
-        m_muteButton->setCursor(Qt::PointingHandCursor);
-        m_muteButton->setFixedSize(22, 18);
-        applyMixButtonStyle(m_muteButton, muted, false, true);
-        buttonRow->addWidget(m_muteButton, 1);
-
         m_soloButton = new QToolButton(this);
         m_soloButton->setText(QStringLiteral("S"));
         m_soloButton->setCheckable(true);
@@ -240,6 +231,15 @@ public:
         m_soloButton->setFixedSize(22, 18);
         applyMixButtonStyle(m_soloButton, soloed, true, !masterStrip);
         buttonRow->addWidget(m_soloButton, 1);
+
+        m_muteButton = new QToolButton(this);
+        m_muteButton->setText(QStringLiteral("M"));
+        m_muteButton->setCheckable(true);
+        m_muteButton->setChecked(muted);
+        m_muteButton->setCursor(Qt::PointingHandCursor);
+        m_muteButton->setFixedSize(22, 18);
+        applyMixButtonStyle(m_muteButton, muted, false, true);
+        buttonRow->addWidget(m_muteButton, 1);
         contentLayout->addLayout(buttonRow);
 
         auto* swatch = new QFrame(this);

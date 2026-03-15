@@ -14,6 +14,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
+#include <QWheelEvent>
 
 namespace
 {
@@ -194,7 +195,7 @@ public:
     explicit VideoOverlayLayer(VideoCanvas* owner)
         : QWidget(owner)
         , m_owner(owner)
-        , m_emptyStateLogo(QStringLiteral(":/branding/logo.png"))
+        , m_emptyStateLogo(QStringLiteral(":/branding/logo-transparent.png"))
     {
         setMouseTracking(true);
         setAcceptDrops(true);
@@ -327,6 +328,10 @@ protected:
 
         if (!m_hasFrame)
         {
+            if (event->button() == Qt::LeftButton && emptyStatePromptRect(imageRenderRect()).contains(event->position()))
+            {
+                m_owner->importVideoRequested();
+            }
             return;
         }
 
@@ -368,6 +373,40 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override
     {
         QWidget::mouseMoveEvent(event);
+
+        if (!m_hasFrame)
+        {
+            const auto hovered = emptyStatePromptRect(imageRenderRect()).contains(event->position());
+            if (m_emptyStatePromptHovered != hovered)
+            {
+                m_emptyStatePromptHovered = hovered;
+                update();
+            }
+
+            if (hovered)
+            {
+                setCursor(Qt::PointingHandCursor);
+            }
+            else
+            {
+                unsetCursor();
+            }
+            return;
+        }
+
+        const auto hoveredTrackId = trackAt(event->position());
+        if (!m_draggedTrackId.isNull())
+        {
+            setCursor(Qt::ClosedHandCursor);
+        }
+        else if (!hoveredTrackId.isNull())
+        {
+            setCursor(Qt::PointingHandCursor);
+        }
+        else
+        {
+            unsetCursor();
+        }
 
         if (m_draggedTrackId.isNull() || !m_hasFrame)
         {
@@ -424,6 +463,16 @@ protected:
 
             m_draggedTrackId = {};
         }
+
+        const auto hoveredTrackId = trackAt(event->position());
+        if (!hoveredTrackId.isNull())
+        {
+            setCursor(Qt::PointingHandCursor);
+        }
+        else
+        {
+            unsetCursor();
+        }
     }
 
     void mouseDoubleClickEvent(QMouseEvent* event) override
@@ -443,6 +492,49 @@ protected:
 
         m_owner->trackSelected(trackId);
         m_owner->trackActivated(trackId);
+    }
+
+    void wheelEvent(QWheelEvent* event) override
+    {
+        if (!(event->modifiers() & Qt::ControlModifier) || event->angleDelta().y() == 0 || !m_hasFrame)
+        {
+            QWidget::wheelEvent(event);
+            return;
+        }
+
+        const auto trackId = trackAt(event->position());
+        if (trackId.isNull())
+        {
+            QWidget::wheelEvent(event);
+            return;
+        }
+
+        const auto overlayIt = std::find_if(
+            m_overlays.cbegin(),
+            m_overlays.cend(),
+            [&trackId](const TrackOverlay& overlay)
+            {
+                return overlay.id == trackId;
+            });
+        if (overlayIt == m_overlays.cend() || !overlayIt->isSelected || !overlayIt->hasAttachedAudio)
+        {
+            QWidget::wheelEvent(event);
+            return;
+        }
+
+        m_owner->trackGainAdjustRequested(trackId, event->angleDelta().y(), event->globalPosition().toPoint());
+        event->accept();
+    }
+
+    void leaveEvent(QEvent* event) override
+    {
+        QWidget::leaveEvent(event);
+        if (m_emptyStatePromptHovered)
+        {
+            m_emptyStatePromptHovered = false;
+            update();
+        }
+        unsetCursor();
     }
 
 private:
@@ -630,6 +722,7 @@ private:
         painter.setPen(QPen(QColor{70, 86, 108, 180}, 1.0));
         painter.drawPath(panelPath);
 
+        const auto contentRect = emptyStateContentRect(frameRect);
         const auto logoMaxWidth = std::min(frameRect.width() * 0.62, 680.0);
         const auto logoMaxHeight = std::min(frameRect.height() * 0.36, 240.0);
         const auto logoSize = m_emptyStateLogo.isNull()
@@ -638,15 +731,6 @@ private:
                   static_cast<int>(logoMaxWidth),
                   static_cast<int>(logoMaxHeight),
                   Qt::KeepAspectRatio);
-
-        const auto contentWidth = std::max<double>(420.0, logoSize.width());
-        const auto topY = frameRect.center().y() - 130.0;
-        const QRectF contentRect{
-            frameRect.center().x() - contentWidth * 0.5,
-            topY,
-            contentWidth,
-            260.0
-        };
 
         if (!m_emptyStateLogo.isNull())
         {
@@ -686,24 +770,80 @@ private:
             contentRect.left(),
             headlineRect.bottom() + 8.0,
             contentRect.width(),
-            44.0
+            52.0
         };
         painter.drawText(
             bodyRect,
             Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap,
-            QStringLiteral("Open a clip to start placing nodes, attach sound, and stage movement directly on the film."));
+            QStringLiteral("Import a video to start placing nodes, attach sound, and stage movement directly on the film."));
 
         auto promptFont = painter.font();
-        promptFont.setPointSizeF(10.0);
+        promptFont.setPointSizeF(9.5);
+        promptFont.setBold(false);
+        promptFont.setUnderline(m_emptyStatePromptHovered);
         painter.setFont(promptFont);
-        painter.setPen(QColor{92, 175, 255});
-        const QRectF promptRect{
-            contentRect.left(),
-            bodyRect.bottom() + 18.0,
-            contentRect.width(),
-            20.0
+        const auto promptRect = emptyStatePromptRect(frameRect);
+        painter.setPen(m_emptyStatePromptHovered ? QColor{255, 255, 255} : QColor{238, 243, 248});
+        painter.drawText(promptRect, Qt::AlignHCenter | Qt::AlignVCenter, QStringLiteral("Import Video..."));
+    }
+
+    [[nodiscard]] QRectF emptyStateContentRect(const QRectF& frameRect) const
+    {
+        const auto logoMaxWidth = std::min(frameRect.width() * 0.62, 680.0);
+        const auto logoMaxHeight = std::min(frameRect.height() * 0.36, 240.0);
+        const auto logoSize = m_emptyStateLogo.isNull()
+            ? QSize{}
+            : m_emptyStateLogo.size().scaled(
+                  static_cast<int>(logoMaxWidth),
+                  static_cast<int>(logoMaxHeight),
+                  Qt::KeepAspectRatio);
+        const auto contentWidth = std::max<double>(420.0, logoSize.width());
+        return QRectF{
+            frameRect.center().x() - contentWidth * 0.5,
+            frameRect.top() + std::max(26.0, frameRect.height() * 0.10),
+            contentWidth,
+            240.0
         };
-        painter.drawText(promptRect, Qt::AlignHCenter | Qt::AlignVCenter, QStringLiteral("Open Video"));
+    }
+
+    [[nodiscard]] QRectF emptyStatePromptRect(const QRectF& frameRect) const
+    {
+        const auto contentRect = emptyStateContentRect(frameRect);
+        const auto logoMaxWidth = std::min(frameRect.width() * 0.62, 680.0);
+        const auto logoMaxHeight = std::min(frameRect.height() * 0.36, 240.0);
+        const auto logoSize = m_emptyStateLogo.isNull()
+            ? QSize{}
+            : m_emptyStateLogo.size().scaled(
+                  static_cast<int>(logoMaxWidth),
+                  static_cast<int>(logoMaxHeight),
+                  Qt::KeepAspectRatio);
+        const QRectF headlineRect{
+            contentRect.left(),
+            contentRect.top() + logoSize.height() + 18.0,
+            contentRect.width(),
+            28.0
+        };
+        const QRectF bodyRect{
+            contentRect.left(),
+            headlineRect.bottom() + 8.0,
+            contentRect.width(),
+            52.0
+        };
+
+        QFont promptFont = font();
+        promptFont.setPointSizeF(9.5);
+        promptFont.setBold(false);
+        const QFontMetricsF metrics(promptFont);
+        const auto textSize = metrics.size(Qt::TextSingleLine, QStringLiteral("Import Video..."));
+        constexpr double horizontalPadding = 12.0;
+        constexpr double verticalPadding = 6.0;
+        const auto promptHeight = textSize.height() + verticalPadding * 2.0;
+        return QRectF{
+            contentRect.center().x() - (textSize.width() * 0.5) - horizontalPadding,
+            bodyRect.bottom() + 6.0,
+            textSize.width() + horizontalPadding * 2.0,
+            promptHeight
+        };
     }
 
     VideoCanvas* m_owner = nullptr;
@@ -720,6 +860,7 @@ private:
     bool m_nativePresentationActive = false;
     bool m_pendingSeed = false;
     bool m_isMarqueeSelecting = false;
+    bool m_emptyStatePromptHovered = false;
 };
 }
 

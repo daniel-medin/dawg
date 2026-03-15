@@ -39,12 +39,14 @@ signals:
     void playheadChanged(int playheadMs);
     void gainChanged(float gainDb);
     void loopSoundChanged(bool enabled);
+    void attachAudioRequested();
 
 private:
     class WaveformView;
 
     WaveformView* m_waveformView = nullptr;
     QWidget* m_editorContent = nullptr;
+    QWidget* m_infoBar = nullptr;
     QWidget* m_emptyState = nullptr;
     QWidget* m_emptyStateCard = nullptr;
     class QLabel* m_titleLabel = nullptr;
@@ -59,4 +61,5 @@ private:
     class QLabel* m_gainLabel = nullptr;
     class QLabel* m_emptyTitleLabel = nullptr;
     class QLabel* m_emptyBodyLabel = nullptr;
+    class QLabel* m_emptyActionLabel = nullptr;
 };
