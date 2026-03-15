@@ -4,10 +4,13 @@
 
 #include <QDebug>
 #include <QQmlContext>
+#include <QQuickImageProvider>
 #include <QQuickView>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include "ui/TimelineQuickController.h"
+#include "ui/TimelineThumbnailCache.h"
 
 namespace
 {
@@ -15,6 +18,44 @@ QUrl timelineSceneUrl()
 {
     return QUrl(QStringLiteral("qrc:/qml/TimelineScene.qml"));
 }
+
+class TimelineThumbnailProvider final : public QQuickImageProvider
+{
+public:
+    TimelineThumbnailProvider()
+        : QQuickImageProvider(QQuickImageProvider::Image)
+    {
+    }
+
+    QImage requestImage(const QString& id, QSize* size, const QSize& requestedSize) override
+    {
+        const auto segments = id.split(QLatin1Char('/'));
+        if (segments.size() < 2)
+        {
+            return {};
+        }
+
+        bool frameOk = false;
+        const auto frameIndex = segments.at(1).toInt(&frameOk);
+        if (!frameOk)
+        {
+            return {};
+        }
+
+        auto image = timelineThumbnailCache().thumbnail(
+            QUrl::fromPercentEncoding(segments.at(0).toLatin1()),
+            frameIndex);
+        if (requestedSize.isValid() && !image.isNull())
+        {
+            image = image.scaled(requestedSize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        }
+        if (size)
+        {
+            *size = image.size();
+        }
+        return image;
+    }
+};
 
 void ensureTimelineQuickTypesRegistered()
 {
@@ -40,6 +81,9 @@ TimelineView::TimelineView(QWidget* parent)
     m_quickView = new QQuickView();
     m_quickView->setColor(Qt::transparent);
     m_quickView->setResizeMode(QQuickView::SizeRootObjectToView);
+    m_quickView->engine()->addImageProvider(
+        QStringLiteral("timeline-thumbnail"),
+        new TimelineThumbnailProvider());
     m_quickView->rootContext()->setContextProperty(QStringLiteral("timelineController"), m_timelineController);
     connect(m_quickView, &QQuickView::statusChanged, this, [this]()
     {
@@ -70,6 +114,7 @@ TimelineView::TimelineView(QWidget* parent)
 
 void TimelineView::clear()
 {
+    m_videoPath.clear();
     m_totalFrames = 0;
     m_currentFrame = 0;
     m_fps = 0.0;
@@ -81,6 +126,15 @@ void TimelineView::clear()
         m_timelineController->clear();
     }
     updatePreferredHeight();
+}
+
+void TimelineView::setVideoPath(const QString& videoPath)
+{
+    m_videoPath = videoPath;
+    if (m_timelineController)
+    {
+        m_timelineController->setVideoPath(videoPath);
+    }
 }
 
 void TimelineView::setTimeline(const int totalFrames, const double fps)
@@ -142,6 +196,15 @@ void TimelineView::setSeekOnClickEnabled(const bool enabled)
     }
 }
 
+void TimelineView::setThumbnailsVisible(const bool visible)
+{
+    m_thumbnailsVisible = visible;
+    if (m_timelineController)
+    {
+        m_timelineController->setThumbnailsVisible(visible);
+    }
+}
+
 std::optional<int> TimelineView::loopEditFrame() const
 {
     return m_timelineController ? m_timelineController->loopEditFrame() : std::nullopt;
@@ -195,7 +258,9 @@ void TimelineView::syncController()
         return;
     }
 
+    m_timelineController->setVideoPath(m_videoPath);
     m_timelineController->setSeekOnClickEnabled(m_seekOnClickEnabled);
+    m_timelineController->setThumbnailsVisible(m_thumbnailsVisible);
     m_timelineController->setTimeline(m_totalFrames, m_fps);
     m_timelineController->setTrackSpans(m_trackSpans);
     m_timelineController->setLoopRange(m_loopStartFrame, m_loopEndFrame);
@@ -215,8 +280,8 @@ int TimelineView::laneCount() const
 
 int TimelineView::preferredHeight() const
 {
-    constexpr int baseHeight = 104;
-    constexpr int verticalPadding = 40;
+    constexpr int baseHeight = 154;
+    constexpr int verticalPadding = 90;
     constexpr int rowHeight = 10;
     constexpr int rowGap = 2;
 

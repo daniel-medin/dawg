@@ -32,6 +32,8 @@ public:
     void setSourceFrameSize(const QSize& sourceSize);
     void setNativePresentationEnabled(bool enabled);
     void setDisplayScaleFactor(double scaleFactor);
+    [[nodiscard]] double displayScaleFactor() const;
+    void resetDisplayScaleFactor();
     void setOverlays(const std::vector<TrackOverlay>& overlays);
     void setShowAllLabels(bool enabled);
 
@@ -53,4 +55,5 @@ protected:
 private:
     QWidget* m_surfaceLayer = nullptr;
     QWidget* m_overlayLayer = nullptr;
+    double m_displayScaleFactor = 1.0;
 };

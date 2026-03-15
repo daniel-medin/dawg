@@ -113,6 +113,8 @@ add_executable(dawg WIN32
     src/ui/QuickMixStripWidget.h
     src/ui/TimelineQuickController.cpp
     src/ui/TimelineQuickController.h
+    src/ui/TimelineThumbnailCache.cpp
+    src/ui/TimelineThumbnailCache.h
     src/ui/TimelineTypes.h
     src/ui/TimelineView.cpp
     src/ui/TimelineView.h

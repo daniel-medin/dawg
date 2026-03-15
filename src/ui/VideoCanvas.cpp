@@ -47,6 +47,32 @@ QString audioPathFromMimeData(const QMimeData* mimeData)
     return {};
 }
 
+QRectF scaledFrameRect(const QSize& containerSize, const QSize& sourceSize, const double displayScaleFactor)
+{
+    if (sourceSize.isEmpty())
+    {
+        const auto width = std::max(320, containerSize.width() - 64);
+        const auto height = std::max(180, containerSize.height() - 64);
+        return QRectF{
+            (containerSize.width() - width) / 2.0,
+            (containerSize.height() - height) / 2.0,
+            static_cast<double>(width),
+            static_cast<double>(height)
+        };
+    }
+
+    const auto bounded = sourceSize.scaled(containerSize, Qt::KeepAspectRatio);
+    const auto clampedScale = std::clamp(displayScaleFactor, 0.1, 1.0);
+    const auto scaledWidth = std::max(1, static_cast<int>(std::lround(bounded.width() * clampedScale)));
+    const auto scaledHeight = std::max(1, static_cast<int>(std::lround(bounded.height() * clampedScale)));
+    return QRectF{
+        (containerSize.width() - scaledWidth) / 2.0,
+        (containerSize.height() - scaledHeight) / 2.0,
+        static_cast<double>(scaledWidth),
+        static_cast<double>(scaledHeight)
+    };
+}
+
 class VideoSurfaceLayer final : public QWidget
 {
 public:
@@ -110,29 +136,22 @@ public:
         requestPresentRefresh();
     }
 
+    void setDisplayScaleFactor(const double scaleFactor)
+    {
+        const auto clampedScale = std::clamp(scaleFactor, 0.1, 1.0);
+        if (std::abs(m_displayScaleFactor - clampedScale) < 0.001)
+        {
+            return;
+        }
+
+        m_displayScaleFactor = clampedScale;
+        requestPresentRefresh();
+    }
+
     [[nodiscard]] QRectF imageRenderRect() const
     {
         const auto sourceSize = !m_sourceFrameSize.isEmpty() ? m_sourceFrameSize : m_frame.size();
-        if (sourceSize.isEmpty())
-        {
-            const auto width = std::max(320, this->width() - 64);
-            const auto height = std::max(180, this->height() - 64);
-            return QRectF{
-                (this->width() - width) / 2.0,
-                (this->height() - height) / 2.0,
-                static_cast<double>(width),
-                static_cast<double>(height)
-            };
-        }
-
-        const auto bounded = size();
-        const auto scaled = sourceSize.scaled(bounded, Qt::KeepAspectRatio);
-        return QRectF{
-            (width() - scaled.width()) / 2.0,
-            (height() - scaled.height()) / 2.0,
-            static_cast<double>(scaled.width()),
-            static_cast<double>(scaled.height())
-        };
+        return scaledFrameRect(size(), sourceSize, m_displayScaleFactor);
     }
 
 protected:
@@ -202,6 +221,7 @@ private:
     std::function<void(bool)> m_nativePresentationChanged;
     bool m_nativePresentationEnabled = false;
     bool m_nativePresentationActive = false;
+    double m_displayScaleFactor = 1.0;
 };
 
 class VideoOverlayLayer final : public QWidget
@@ -272,6 +292,18 @@ public:
         }
 
         m_nativePresentationActive = active;
+        update();
+    }
+
+    void setDisplayScaleFactor(const double scaleFactor)
+    {
+        const auto clampedScale = std::clamp(scaleFactor, 0.1, 1.0);
+        if (std::abs(m_displayScaleFactor - clampedScale) < 0.001)
+        {
+            return;
+        }
+
+        m_displayScaleFactor = clampedScale;
         update();
     }
 
@@ -589,27 +621,8 @@ protected:
 private:
     [[nodiscard]] QRectF imageRenderRect() const
     {
-        if (!m_hasFrame)
-        {
-            const auto width = std::max(320, this->width() - 64);
-            const auto height = std::max(180, this->height() - 64);
-            return QRectF{
-                (this->width() - width) / 2.0,
-                (this->height() - height) / 2.0,
-                static_cast<double>(width),
-                static_cast<double>(height)
-            };
-        }
-
         const auto sourceSize = !m_sourceFrameSize.isEmpty() ? m_sourceFrameSize : m_presentedFrameSize;
-        const auto bounded = size();
-        const auto scaled = sourceSize.scaled(bounded, Qt::KeepAspectRatio);
-        return QRectF{
-            (width() - scaled.width()) / 2.0,
-            (height() - scaled.height()) / 2.0,
-            static_cast<double>(scaled.width()),
-            static_cast<double>(scaled.height())
-        };
+        return scaledFrameRect(size(), sourceSize, m_displayScaleFactor);
     }
 
     [[nodiscard]] QPointF widgetToImagePoint(const QPointF& widgetPoint) const
@@ -910,13 +923,14 @@ private:
     bool m_pendingSeed = false;
     bool m_isMarqueeSelecting = false;
     bool m_emptyStatePromptHovered = false;
+    double m_displayScaleFactor = 1.0;
 };
 }
 
 VideoCanvas::VideoCanvas(QWidget* parent)
     : QWidget(parent)
 {
-    setMinimumSize(960, 540);
+    setMinimumSize(320, 180);
     m_surfaceLayer = new VideoSurfaceLayer(
         [this](const bool active)
         {
@@ -975,7 +989,25 @@ void VideoCanvas::setNativePresentationEnabled(const bool enabled)
 
 void VideoCanvas::setDisplayScaleFactor(const double scaleFactor)
 {
-    Q_UNUSED(scaleFactor);
+    const auto clampedScale = std::clamp(scaleFactor, 0.1, 1.0);
+    if (std::abs(m_displayScaleFactor - clampedScale) < 0.001)
+    {
+        return;
+    }
+
+    m_displayScaleFactor = clampedScale;
+    static_cast<VideoSurfaceLayer*>(m_surfaceLayer)->setDisplayScaleFactor(m_displayScaleFactor);
+    static_cast<VideoOverlayLayer*>(m_overlayLayer)->setDisplayScaleFactor(m_displayScaleFactor);
+}
+
+double VideoCanvas::displayScaleFactor() const
+{
+    return m_displayScaleFactor;
+}
+
+void VideoCanvas::resetDisplayScaleFactor()
+{
+    setDisplayScaleFactor(1.0);
 }
 
 void VideoCanvas::setOverlays(const std::vector<TrackOverlay>& overlays)

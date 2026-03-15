@@ -241,6 +241,7 @@ private:
     QAction* m_showClipEditorAction = nullptr;
     QAction* m_showTimelineAction = nullptr;
     QAction* m_showMixAction = nullptr;
+    QAction* m_showTimelineThumbnailsAction = nullptr;
     QAction* m_timelineClickSeeksAction = nullptr;
     QAction* m_audioPoolAction = nullptr;
     QAction* m_deleteNodeAction = nullptr;

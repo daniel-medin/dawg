@@ -4,11 +4,15 @@
 #include <cmath>
 
 #include <QToolTip>
+#include <QUrl>
+
+#include "ui/TimelineThumbnailCache.h"
 
 namespace
 {
 constexpr double kMinVisibleFrameSpan = 12.0;
 constexpr double kZoomStepFactor = 1.2;
+constexpr double kFilmstripHeight = 42.0;
 
 double clampedVisibleFrameSpan(const int totalFrames, const double requestedSpan)
 {
@@ -21,6 +25,12 @@ int roundedFpsFrames(const double fps)
 {
     return std::max(1, static_cast<int>(std::lround(fps > 0.0 ? fps : 30.0)));
 }
+
+QString thumbnailSourceUrl(const QString& videoPath, const int frameIndex)
+{
+    const auto encodedPath = QString::fromLatin1(QUrl::toPercentEncoding(videoPath));
+    return QStringLiteral("image://timeline-thumbnail/%1/%2").arg(encodedPath).arg(frameIndex);
+}
 }
 
 TimelineQuickController::TimelineQuickController(QObject* parent)
@@ -29,6 +39,26 @@ TimelineQuickController::TimelineQuickController(QObject* parent)
     m_scrubRequestTimer.setSingleShot(true);
     m_scrubRequestTimer.setInterval(16);
     connect(&m_scrubRequestTimer, &QTimer::timeout, this, &TimelineQuickController::flushPendingFrameRequest);
+    connect(
+        &timelineThumbnailCache(),
+        &TimelineThumbnailCache::thumbnailReady,
+        this,
+        [this](const QString& videoPath, const int frameIndex)
+        {
+            if (videoPath != m_videoPath)
+            {
+                return;
+            }
+
+            const auto sourceUrl = thumbnailSourceUrl(videoPath, frameIndex);
+            if (m_thumbnailSources.value(frameIndex) == sourceUrl)
+            {
+                return;
+            }
+
+            m_thumbnailSources.insert(frameIndex, sourceUrl);
+            refreshVisuals();
+        });
 }
 
 void TimelineQuickController::clear()
@@ -56,8 +86,29 @@ void TimelineQuickController::clear()
     m_lastRequestedFrame = -1;
     m_pendingRequestedFrame = -1;
     m_cursorShape = static_cast<int>(Qt::ArrowCursor);
+    m_videoPath.clear();
+    m_thumbnailFrames.clear();
+    m_thumbnailSources.clear();
     m_scrubRequestTimer.stop();
+    timelineThumbnailCache().clear();
     QToolTip::hideText();
+    refreshVisuals();
+}
+
+void TimelineQuickController::setVideoPath(const QString& videoPath)
+{
+    if (m_videoPath == videoPath)
+    {
+        return;
+    }
+
+    m_videoPath = videoPath;
+    m_thumbnailFrames.clear();
+    m_thumbnailSources.clear();
+    if (m_videoPath.isEmpty())
+    {
+        timelineThumbnailCache().clear();
+    }
     refreshVisuals();
 }
 
@@ -148,6 +199,17 @@ void TimelineQuickController::setSeekOnClickEnabled(const bool enabled)
     m_seekOnClickEnabled = enabled;
 }
 
+void TimelineQuickController::setThumbnailsVisible(const bool visible)
+{
+    if (m_showThumbnails == visible)
+    {
+        return;
+    }
+
+    m_showThumbnails = visible;
+    refreshVisuals();
+}
+
 std::optional<int> TimelineQuickController::loopEditFrame() const
 {
     return m_loopEditFrame;
@@ -173,6 +235,11 @@ QVariantMap TimelineQuickController::timelineRect() const
     return m_timelineRect;
 }
 
+QVariantMap TimelineQuickController::filmstripRect() const
+{
+    return m_filmstripRect;
+}
+
 QVariantMap TimelineQuickController::loopBarRect() const
 {
     return m_loopBarRect;
@@ -186,6 +253,11 @@ QVariantMap TimelineQuickController::trackAreaRect() const
 QVariantList TimelineQuickController::gridLines() const
 {
     return m_gridLines;
+}
+
+QVariantList TimelineQuickController::thumbnailTiles() const
+{
+    return m_thumbnailTiles;
 }
 
 QVariantList TimelineQuickController::trackGeometries() const
@@ -763,12 +835,40 @@ void TimelineQuickController::updateCursorAndTooltip(const QPointF& position, co
 void TimelineQuickController::refreshVisuals()
 {
     const auto timelineRect = computeTimelineRect();
+    const auto filmstripRect = computeFilmstripRect();
     const auto loopRect = computeLoopBarRect();
     const auto trackRect = computeTrackAreaRect();
 
     m_timelineRect = rectMap(timelineRect);
+    m_filmstripRect = rectMap(filmstripRect);
     m_loopBarRect = rectMap(loopRect);
     m_trackAreaRect = rectMap(trackRect);
+
+    const auto nextThumbnailFrames = computeThumbnailFrames();
+    if (m_thumbnailFrames != nextThumbnailFrames)
+    {
+        m_thumbnailFrames = nextThumbnailFrames;
+    }
+    requestThumbnailFrames(m_thumbnailFrames);
+
+    m_thumbnailTiles.clear();
+    if (!m_thumbnailFrames.isEmpty())
+    {
+        const auto tileCount = std::max(1, static_cast<int>(m_thumbnailFrames.size()));
+        const auto tileWidth = filmstripRect.width() / static_cast<double>(tileCount);
+        for (int index = 0; index < m_thumbnailFrames.size(); ++index)
+        {
+            const auto frameIndex = m_thumbnailFrames.at(index);
+            QVariantMap tile;
+            tile.insert(QStringLiteral("x"), filmstripRect.left() + tileWidth * index);
+            tile.insert(QStringLiteral("y"), filmstripRect.top());
+            tile.insert(QStringLiteral("width"), tileWidth);
+            tile.insert(QStringLiteral("height"), filmstripRect.height());
+            tile.insert(QStringLiteral("frameIndex"), frameIndex);
+            tile.insert(QStringLiteral("source"), m_thumbnailSources.value(frameIndex));
+            m_thumbnailTiles.push_back(tile);
+        }
+    }
 
     m_gridLines.clear();
     if (m_totalFrames > 0)
@@ -844,12 +944,33 @@ QRectF TimelineQuickController::computeTimelineRect() const
     };
 }
 
+QRectF TimelineQuickController::computeFilmstripRect() const
+{
+    const auto rect = computeTimelineRect();
+    if (!m_showThumbnails)
+    {
+        return QRectF{
+            rect.left() + 6.0,
+            rect.top() + 6.0,
+            std::max(108.0, rect.width() - 12.0),
+            0.0
+        };
+    }
+
+    return QRectF{
+        rect.left() + 6.0,
+        rect.top() + 6.0,
+        std::max(108.0, rect.width() - 12.0),
+        kFilmstripHeight
+    };
+}
+
 QRectF TimelineQuickController::computeLoopBarRect() const
 {
     const auto rect = computeTimelineRect();
     return QRectF{
         rect.left() + 6.0,
-        rect.top() + 6.0,
+        computeFilmstripRect().bottom() + 6.0,
         std::max(108.0, rect.width() - 12.0),
         14.0
     };
@@ -865,6 +986,55 @@ QRectF TimelineQuickController::computeTrackAreaRect() const
         std::max(108.0, rect.width() - 12.0),
         std::max(28.0, rect.bottom() - top - 6.0)
     };
+}
+
+QVector<int> TimelineQuickController::computeThumbnailFrames() const
+{
+    QVector<int> frameIndices;
+    if (!m_showThumbnails || m_totalFrames <= 0 || m_videoPath.isEmpty())
+    {
+        return frameIndices;
+    }
+
+    const auto filmstripRect = computeFilmstripRect();
+    const auto tileCount = std::clamp(
+        static_cast<int>(std::floor(filmstripRect.width() / 92.0)),
+        4,
+        12);
+    frameIndices.reserve(tileCount);
+    for (int index = 0; index < tileCount; ++index)
+    {
+        const auto ratio = (static_cast<double>(index) + 0.5) / static_cast<double>(tileCount);
+        frameIndices.push_back(static_cast<int>(std::lround(m_viewStartFrame + visibleFrameSpan() * ratio)));
+    }
+    return frameIndices;
+}
+
+void TimelineQuickController::requestThumbnailFrames(const QVector<int>& frameIndices)
+{
+    if (m_videoPath.isEmpty() || frameIndices.isEmpty())
+    {
+        return;
+    }
+
+    QVector<int> missingFrames;
+    missingFrames.reserve(frameIndices.size());
+    for (const auto frameIndex : frameIndices)
+    {
+        if (!m_thumbnailSources.contains(frameIndex) && !timelineThumbnailCache().hasThumbnail(m_videoPath, frameIndex))
+        {
+            missingFrames.push_back(frameIndex);
+        }
+        else if (!m_thumbnailSources.contains(frameIndex) && timelineThumbnailCache().hasThumbnail(m_videoPath, frameIndex))
+        {
+            m_thumbnailSources.insert(frameIndex, thumbnailSourceUrl(m_videoPath, frameIndex));
+        }
+    }
+
+    if (!missingFrames.isEmpty())
+    {
+        timelineThumbnailCache().requestFrames(m_videoPath, missingFrames);
+    }
 }
 
 double TimelineQuickController::visibleFrameSpan() const

@@ -3,6 +3,7 @@
 #include <optional>
 #include <vector>
 
+#include <QString>
 #include <QWidget>
 
 #include "ui/TimelineTypes.h"
@@ -18,11 +19,13 @@ public:
     explicit TimelineView(QWidget* parent = nullptr);
 
     void clear();
+    void setVideoPath(const QString& videoPath);
     void setTimeline(int totalFrames, double fps);
     void setCurrentFrame(int frameIndex);
     void setLoopRange(std::optional<int> startFrame, std::optional<int> endFrame);
     void setTrackSpans(const std::vector<TimelineTrackSpan>& trackSpans);
     void setSeekOnClickEnabled(bool enabled);
+    void setThumbnailsVisible(bool visible);
     [[nodiscard]] std::optional<int> loopEditFrame() const;
     [[nodiscard]] std::optional<int> loopShortcutFrame() const;
     [[nodiscard]] bool hasSelectedLoopRange() const;
@@ -56,8 +59,10 @@ private:
     int m_totalFrames = 0;
     int m_currentFrame = 0;
     double m_fps = 0.0;
+    QString m_videoPath;
     std::optional<int> m_loopStartFrame;
     std::optional<int> m_loopEndFrame;
     bool m_seekOnClickEnabled = true;
+    bool m_thumbnailsVisible = true;
     std::vector<TimelineTrackSpan> m_trackSpans;
 };

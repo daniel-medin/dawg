@@ -43,7 +43,7 @@ Rectangle {
             spacing: 8
 
             Text {
-                width: parent.width - (loopButton.visible ? loopButton.width + 8 : 0)
+                width: parent.width - (loopButton.visible ? loopButton.width + parent.spacing : 0)
                 text: clipEditorController.titleText
                 color: "#f1f4f7"
                 font.pixelSize: 18
@@ -54,18 +54,19 @@ Rectangle {
             Rectangle {
                 id: loopButton
                 visible: clipEditorController.showLoopButton
-                width: 108
-                height: 26
-                radius: 6
-                color: clipEditorController.loopEnabled ? "#2b4d31" : "#141a21"
+                width: 28
+                height: 28
+                radius: 7
+                color: clipEditorController.loopEnabled ? "#274632" : "#131a22"
                 border.width: 1
-                border.color: clipEditorController.loopEnabled ? "#4f8a58" : "#2a3541"
+                border.color: clipEditorController.loopEnabled ? "#5f9b6b" : "#2c3947"
 
                 Text {
                     anchors.centerIn: parent
-                    text: "Loop Sound"
-                    color: clipEditorController.loopEnabled ? "#eef7f0" : "#d5dce4"
-                    font.pixelSize: 12
+                    text: "\u27f3"
+                    color: clipEditorController.loopEnabled ? "#f0f8f2" : "#d1d9e2"
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
                 }
 
                 MouseArea {

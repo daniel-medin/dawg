@@ -64,6 +64,7 @@ void MainWindowActions::buildMenus()
     m_window.m_showClipEditorAction = new QAction(QStringLiteral("Toggle Clip Editor (Ctrl+-)"), &m_window);
     m_window.m_showTimelineAction = new QAction(QStringLiteral("Show Timeline (T)"), &m_window);
     m_window.m_showMixAction = new QAction(QStringLiteral("Toggle Mix Window (Ctrl++)"), &m_window);
+    m_window.m_showTimelineThumbnailsAction = new QAction(QStringLiteral("Hide Thumbnails"), &m_window);
     m_window.m_timelineClickSeeksAction = new QAction(QStringLiteral("Click Seeks Playhead"), &m_window);
     m_window.m_audioPoolAction = new QAction(QStringLiteral("Audio Pool (P)"), &m_window);
     m_window.m_deleteNodeAction = new QAction(QStringLiteral("Delete (Backspace)"), &m_window);
@@ -83,6 +84,8 @@ void MainWindowActions::buildMenus()
     m_window.m_showTimelineAction->setChecked(true);
     m_window.m_showMixAction->setCheckable(true);
     m_window.m_showMixAction->setChecked(false);
+    m_window.m_showTimelineThumbnailsAction->setCheckable(true);
+    m_window.m_showTimelineThumbnailsAction->setChecked(true);
     m_window.m_timelineClickSeeksAction->setCheckable(true);
     m_window.m_timelineClickSeeksAction->setChecked(true);
     m_window.m_audioPoolAction->setCheckable(true);
@@ -180,6 +183,7 @@ void MainWindowActions::buildMenus()
     timelineMenu->addAction(m_window.m_setLoopEndAction);
     timelineMenu->addAction(m_window.m_clearLoopRangeAction);
     timelineMenu->addSeparator();
+    timelineMenu->addAction(m_window.m_showTimelineThumbnailsAction);
     timelineMenu->addAction(m_window.m_timelineClickSeeksAction);
 
     auto* viewMenu = m_window.menuBar()->addMenu(QStringLiteral("&View"));

@@ -903,6 +903,16 @@ MainWindow::MainWindow(QWidget* parent)
         }
         showStatus(visible ? QStringLiteral("Mix window shown.") : QStringLiteral("Mix window hidden."));
     });
+    connect(m_showTimelineThumbnailsAction, &QAction::toggled, this, [this](const bool visible)
+    {
+        if (m_timeline)
+        {
+            m_timeline->setThumbnailsVisible(visible);
+        }
+        m_showTimelineThumbnailsAction->setText(
+            visible ? QStringLiteral("Hide Thumbnails") : QStringLiteral("Show Thumbnails"));
+        showStatus(visible ? QStringLiteral("Timeline thumbnails shown.") : QStringLiteral("Timeline thumbnails hidden."));
+    });
     connect(m_timelineClickSeeksAction, &QAction::toggled, this, [this](const bool enabled)
     {
         m_timeline->setSeekOnClickEnabled(enabled || !m_controller->isPlaying());
@@ -1053,6 +1063,10 @@ MainWindow::MainWindow(QWidget* parent)
             clearLoopRange();
         }
     });
+    if (m_showTimelineThumbnailsAction)
+    {
+        m_timeline->setThumbnailsVisible(m_showTimelineThumbnailsAction->isChecked());
+    }
     connect(m_toggleDebugAction, &QAction::toggled, this, [this](const bool enabled)
     {
         updateDebugVisibility(enabled);
@@ -2459,6 +2473,7 @@ void MainWindow::refreshTimeline()
     const auto trackSpans = m_controller->timelineTrackSpans();
     if (m_timeline)
     {
+        m_timeline->setVideoPath(m_controller->loadedPath());
         m_timeline->setTrackSpans(trackSpans);
         m_timeline->setLoopRange(m_controller->loopStartFrame(), m_controller->loopEndFrame());
     }

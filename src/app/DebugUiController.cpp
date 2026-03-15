@@ -455,6 +455,7 @@ void DebugUiController::handleVideoLoaded(const QString& filePath, const int tot
     }
     else
     {
+        m_window.m_timeline->setVideoPath(filePath);
         m_window.m_timeline->setTimeline(totalFrames, fps);
     }
     if (m_window.m_nativeViewportWindow)
