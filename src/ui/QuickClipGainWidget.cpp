@@ -13,11 +13,23 @@ QUrl clipGainStripUrl()
 }
 
 constexpr float kGainStepDb = 0.1F;
-constexpr float kMeterStep = 1.0F / 96.0F;
+constexpr float kMeterQuantizeStepDb = 0.5F;
 
 float quantizeStep(const float value, const float step)
 {
     return std::round(value / step) * step;
+}
+
+float quantizeMeterLevel(const float level)
+{
+    if (level <= 0.0F)
+    {
+        return 0.0F;
+    }
+
+    const auto meterDb = 20.0F * std::log10(level);
+    const auto quantizedDb = quantizeStep(meterDb, kMeterQuantizeStepDb);
+    return std::clamp(std::pow(10.0F, quantizedDb / 20.0F), 0.0F, 1.0F);
 }
 }
 
@@ -50,7 +62,7 @@ void QuickClipGainWidget::setGainDb(const float gainDb)
 void QuickClipGainWidget::setMeterLevel(const float level)
 {
     const auto clampedLevel = std::clamp(level, 0.0F, 1.0F);
-    const auto quantizedLevel = std::clamp(quantizeStep(clampedLevel, kMeterStep), 0.0F, 1.0F);
+    const auto quantizedLevel = quantizeMeterLevel(clampedLevel);
     if (std::abs(m_meterLevel - quantizedLevel) <= 0.0001F)
     {
         return;
