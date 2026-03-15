@@ -21,6 +21,8 @@ public:
     virtual int frameCount() const = 0;
     virtual double fps() const = 0;
     virtual cv::Size frameSize() const = 0;
+    virtual void setCpuFrameExtractionEnabled(bool enabled) = 0;
+    [[nodiscard]] virtual bool cpuFrameExtractionEnabled() const = 0;
     virtual void setOutputScale(double scale) = 0;
     [[nodiscard]] virtual double outputScale() const = 0;
     [[nodiscard]] virtual QString backendName() const = 0;

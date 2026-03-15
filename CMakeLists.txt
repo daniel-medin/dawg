@@ -27,16 +27,32 @@ add_executable(dawg WIN32
     src/resources.qrc
     src/app/MainWindow.cpp
     src/app/MainWindow.h
+    src/app/AudioPlaybackCoordinator.cpp
+    src/app/AudioPlaybackCoordinator.h
     src/app/AudioPoolService.cpp
     src/app/AudioPoolService.h
+    src/app/ClipEditorSession.cpp
+    src/app/ClipEditorSession.h
+    src/app/MixStateStore.cpp
+    src/app/MixStateStore.h
+    src/app/TimelineLayoutService.cpp
+    src/app/TimelineLayoutService.h
     src/app/ProjectDocument.cpp
     src/app/ProjectDocument.h
     src/app/PerformanceLogger.cpp
     src/app/PerformanceLogger.h
     src/app/PlayerController.cpp
     src/app/PlayerController.h
+    src/app/ProjectSessionAdapter.cpp
+    src/app/ProjectSessionAdapter.h
+    src/app/SelectionController.cpp
+    src/app/SelectionController.h
+    src/app/TrackEditService.cpp
+    src/app/TrackEditService.h
     src/app/TransportController.cpp
     src/app/TransportController.h
+    src/app/VideoPlaybackCoordinator.cpp
+    src/app/VideoPlaybackCoordinator.h
     src/core/audio/AudioDurationProbe.cpp
     src/core/audio/AudioDurationProbe.h
     src/core/audio/AudioEngine.cpp

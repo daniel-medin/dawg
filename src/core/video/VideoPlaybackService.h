@@ -41,6 +41,8 @@ public:
     [[nodiscard]] const VideoFrame& currentFrame() const;
     [[nodiscard]] QString decoderBackendName() const;
     [[nodiscard]] bool isHardwareDecoded() const;
+    bool setCpuFrameExtractionEnabled(bool enabled);
+    [[nodiscard]] bool cpuFrameExtractionEnabled() const;
     bool setPresentationScale(double scale);
     [[nodiscard]] double presentationScale() const;
 
@@ -75,6 +77,7 @@ private:
     int m_totalFrames = 0;
     double m_fps = 0.0;
     double m_presentationScale = 1.0;
+    bool m_cpuFrameExtractionEnabled = true;
     std::size_t m_prefetchTargetSize = 8;
     bool m_stopPrefetch = false;
     bool m_reachedEndOfStream = false;

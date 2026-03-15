@@ -34,11 +34,7 @@ bool RenderService::fastPlaybackEnabled() const
 
 QImage RenderService::presentFrame(const VideoFrame& frame, const bool playbackActive)
 {
-    // Frame delivery still needs a CPU image for Qt overlays, fallback drawing, and
-    // non-native paths. Native widgets upload to D3D at paint time instead.
-    Q_UNUSED(m_backend);
     Q_UNUSED(playbackActive);
-
     return frame.cpuImage;
 }
 

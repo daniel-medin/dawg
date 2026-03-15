@@ -38,10 +38,12 @@ bool VideoPlaybackService::open(const QString& filePath)
     close();
 
     auto decoder = createVideoDecoder();
+    decoder->setCpuFrameExtractionEnabled(m_cpuFrameExtractionEnabled);
     decoder->setOutputScale(m_presentationScale);
     if (!decoder->open(filePath.toStdString()))
     {
         decoder = std::make_unique<OpenCvVideoDecoder>();
+        decoder->setCpuFrameExtractionEnabled(m_cpuFrameExtractionEnabled);
         decoder->setOutputScale(m_presentationScale);
         if (!decoder->open(filePath.toStdString()))
         {
@@ -101,6 +103,7 @@ void VideoPlaybackService::close()
         m_totalFrames = 0;
         m_fps = 0.0;
         m_presentationScale = 1.0;
+        m_cpuFrameExtractionEnabled = true;
         m_reachedEndOfStream = false;
     m_decoderNeedsRealign = false;
     m_lastStepWaitMs = 0;
@@ -205,6 +208,62 @@ double VideoPlaybackService::presentationScale() const
 {
     const std::lock_guard stateLock(m_stateMutex);
     return m_presentationScale;
+}
+
+bool VideoPlaybackService::setCpuFrameExtractionEnabled(const bool enabled)
+{
+    {
+        const std::lock_guard stateLock(m_stateMutex);
+        if (m_cpuFrameExtractionEnabled == enabled)
+        {
+            return true;
+        }
+    }
+
+    if (!hasVideoLoaded())
+    {
+        const std::lock_guard stateLock(m_stateMutex);
+        m_cpuFrameExtractionEnabled = enabled;
+        return true;
+    }
+
+    const auto currentFrameIndex = m_currentFrame.index;
+    {
+        const std::lock_guard decoderLock(m_decoderMutex);
+        if (m_decoder)
+        {
+            m_decoder->setCpuFrameExtractionEnabled(enabled);
+        }
+    }
+
+    const auto reloadedFrame = decodeFrameAt(currentFrameIndex);
+    if (!reloadedFrame.has_value() || !reloadedFrame->isValid())
+    {
+        return false;
+    }
+
+    {
+        const std::lock_guard stateLock(m_stateMutex);
+        m_cpuFrameExtractionEnabled = enabled;
+        m_frameQueue.clear();
+        m_recentFrameCache.clear();
+        m_currentFrame = *reloadedFrame;
+        m_reachedEndOfStream = false;
+        m_decoderNeedsRealign = false;
+        m_lastStepWaitMs = 0;
+        m_lastStepUsedSynchronousFallback = false;
+        ++m_prefetchGeneration;
+        cacheFrameLocked(m_currentFrame);
+    }
+
+    requestPrefetch();
+    return true;
+}
+
+bool VideoPlaybackService::cpuFrameExtractionEnabled() const
+{
+    const std::lock_guard stateLock(m_stateMutex);
+    return m_cpuFrameExtractionEnabled;
 }
 
 bool VideoPlaybackService::seekFrame(const int frameIndex)

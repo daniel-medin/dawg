@@ -193,6 +193,7 @@ struct FfmpegVideoDecoder::Impl
     HardwareFormatSelectionContext hardwareFormatSelection;
     int presentationRotationDegrees = 0;
     double outputScale = 1.0;
+    bool cpuFrameExtractionEnabled = true;
 
     ~Impl()
     {
@@ -250,6 +251,7 @@ struct FfmpegVideoDecoder::Impl
         activeBackendName = QStringLiteral("FFmpeg");
         hardwareFormatSelection = {};
         presentationRotationDegrees = 0;
+        cpuFrameExtractionEnabled = true;
     }
 #endif
 };
@@ -475,21 +477,13 @@ std::optional<VideoFrame> FfmpegVideoDecoder::readFrame()
                 ? (m_impl->decodedFrame->duration * rationalToDouble(m_impl->streamTimeBase))
                 : (fps() > 0.0 ? 1.0 / fps() : 0.0);
 
-            auto* sourceFrame = m_impl->decodedFrame;
             std::uintptr_t nativeHandle = 0;
             std::uint32_t nativeSubresourceIndex = 0;
             bool hardwareBacked = false;
             std::shared_ptr<void> nativeResource;
+            auto* sourceFrame = m_impl->decodedFrame;
             if (m_impl->hardwareDecodeEnabled && m_impl->decodedFrame->format == m_impl->hardwarePixelFormat)
             {
-                av_frame_unref(m_impl->transferFrame);
-                if (av_hwframe_transfer_data(m_impl->transferFrame, m_impl->decodedFrame, 0) < 0)
-                {
-                    av_frame_unref(m_impl->decodedFrame);
-                    return std::nullopt;
-                }
-
-                sourceFrame = m_impl->transferFrame;
                 nativeHandle = reinterpret_cast<std::uintptr_t>(m_impl->decodedFrame->data[0]);
                 nativeSubresourceIndex = static_cast<std::uint32_t>(
                     reinterpret_cast<std::uintptr_t>(m_impl->decodedFrame->data[1]));
@@ -509,73 +503,89 @@ std::optional<VideoFrame> FfmpegVideoDecoder::readFrame()
                         });
                 }
 #endif
+
+                if (m_impl->cpuFrameExtractionEnabled)
+                {
+                    av_frame_unref(m_impl->transferFrame);
+                    if (av_hwframe_transfer_data(m_impl->transferFrame, m_impl->decodedFrame, 0) < 0)
+                    {
+                        av_frame_unref(m_impl->decodedFrame);
+                        return std::nullopt;
+                    }
+
+                    sourceFrame = m_impl->transferFrame;
+                }
             }
 
-            if (!m_impl->swsContext)
+            QImage presentedImage;
+            if (!hardwareBacked || m_impl->cpuFrameExtractionEnabled)
             {
-                m_impl->swsContext = sws_getCachedContext(
+                if (!m_impl->swsContext)
+                {
+                    m_impl->swsContext = sws_getCachedContext(
+                        m_impl->swsContext,
+                        sourceFrame->width,
+                        sourceFrame->height,
+                        static_cast<AVPixelFormat>(sourceFrame->format),
+                        sourceFrame->width,
+                        sourceFrame->height,
+                        AV_PIX_FMT_BGRA,
+                        SWS_BILINEAR,
+                        nullptr,
+                        nullptr,
+                        nullptr);
+                }
+
+                if (!m_impl->swsContext)
+                {
+                    av_frame_unref(m_impl->decodedFrame);
+                    return std::nullopt;
+                }
+
+                QImage cpuImage(
+                    sourceFrame->width,
+                    sourceFrame->height,
+                    QImage::Format_ARGB32);
+                if (cpuImage.isNull())
+                {
+                    av_frame_unref(m_impl->decodedFrame);
+                    return std::nullopt;
+                }
+
+                uint8_t* dstData[4] = {cpuImage.bits(), nullptr, nullptr, nullptr};
+                int dstLinesize[4] = {static_cast<int>(cpuImage.bytesPerLine()), 0, 0, 0};
+                sws_scale(
                     m_impl->swsContext,
-                    sourceFrame->width,
+                    sourceFrame->data,
+                    sourceFrame->linesize,
+                    0,
                     sourceFrame->height,
-                    static_cast<AVPixelFormat>(sourceFrame->format),
-                    sourceFrame->width,
-                    sourceFrame->height,
-                    AV_PIX_FMT_BGRA,
-                    SWS_BILINEAR,
-                    nullptr,
-                    nullptr,
-                    nullptr);
-            }
+                    dstData,
+                    dstLinesize);
 
-            if (!m_impl->swsContext)
-            {
-                av_frame_unref(m_impl->decodedFrame);
-                return std::nullopt;
-            }
-
-            QImage cpuImage(
-                sourceFrame->width,
-                sourceFrame->height,
-                QImage::Format_ARGB32);
-            if (cpuImage.isNull())
-            {
-                av_frame_unref(m_impl->decodedFrame);
-                return std::nullopt;
-            }
-
-            uint8_t* dstData[4] = {cpuImage.bits(), nullptr, nullptr, nullptr};
-            int dstLinesize[4] = {static_cast<int>(cpuImage.bytesPerLine()), 0, 0, 0};
-            sws_scale(
-                m_impl->swsContext,
-                sourceFrame->data,
-                sourceFrame->linesize,
-                0,
-                sourceFrame->height,
-                dstData,
-                dstLinesize);
-
-            QImage presentedImage = cpuImage;
-            switch (m_impl->presentationRotationDegrees)
-            {
-            case 90:
-                presentedImage = cpuImage.transformed(QTransform().rotate(90.0));
-                break;
-            case 180:
-                presentedImage = cpuImage.transformed(QTransform().rotate(180.0));
-                break;
-            case 270:
-                presentedImage = cpuImage.transformed(QTransform().rotate(270.0));
-                break;
-            default:
-                break;
-            }
-            if (m_impl->outputScale < 0.999)
-            {
-                presentedImage = presentedImage.scaled(
-                    std::max(1, static_cast<int>(std::lround(presentedImage.width() * m_impl->outputScale))),
-                    std::max(1, static_cast<int>(std::lround(presentedImage.height() * m_impl->outputScale))),
-                    Qt::IgnoreAspectRatio,
-                    Qt::SmoothTransformation);
+                presentedImage = cpuImage;
+                switch (m_impl->presentationRotationDegrees)
+                {
+                case 90:
+                    presentedImage = cpuImage.transformed(QTransform().rotate(90.0));
+                    break;
+                case 180:
+                    presentedImage = cpuImage.transformed(QTransform().rotate(180.0));
+                    break;
+                case 270:
+                    presentedImage = cpuImage.transformed(QTransform().rotate(270.0));
+                    break;
+                default:
+                    break;
+                }
+                if (m_impl->outputScale < 0.999)
+                {
+                    presentedImage = presentedImage.scaled(
+                        std::max(1, static_cast<int>(std::lround(presentedImage.width() * m_impl->outputScale))),
+                        std::max(1, static_cast<int>(std::lround(presentedImage.height() * m_impl->outputScale))),
+                        Qt::IgnoreAspectRatio,
+                        Qt::SmoothTransformation);
+                }
             }
 
             VideoFrame frame;
@@ -672,6 +682,21 @@ void FfmpegVideoDecoder::setOutputScale(const double scale)
 double FfmpegVideoDecoder::outputScale() const
 {
     return m_impl ? m_impl->outputScale : 1.0;
+}
+
+void FfmpegVideoDecoder::setCpuFrameExtractionEnabled(const bool enabled)
+{
+    if (!m_impl)
+    {
+        return;
+    }
+
+    m_impl->cpuFrameExtractionEnabled = enabled;
+}
+
+bool FfmpegVideoDecoder::cpuFrameExtractionEnabled() const
+{
+    return m_impl ? m_impl->cpuFrameExtractionEnabled : true;
 }
 
 QString FfmpegVideoDecoder::backendName() const

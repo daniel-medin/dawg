@@ -30,6 +30,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QScreen>
 #include <QSettings>
@@ -229,11 +230,54 @@ QStringList projectMediaFilesInDirectory(const QString& directoryPath, const QSt
     return files;
 }
 
-bool controllerStateHasSavedMedia(const dawg::project::ControllerState& state)
+QString normalizedMediaCopyBaseName(const QFileInfo& fileInfo)
 {
-    return !state.videoPath.isEmpty()
-        || !state.audioPoolAssetPaths.empty()
-        || !state.trackerState.tracks.empty();
+    auto baseName = fileInfo.completeBaseName();
+    static const QRegularExpression copySuffixPattern(QStringLiteral(R"( \(\d+\)$)"));
+    baseName.remove(copySuffixPattern);
+    return baseName;
+}
+
+std::optional<QString> preferredRecoveredVideoPath(const QStringList& videoFiles)
+{
+    if (videoFiles.isEmpty())
+    {
+        return std::nullopt;
+    }
+
+    QStringList rankedFiles = videoFiles;
+    std::sort(
+        rankedFiles.begin(),
+        rankedFiles.end(),
+        [](const QString& leftPath, const QString& rightPath)
+        {
+            const QFileInfo leftInfo(leftPath);
+            const QFileInfo rightInfo(rightPath);
+            const auto leftNormalizedBase = normalizedMediaCopyBaseName(leftInfo);
+            const auto rightNormalizedBase = normalizedMediaCopyBaseName(rightInfo);
+            const auto leftIsCopiedName =
+                QString::compare(leftInfo.completeBaseName(), leftNormalizedBase, Qt::CaseInsensitive) != 0;
+            const auto rightIsCopiedName =
+                QString::compare(rightInfo.completeBaseName(), rightNormalizedBase, Qt::CaseInsensitive) != 0;
+            if (leftIsCopiedName != rightIsCopiedName)
+            {
+                return !leftIsCopiedName;
+            }
+
+            const auto leftNameCompare = QString::compare(leftNormalizedBase, rightNormalizedBase, Qt::CaseInsensitive);
+            if (leftNameCompare != 0)
+            {
+                return leftNameCompare < 0;
+            }
+
+            if (leftInfo.fileName().size() != rightInfo.fileName().size())
+            {
+                return leftInfo.fileName().size() < rightInfo.fileName().size();
+            }
+
+            return QString::compare(leftInfo.fileName(), rightInfo.fileName(), Qt::CaseInsensitive) < 0;
+        });
+    return QDir::cleanPath(rankedFiles.front());
 }
 
 bool recoverProjectMediaFromFolders(
@@ -241,28 +285,34 @@ bool recoverProjectMediaFromFolders(
     const QString& projectRootPath,
     QString* message)
 {
-    if (!state || controllerStateHasSavedMedia(*state))
+    if (!state)
     {
         return false;
     }
 
     bool recovered = false;
-    const auto videoFiles = projectMediaFilesInDirectory(
-        QDir(projectRootPath).filePath(QStringLiteral("video")),
-        projectVideoExtensions());
-    if (videoFiles.size() == 1)
+    if (state->videoPath.isEmpty())
     {
-        state->videoPath = videoFiles.front();
-        recovered = true;
+        const auto videoFiles = projectMediaFilesInDirectory(
+            QDir(projectRootPath).filePath(QStringLiteral("video")),
+            projectVideoExtensions());
+        if (const auto recoveredVideoPath = preferredRecoveredVideoPath(videoFiles); recoveredVideoPath.has_value())
+        {
+            state->videoPath = *recoveredVideoPath;
+            recovered = true;
+        }
     }
 
-    const auto audioFiles = projectMediaFilesInDirectory(
-        QDir(projectRootPath).filePath(QStringLiteral("audio")),
-        projectAudioExtensions());
-    if (!audioFiles.isEmpty())
+    if (state->audioPoolAssetPaths.empty())
     {
-        state->audioPoolAssetPaths.assign(audioFiles.cbegin(), audioFiles.cend());
-        recovered = true;
+        const auto audioFiles = projectMediaFilesInDirectory(
+            QDir(projectRootPath).filePath(QStringLiteral("audio")),
+            projectAudioExtensions());
+        if (!audioFiles.isEmpty())
+        {
+            state->audioPoolAssetPaths.assign(audioFiles.cbegin(), audioFiles.cend());
+            recovered = true;
+        }
     }
 
     if (recovered && message)
@@ -4383,7 +4433,6 @@ void MainWindow::buildUi()
 
     m_canvas = new VideoCanvas(m_canvasPanel);
     m_canvas->setRenderService(m_controller->renderService());
-    m_canvas->setNativePresentationEnabled(true);
     canvasPanelLayout->addWidget(m_canvas, 1);
     m_nativeViewport = new NativeVideoViewport(nullptr);
     m_nativeViewport->setWindowTitle(QStringLiteral("Native Video Viewport Test"));

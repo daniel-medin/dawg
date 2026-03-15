@@ -112,7 +112,8 @@ public:
 
     [[nodiscard]] QRectF imageRenderRect() const
     {
-        if (m_frame.isNull())
+        const auto sourceSize = !m_sourceFrameSize.isEmpty() ? m_sourceFrameSize : m_frame.size();
+        if (sourceSize.isEmpty())
         {
             const auto width = std::max(320, this->width() - 64);
             const auto height = std::max(180, this->height() - 64);
@@ -124,7 +125,6 @@ public:
             };
         }
 
-        const auto sourceSize = !m_sourceFrameSize.isEmpty() ? m_sourceFrameSize : m_frame.size();
         const auto bounded = size();
         const auto scaled = sourceSize.scaled(bounded, Qt::KeepAspectRatio);
         return QRectF{
@@ -222,7 +222,17 @@ public:
     {
         m_frame = frame;
         m_presentedFrameSize = frame.size();
-        m_hasFrame = !frame.isNull();
+        update();
+    }
+
+    void setFrameAvailable(const bool available)
+    {
+        if (m_hasFrame == available)
+        {
+            return;
+        }
+
+        m_hasFrame = available;
         update();
     }
 
@@ -278,6 +288,13 @@ protected:
             painter.fillRect(frameRect, QColor{24, 27, 32});
             paintWelcomeState(painter, frameRect);
             return;
+        }
+
+        if (m_nativePresentationActive)
+        {
+            painter.setCompositionMode(QPainter::CompositionMode_Source);
+            painter.fillRect(rect(), Qt::transparent);
+            painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
         }
 
         if (!m_nativePresentationActive)
@@ -923,13 +940,16 @@ void VideoCanvas::setPresentedFrame(const QImage& frame, const VideoFrame& video
     surfaceLayer->setVideoFrame(videoFrame);
     surfaceLayer->setSourceFrameSize(sourceSize);
     overlayLayer->setFrame(frame);
+    overlayLayer->setFrameAvailable(videoFrame.isValid());
     overlayLayer->setSourceFrameSize(sourceSize);
 }
 
 void VideoCanvas::setFrame(const QImage& frame)
 {
     static_cast<VideoSurfaceLayer*>(m_surfaceLayer)->setFrame(frame);
-    static_cast<VideoOverlayLayer*>(m_overlayLayer)->setFrame(frame);
+    auto* overlayLayer = static_cast<VideoOverlayLayer*>(m_overlayLayer);
+    overlayLayer->setFrame(frame);
+    overlayLayer->setFrameAvailable(!frame.isNull());
 }
 
 void VideoCanvas::setVideoFrame(const VideoFrame& frame)

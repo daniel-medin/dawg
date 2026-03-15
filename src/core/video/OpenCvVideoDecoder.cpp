@@ -126,6 +126,16 @@ cv::Size OpenCvVideoDecoder::frameSize() const
     };
 }
 
+void OpenCvVideoDecoder::setCpuFrameExtractionEnabled(const bool enabled)
+{
+    Q_UNUSED(enabled);
+}
+
+bool OpenCvVideoDecoder::cpuFrameExtractionEnabled() const
+{
+    return true;
+}
+
 void OpenCvVideoDecoder::setOutputScale(const double scale)
 {
     m_outputScale = std::clamp(scale, 0.1, 1.0);

@@ -19,15 +19,18 @@
 #include <opencv2/core/mat.hpp>
 
 #include "app/TransportController.h"
+#include "app/AudioPlaybackCoordinator.h"
 #include "app/AudioPoolService.h"
+#include "app/ClipEditorSession.h"
+#include "app/MixStateStore.h"
 #include "app/PerformanceLogger.h"
 #include "app/ProjectDocument.h"
+#include "app/SelectionController.h"
+#include "app/TrackEditService.h"
+#include "app/VideoPlaybackCoordinator.h"
 #include "core/audio/AudioEngine.h"
-#include "core/render/RenderService.h"
 #include "core/tracking/MotionTracker.h"
-#include "core/video/AnalysisFrameProvider.h"
 #include "core/video/VideoFrame.h"
-#include "core/video/VideoPlaybackService.h"
 #include "ui/ClipEditorView.h"
 #include "ui/MixView.h"
 #include "ui/TimelineView.h"
@@ -174,81 +177,45 @@ private slots:
 
 private:
     [[nodiscard]] bool advanceOneFrame(bool presentFrame, bool syncAudio);
-    [[nodiscard]] bool needsTrackingFrameProcessing() const;
-    void updateCurrentGrayFrameIfNeeded();
     bool loadFrameAt(int frameIndex);
     [[nodiscard]] double frameTimestampSeconds(int frameIndex) const;
     [[nodiscard]] std::optional<int> trimmedEndFrameForTrack(const TrackPoint& track) const;
     [[nodiscard]] std::optional<int> audioDurationMs(const QString& filePath) const;
     void saveUndoState();
     void restoreTrackEditState(const MotionTrackerState& trackerState, const std::vector<QUuid>& selectedTrackIds);
-    void clearProjectStateAfterMediaStop();
+    void clearProjectStateAfterMediaStop(bool resetVideoPlaybackState = true);
     void syncAttachedAudioForCurrentFrame();
     void refreshOverlays();
     void emitCurrentFrame();
-    bool applyPresentationScaleForPlaybackState(bool playbackActive);
     [[nodiscard]] bool isTrackSelected(const QUuid& trackId) const;
     [[nodiscard]] std::optional<int> mixLaneIndexForTrack(const QUuid& trackId) const;
-    [[nodiscard]] float mixLaneGainDb(int laneIndex) const;
-    [[nodiscard]] bool isMixLaneMuted(int laneIndex) const;
-    [[nodiscard]] bool isMixLaneSoloed(int laneIndex) const;
-    [[nodiscard]] bool anyMixLaneSoloed() const;
     [[nodiscard]] std::optional<std::pair<int, int>> activeLoopRange() const;
     void applyLiveMixStateToCurrentPlayback();
-    [[nodiscard]] std::optional<int> currentSelectedTrackClipPreviewPlayheadMs() const;
     void handleClipEditorPreviewTimeout();
     void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
-    void logPlaybackHitchIfNeeded(int targetFrameIndex, int previousFrameIndex, int advancedFrames);
 
-    VideoPlaybackService m_videoPlayback;
     TransportController m_transport;
     std::unique_ptr<AudioEngine> m_audioEngine;
-    RenderService m_renderService;
-    AnalysisFrameProvider m_analysisFrameProvider;
+    std::unique_ptr<AudioPlaybackCoordinator> m_audioPlaybackCoordinator;
+    std::unique_ptr<VideoPlaybackCoordinator> m_videoPlaybackCoordinator;
     AudioPoolService m_audioPool;
     MotionTracker m_tracker;
-    QString m_loadedPath;
-    QString m_embeddedVideoAudioPath;
-    QString m_embeddedVideoAudioDisplayName;
+    std::unique_ptr<SelectionController> m_selectionController;
+    std::unique_ptr<TrackEditService> m_trackEditService;
+    std::unique_ptr<ClipEditorSession> m_clipEditorSession;
+    std::unique_ptr<MixStateStore> m_mixStateStore;
     bool m_embeddedVideoAudioMuted = true;
-    VideoFrame m_currentFrame;
-    cv::Mat m_currentGrayFrame;
     std::vector<TrackOverlay> m_currentOverlays;
-    int m_totalFrames = 0;
-    double m_fps = 0.0;
     bool m_motionTrackingEnabled = false;
-    double m_playbackStartTimestampSeconds = 0.0;
-    QElapsedTimer m_playbackElapsedTimer;
-    QElapsedTimer m_perfPlaybackTickTimer;
     std::optional<int> m_loopStartFrame;
     std::optional<int> m_loopEndFrame;
-    float m_masterMixGainDb = 0.0F;
-    bool m_masterMixMuted = false;
-    std::unordered_map<int, float> m_mixLaneGainDbByLane;
-    std::unordered_map<int, bool> m_mixLaneMutedByLane;
-    std::unordered_map<int, bool> m_mixLaneSoloByLane;
-    std::vector<QUuid> m_selectedTrackIds;
-    QUuid m_selectedTrackId;
-    QUuid m_fadingDeselectedTrackId;
-    float m_fadingDeselectedTrackOpacity = 0.0F;
     QTimer m_selectionFadeTimer;
-    std::vector<TrackPoint> m_copiedTracks;
     std::optional<MotionTrackerState> m_undoTrackerState;
     std::vector<QUuid> m_undoSelectedTrackIds;
     std::optional<MotionTrackerState> m_redoTrackerState;
     std::vector<QUuid> m_redoSelectedTrackIds;
     PerformanceLogger m_perfLogger;
-    std::uint64_t m_lastLoggedQueueStarvationCount = 0;
     const QUuid m_embeddedVideoAudioTrackId = QUuid(QStringLiteral("{eb6fc60f-0781-433f-9f03-ff16531165f7}"));
-    const QUuid m_audioPoolPreviewTrackId = QUuid(QStringLiteral("{8d6166c4-b107-4c55-8f11-f9cbf67d0e0a}"));
-    const QUuid m_clipEditorPreviewTrackId = QUuid(QStringLiteral("{3427e43b-a4c0-4d8e-86ea-52e9d85f2747}"));
-    QUuid m_clipEditorPreviewSourceTrackId;
-    QString m_audioPoolPreviewAssetPath;
     QTimer m_clipEditorPreviewStopTimer;
-    QElapsedTimer m_clipEditorPreviewElapsedTimer;
-    int m_clipEditorPreviewStartMs = 0;
-    int m_clipEditorPreviewClipStartMs = 0;
-    int m_clipEditorPreviewClipEndMs = 0;
     mutable QHash<QString, std::optional<int>> m_audioDurationMsByPath;
-    QHash<QUuid, int> m_clipEditorPlayheadMsByTrack;
 };

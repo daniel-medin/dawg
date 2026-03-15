@@ -130,12 +130,12 @@ void NativeVideoViewport::resizeEvent(QResizeEvent* event)
 
 QRectF NativeVideoViewport::imageRenderRect() const
 {
-    if (m_frame.isNull())
+    const auto sourceSize = !m_sourceFrameSize.isEmpty() ? m_sourceFrameSize : m_frame.size();
+    if (sourceSize.isEmpty())
     {
         return fallbackFrameRect(size());
     }
 
-    const auto sourceSize = !m_sourceFrameSize.isEmpty() ? m_sourceFrameSize : m_frame.size();
     const auto scaled = sourceSize.scaled(size(), Qt::KeepAspectRatio);
     return QRectF{
         (width() - scaled.width()) / 2.0,
@@ -238,12 +238,12 @@ void NativeVideoViewport::paintOverlayContent(QPainter& painter, const QRectF& f
     painter.drawLine(frameRect.bottomLeft(), frameRect.bottomLeft() + QPointF{28.0, -28.0});
     painter.drawLine(frameRect.bottomRight(), frameRect.bottomRight() + QPointF{-28.0, -28.0});
 
-    if (m_frame.isNull())
+    const auto sourceSize = !m_sourceFrameSize.isEmpty() ? m_sourceFrameSize : m_frame.size();
+    if (sourceSize.isEmpty())
     {
         return;
     }
 
-    const auto sourceSize = !m_sourceFrameSize.isEmpty() ? m_sourceFrameSize : m_frame.size();
     const auto scaleX = frameRect.width() / static_cast<double>(std::max(1, sourceSize.width()));
     const auto scaleY = frameRect.height() / static_cast<double>(std::max(1, sourceSize.height()));
 
