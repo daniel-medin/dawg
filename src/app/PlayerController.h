@@ -41,6 +41,7 @@ class PlayerController final : public QObject
 
 public:
     explicit PlayerController(QObject* parent = nullptr);
+    ~PlayerController() override;
 
     bool openVideo(const QString& filePath);
     bool importAudioToPool(const QString& filePath);
@@ -176,6 +177,8 @@ private slots:
     void advanceSelectionFade();
 
 private:
+    friend class NodeController;
+
     [[nodiscard]] bool advanceOneFrame(bool presentFrame, bool syncAudio);
     bool loadFrameAt(int frameIndex);
     [[nodiscard]] double frameTimestampSeconds(int frameIndex) const;
@@ -198,6 +201,7 @@ private:
     std::unique_ptr<AudioEngine> m_audioEngine;
     std::unique_ptr<AudioPlaybackCoordinator> m_audioPlaybackCoordinator;
     std::unique_ptr<VideoPlaybackCoordinator> m_videoPlaybackCoordinator;
+    std::unique_ptr<class NodeController> m_nodeController;
     AudioPoolService m_audioPool;
     MotionTracker m_tracker;
     std::unique_ptr<SelectionController> m_selectionController;

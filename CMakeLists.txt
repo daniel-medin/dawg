@@ -33,12 +33,24 @@ add_executable(dawg WIN32
     src/app/AudioPoolService.h
     src/app/ClipEditorSession.cpp
     src/app/ClipEditorSession.h
+    src/app/DebugUiController.cpp
+    src/app/DebugUiController.h
+    src/app/MainWindowActions.cpp
+    src/app/MainWindowActions.h
+    src/app/MediaImportController.cpp
+    src/app/MediaImportController.h
     src/app/MixStateStore.cpp
     src/app/MixStateStore.h
+    src/app/NodeController.cpp
+    src/app/NodeController.h
+    src/app/PanelLayoutController.cpp
+    src/app/PanelLayoutController.h
     src/app/TimelineLayoutService.cpp
     src/app/TimelineLayoutService.h
     src/app/ProjectDocument.cpp
     src/app/ProjectDocument.h
+    src/app/ProjectWindowController.cpp
+    src/app/ProjectWindowController.h
     src/app/PerformanceLogger.cpp
     src/app/PerformanceLogger.h
     src/app/PlayerController.cpp

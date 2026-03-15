@@ -35,6 +35,8 @@ This is not intended to feel like a traditional DAW with lots of horizontal audi
 ## Current Features
 
 - open a video and play, seek, step, and scrub it
+- create, save, load, and reopen `.dawg` projects
+- keep imported project media inside project-local `audio/` and `video/` folders
 - create and select nodes in the viewer
 - show nodes as spans in the timeline
 - drag node starts, ends, and full spans in the timeline
@@ -62,6 +64,17 @@ This is not intended to feel like a traditional DAW with lots of horizontal audi
 - `src/core/render` — render backend abstractions and D3D11 groundwork
 - `src/core/tracking` — node models and motion tracking
 - `src/ui` — timeline, canvas, floating panels, UI widgets
+
+### App Layer Split
+
+The app layer is being split into smaller controllers and services instead of keeping everything in `MainWindow` and `PlayerController`.
+
+- `MainWindow` is now mostly the widget shell and event host
+- `ProjectWindowController`, `MediaImportController`, `PanelLayoutController`, `DebugUiController`, and `MainWindowActions` own major UI/application slices
+- `PlayerController` stays the public runtime facade
+- `VideoPlaybackCoordinator`, `AudioPlaybackCoordinator`, `TimelineLayoutService`, `TrackEditService`, `SelectionController`, `ClipEditorSession`, `MixStateStore`, `ProjectSessionAdapter`, and `NodeController` now hold most feature-specific logic
+
+Startup no longer depends on a debug-only local `.dev` bootstrap path. Project open/save/restore is now the intended startup flow.
 
 ## Build
 
@@ -93,7 +106,6 @@ These scripts build in a short-path workspace like `C:\dawg-dev\src` and keep yo
 
 ## Local Dev Notes
 
-- `.dev/` is ignored by git and can hold local test videos and audio files
 - build folders like `build/`, `b/`, `rel/`, and `rel2/` are ignored
 - `.tools/vcpkg/` is ignored as well
 

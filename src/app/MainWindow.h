@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 
 #include <QAction>
@@ -25,6 +26,11 @@ class DebugOverlayWindow;
 class ClipEditorView;
 class MixView;
 class NativeVideoViewport;
+class MainWindowActions;
+class ProjectWindowController;
+class PanelLayoutController;
+class DebugUiController;
+class MediaImportController;
 class QMenu;
 class QSlider;
 class TimelineView;
@@ -36,6 +42,7 @@ class MainWindow final : public QMainWindow
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+    ~MainWindow() override;
     [[nodiscard]] bool openProjectFilePath(const QString& projectFilePath);
 
 protected:
@@ -92,6 +99,12 @@ private slots:
     void updateNativeViewportVisibility(bool visible);
 
 private:
+    friend class MainWindowActions;
+    friend class ProjectWindowController;
+    friend class PanelLayoutController;
+    friend class DebugUiController;
+    friend class MediaImportController;
+
     void showNodeContextMenu(const QUuid& trackId, const QPoint& globalPosition, bool includeSoundActions);
     void buildMenus();
     void buildUi();
@@ -108,9 +121,6 @@ private:
     void applyHeldNodeNudge();
     [[nodiscard]] bool shouldIgnoreNodeMovementShortcuts() const;
     [[nodiscard]] bool shouldApplyNodeShortcutToAll() const;
-    void syncMotionTrackingUi(bool enabled);
-    void tryOpenLocalDevVideo();
-    void populateAudioPoolFromLocalDevDirectory();
     void armClearAllShortcut();
     void clearPendingClearAllShortcut();
     void syncMainVerticalPanelSizes();
@@ -155,6 +165,11 @@ private:
         const QString& directory = {}) const;
 
     PlayerController* m_controller = nullptr;
+    std::unique_ptr<MainWindowActions> m_actionsController;
+    std::unique_ptr<ProjectWindowController> m_projectWindowController;
+    std::unique_ptr<PanelLayoutController> m_panelLayoutController;
+    std::unique_ptr<DebugUiController> m_debugUiController;
+    std::unique_ptr<MediaImportController> m_mediaImportController;
     VideoCanvas* m_canvas = nullptr;
     TimelineView* m_timeline = nullptr;
     ClipEditorView* m_clipEditorView = nullptr;
