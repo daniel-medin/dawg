@@ -1233,13 +1233,48 @@ std::vector<AudioPoolItem> PlayerController::audioPoolItems() const
 std::vector<MixLaneStrip> PlayerController::mixLaneStrips() const
 {
     const auto spans = timelineTrackSpans();
-    return TimelineLayoutService::mixLaneStrips(
+    auto strips = TimelineLayoutService::mixLaneStrips(
         spans,
         m_tracker.tracks(),
         *m_audioEngine,
         m_mixStateStore->gainByLane(),
         m_mixStateStore->mutedByLane(),
         m_mixStateStore->soloByLane());
+
+    if (!m_audioPlaybackCoordinator->isClipPreviewPlaying())
+    {
+        return strips;
+    }
+
+    const auto sourceTrackId = m_audioPlaybackCoordinator->clipPreviewSourceTrackId();
+    if (sourceTrackId.isNull())
+    {
+        return strips;
+    }
+
+    const auto spanIt = std::find_if(
+        spans.begin(),
+        spans.end(),
+        [&sourceTrackId](const TimelineTrackSpan& span)
+        {
+            return span.id == sourceTrackId;
+        });
+    if (spanIt == spans.end())
+    {
+        return strips;
+    }
+
+    const auto previewLevel = m_audioEngine->trackLevel(m_audioPlaybackCoordinator->clipPreviewTrackId());
+    for (auto& strip : strips)
+    {
+        if (strip.laneIndex == spanIt->laneIndex)
+        {
+            strip.meterLevel = std::max(strip.meterLevel, previewLevel);
+            break;
+        }
+    }
+
+    return strips;
 }
 
 std::vector<TimelineTrackSpan> PlayerController::timelineTrackSpans() const

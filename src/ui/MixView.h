@@ -9,7 +9,7 @@
 
 class QHBoxLayout;
 class QLabel;
-class QProgressBar;
+class QuickMixStripWidget;
 
 struct MixLaneStrip
 {
@@ -60,10 +60,8 @@ private:
 
     QHBoxLayout* m_layout = nullptr;
     QLabel* m_emptyLabel = nullptr;
-    QWidget* m_masterStripWidget = nullptr;
-    QProgressBar* m_masterMeter = nullptr;
-    std::unordered_map<int, QWidget*> m_laneStripWidgets;
-    std::unordered_map<int, QProgressBar*> m_laneMeters;
+    QuickMixStripWidget* m_masterQuickStrip = nullptr;
+    std::unordered_map<int, QuickMixStripWidget*> m_laneQuickStrips;
     float m_masterGainDb = 0.0F;
     bool m_masterMuted = false;
     std::vector<MixLaneStrip> m_laneStrips;

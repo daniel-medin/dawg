@@ -12,7 +12,7 @@ set(CMAKE_AUTOUIC ON)
 
 option(DAWG_ENABLE_FFMPEG "Link against FFmpeg when available." ON)
 
-find_package(Qt6 6.6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 6.6 REQUIRED COMPONENTS Widgets Quick QuickWidgets Qml CoreTools)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc video videoio)
 find_package(JUCE CONFIG REQUIRED)
 find_package(PkgConfig QUIET)
@@ -103,8 +103,12 @@ add_executable(dawg WIN32
     src/ui/DebugOverlayWindow.h
     src/ui/ClipEditorView.cpp
     src/ui/ClipEditorView.h
+    src/ui/QuickClipGainWidget.cpp
+    src/ui/QuickClipGainWidget.h
     src/ui/MixView.cpp
     src/ui/MixView.h
+    src/ui/QuickMixStripWidget.cpp
+    src/ui/QuickMixStripWidget.h
     src/ui/TimelineView.cpp
     src/ui/TimelineView.h
 )
@@ -114,6 +118,9 @@ target_include_directories(dawg PRIVATE src)
 target_link_libraries(dawg
     PRIVATE
         Qt6::Widgets
+        Qt6::Quick
+        Qt6::QuickWidgets
+        Qt6::Qml
         ${OpenCV_LIBS}
         juce::juce_audio_basics
         juce::juce_audio_devices
@@ -123,7 +130,7 @@ target_link_libraries(dawg
 )
 
 if(WIN32)
-    target_link_libraries(dawg PRIVATE Psapi Winmm d3d11 dxgi d3dcompiler)
+    target_link_libraries(dawg PRIVATE Psapi Winmm d3d11 dxgi d3dcompiler Pdh)
 endif()
 
 if(TARGET PkgConfig::FFMPEG)
@@ -152,4 +159,16 @@ if(WIN32)
             VERBATIM
         )
     endforeach()
+
+    add_custom_command(
+        TARGET dawg
+        POST_BUILD
+        COMMAND
+            "$<TARGET_FILE:Qt6::windeployqt>"
+            --dir "$<TARGET_FILE_DIR:dawg>"
+            --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "$<TARGET_FILE:dawg>"
+        COMMENT "Deploying Qt runtime and QML modules"
+        VERBATIM
+    )
 endif()

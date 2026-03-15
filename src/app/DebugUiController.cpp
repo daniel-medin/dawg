@@ -1,6 +1,8 @@
 #include "app/DebugUiController.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <vector>
 
 #include <QFileInfo>
 #include <QSignalBlocker>
@@ -8,18 +10,135 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <dxgi1_4.h>
+#include <pdh.h>
+#include <pdhmsg.h>
 #include <psapi.h>
 #endif
 
 #include "app/MainWindow.h"
 #include "app/PlayerController.h"
 #include "ui/DebugOverlayWindow.h"
+#include "ui/QuickMixStripWidget.h"
 #include "ui/NativeVideoViewport.h"
 #include "ui/TimelineView.h"
 #include "ui/VideoCanvas.h"
 
 namespace
 {
+#ifdef Q_OS_WIN
+class GpuEngineUsageSampler
+{
+public:
+    GpuEngineUsageSampler()
+    {
+        if (PdhOpenQueryW(nullptr, 0, &m_query) != ERROR_SUCCESS)
+        {
+            m_query = nullptr;
+            return;
+        }
+
+        if (PdhAddEnglishCounterW(
+                m_query,
+                L"\\GPU Engine(*)\\Utilization Percentage",
+                0,
+                &m_counter) != ERROR_SUCCESS)
+        {
+            PdhCloseQuery(m_query);
+            m_query = nullptr;
+            m_counter = nullptr;
+            return;
+        }
+
+        m_available = true;
+    }
+
+    ~GpuEngineUsageSampler()
+    {
+        if (m_query)
+        {
+            PdhCloseQuery(m_query);
+        }
+    }
+
+    [[nodiscard]] QString sample() const
+    {
+        if (!m_available || !m_query || !m_counter)
+        {
+            return QStringLiteral("GPU --");
+        }
+
+        if (PdhCollectQueryData(m_query) != ERROR_SUCCESS)
+        {
+            return QStringLiteral("GPU --");
+        }
+
+        DWORD bufferSize = 0;
+        DWORD itemCount = 0;
+        const auto firstResult = PdhGetFormattedCounterArrayW(
+            m_counter,
+            PDH_FMT_DOUBLE,
+            &bufferSize,
+            &itemCount,
+            nullptr);
+        if (firstResult != PDH_MORE_DATA || bufferSize == 0 || itemCount == 0)
+        {
+            return m_primed ? QStringLiteral("GPU 0.0%") : QStringLiteral("GPU --");
+        }
+
+        std::vector<std::byte> buffer(bufferSize);
+        auto* items = reinterpret_cast<PPDH_FMT_COUNTERVALUE_ITEM_W>(buffer.data());
+        if (PdhGetFormattedCounterArrayW(
+                m_counter,
+                PDH_FMT_DOUBLE,
+                &bufferSize,
+                &itemCount,
+                items) != ERROR_SUCCESS)
+        {
+            return QStringLiteral("GPU --");
+        }
+
+        const auto pidPattern = QStringLiteral("pid_%1_").arg(GetCurrentProcessId());
+        double totalPercent = 0.0;
+        for (DWORD index = 0; index < itemCount; ++index)
+        {
+            const QString instanceName = QString::fromWCharArray(items[index].szName ? items[index].szName : L"");
+            if (!instanceName.contains(pidPattern, Qt::CaseInsensitive))
+            {
+                continue;
+            }
+
+            if (items[index].FmtValue.CStatus != ERROR_SUCCESS)
+            {
+                continue;
+            }
+
+            totalPercent += items[index].FmtValue.doubleValue;
+        }
+
+        m_primed = true;
+        totalPercent = std::clamp(totalPercent, 0.0, 999.0);
+        return QStringLiteral("GPU %1%").arg(totalPercent, 0, 'f', 1);
+    }
+
+private:
+    mutable bool m_primed = false;
+    bool m_available = false;
+    PDH_HQUERY m_query = nullptr;
+    PDH_HCOUNTER m_counter = nullptr;
+};
+
+QString currentGpuUsageText()
+{
+    static const GpuEngineUsageSampler sampler;
+    return sampler.sample();
+}
+#else
+QString currentGpuUsageText()
+{
+    return QStringLiteral("GPU --");
+}
+#endif
+
 QString currentMemoryUsageText()
 {
 #ifdef Q_OS_WIN
@@ -212,6 +331,7 @@ void DebugUiController::updateMemoryUsage()
 {
     m_window.m_memoryUsageText = currentMemoryUsageText();
     m_window.m_processorUsageText = currentProcessorUsageText();
+    m_window.m_gpuUsageText = currentGpuUsageText();
     m_window.m_videoMemoryUsageText = currentVideoMemoryUsageText();
     updateDebugText();
 }
@@ -260,6 +380,9 @@ void DebugUiController::updateDebugText()
     const auto memoryText = m_window.m_memoryUsageText.isEmpty()
         ? QStringLiteral("Memory --")
         : m_window.m_memoryUsageText;
+    const auto gpuText = m_window.m_gpuUsageText.isEmpty()
+        ? QStringLiteral("GPU --")
+        : m_window.m_gpuUsageText;
     const auto videoMemoryText = m_window.m_videoMemoryUsageText.isEmpty()
         ? QStringLiteral("VRAM --")
         : m_window.m_videoMemoryUsageText;
@@ -269,6 +392,16 @@ void DebugUiController::updateDebugText()
     const auto renderText = m_window.m_controller->renderBackendName().isEmpty()
         ? QStringLiteral("Render --")
         : QStringLiteral("Render %1").arg(m_window.m_controller->renderBackendName());
+    m_window.m_qtQuickLoadText = QuickMixStripWidget::loadStatusText();
+    m_window.m_qtQuickGraphicsApiText = QuickMixStripWidget::graphicsApiText();
+    const auto qtQuickText = QStringLiteral("Qt Quick %1")
+        .arg(m_window.m_qtQuickGraphicsApiText.isEmpty()
+                ? QStringLiteral("Unknown")
+                : m_window.m_qtQuickGraphicsApiText);
+    const auto qtQuickLoadText = QStringLiteral("QML Load %1")
+        .arg(m_window.m_qtQuickLoadText.isEmpty()
+                ? QStringLiteral("Unknown")
+                : m_window.m_qtQuickLoadText);
 
     m_window.m_debugOverlay->setListText(
         QStringLiteral(
@@ -285,7 +418,10 @@ void DebugUiController::updateDebugText()
             "%12\n"
             "%13\n"
             "%14\n"
-            "%15")
+            "%15\n"
+            "%16\n"
+            "%17\n"
+            "%18")
             .arg(clipText)
             .arg(m_window.m_controller->isMotionTrackingEnabled() ? QStringLiteral("On") : QStringLiteral("Off"))
             .arg(insertionText)
@@ -297,10 +433,13 @@ void DebugUiController::updateDebugText()
             .arg(m_window.m_controller->trackCount())
             .arg(m_window.m_controller->hasSelection() ? QStringLiteral("Yes") : QStringLiteral("No"))
             .arg(processorText)
+            .arg(gpuText)
             .arg(memoryText)
             .arg(videoMemoryText)
             .arg(decoderText)
-            .arg(renderText));
+            .arg(renderText)
+            .arg(qtQuickText)
+            .arg(qtQuickLoadText));
     m_window.m_debugTextTimer.restart();
 }
 

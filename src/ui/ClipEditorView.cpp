@@ -1,4 +1,5 @@
 #include "ui/ClipEditorView.h"
+#include "ui/QuickClipGainWidget.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,10 +14,8 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QProgressBar>
 #include <QScrollBar>
 #include <QSignalBlocker>
-#include <QSlider>
 #include <QToolButton>
 #include <QWheelEvent>
 #include <QVBoxLayout>
@@ -60,109 +59,36 @@ juce::AudioFormatManager& waveformFormatManager()
 constexpr int kClipGainMinValue = -1000;
 constexpr int kClipGainMaxValue = 120;
 constexpr float kClipSilentGainDb = static_cast<float>(kClipGainMinValue) / 10.0F;
-constexpr float kClipMeterFloorDb = kClipSilentGainDb;
-constexpr float kClipMeterCeilingDb = static_cast<float>(kClipGainMaxValue) / 10.0F;
-constexpr float kClipMeterYellowThresholdDb = -18.0F;
-constexpr float kClipMeterOrangeThresholdDb = -6.0F;
 
-float sliderValueToClipGainDb(const int sliderValue)
+void setLabelText(QLabel* label, const QString& text)
 {
-    return sliderValue <= kClipGainMinValue ? kClipSilentGainDb : static_cast<float>(sliderValue) / 10.0F;
+    if (label && label->text() != text)
+    {
+        label->setText(text);
+    }
 }
 
-int clipGainDbToSliderValue(const float gainDb)
+bool sameWaveformState(
+    const std::optional<ClipEditorState>& lhs,
+    const std::optional<ClipEditorState>& rhs)
 {
-    if (gainDb <= kClipSilentGainDb + 0.001F)
+    if (lhs.has_value() != rhs.has_value())
     {
-        return kClipGainMinValue;
+        return false;
     }
 
-    return static_cast<int>(std::lround(std::clamp(gainDb, kClipSilentGainDb, 12.0F) * 10.0F));
-}
-
-QString gainLabelText(const float gainDb)
-{
-    if (gainDb <= kClipSilentGainDb + 0.001F)
+    if (!lhs.has_value())
     {
-        return QStringLiteral("-inf");
+        return true;
     }
 
-    return QStringLiteral("%1 dB").arg(gainDb, 0, 'f', 1);
+    return lhs->hasAttachedAudio == rhs->hasAttachedAudio
+        && lhs->assetPath == rhs->assetPath
+        && lhs->sourceDurationMs == rhs->sourceDurationMs
+        && lhs->clipStartMs == rhs->clipStartMs
+        && lhs->clipEndMs == rhs->clipEndMs
+        && lhs->playheadMs == rhs->playheadMs;
 }
-
-float meterLevelToDb(const float level)
-{
-    if (level <= 0.0F)
-    {
-        return kClipMeterFloorDb;
-    }
-
-    return std::clamp(20.0F * std::log10(level), kClipMeterFloorDb, 0.0F);
-}
-
-int meterValueForLevel(const float level)
-{
-    const auto meterDb = meterLevelToDb(level);
-    const auto normalized = (meterDb - kClipMeterFloorDb) / (kClipMeterCeilingDb - kClipMeterFloorDb);
-    return static_cast<int>(std::lround(std::clamp(normalized, 0.0F, 1.0F) * 1000.0F));
-}
-
-QString meterStyleSheet()
-{
-    const auto yellowStop =
-        (kClipMeterYellowThresholdDb - kClipMeterFloorDb) / (kClipMeterCeilingDb - kClipMeterFloorDb);
-    const auto orangeStop =
-        (kClipMeterOrangeThresholdDb - kClipMeterFloorDb) / (kClipMeterCeilingDb - kClipMeterFloorDb);
-
-    return QStringLiteral(
-        "QProgressBar {"
-        "  background: #0b1016;"
-        "  border: 1px solid #1d2733;"
-        "  border-radius: 4px;"
-        "}"
-        "QProgressBar::chunk {"
-        "  background: qlineargradient(x1:0, y1:1, x2:0, y2:0,"
-        "    stop:0 #2fe06d,"
-        "    stop:%1 #2fe06d,"
-        "    stop:%2 #ffb33b,"
-        "    stop:1 #ff5b4d);"
-        "  border-radius: 3px;"
-        "}")
-        .arg(yellowStop, 0, 'f', 3)
-        .arg(orangeStop, 0, 'f', 3);
-}
-
-QString gainSliderStyleSheet()
-{
-    return QStringLiteral(
-        "QSlider::groove:vertical { background: #1a212b; width: 6px; border-radius: 3px; }"
-        "QSlider::sub-page:vertical { background: #11161d; border-radius: 3px; }"
-        "QSlider::add-page:vertical { background: #2d3948; border-radius: 3px; }"
-        "QSlider::handle:vertical { background: #f2f5f8; border: 1px solid #3e4d61; height: 16px; margin: -3px -7px; border-radius: 7px; }");
-}
-
-class ClipGainSlider final : public QSlider
-{
-public:
-    explicit ClipGainSlider(QWidget* parent = nullptr)
-        : QSlider(Qt::Vertical, parent)
-    {
-    }
-
-protected:
-    void mousePressEvent(QMouseEvent* event) override
-    {
-        if (event->button() == Qt::LeftButton && (event->modifiers() & Qt::ControlModifier))
-        {
-            setValue(0);
-            event->accept();
-            return;
-        }
-
-        QSlider::mousePressEvent(event);
-    }
-};
-
 }
 
 class ClipEditorView::WaveformView final : public QWidget
@@ -214,6 +140,11 @@ public:
     {
         if (!state.has_value() || !state->hasAttachedAudio)
         {
+            if (!m_state.has_value() && m_loadedAssetPath.isEmpty() && m_peaks.empty())
+            {
+                return;
+            }
+
             m_state.reset();
             m_loadedAssetPath.clear();
             m_peaks.clear();
@@ -223,6 +154,11 @@ public:
             m_viewStartMs = 0.0;
             notifyViewWindowChanged();
             update();
+            return;
+        }
+
+        if (sameWaveformState(m_state, state))
+        {
             return;
         }
 
@@ -816,46 +752,12 @@ ClipEditorView::ClipEditorView(QWidget* parent)
     editorLayout->setContentsMargins(0, 0, 0, 0);
     editorLayout->setSpacing(12);
 
-    auto* stripWidget = new QFrame(m_editorContent);
-    stripWidget->setObjectName(QStringLiteral("clipEditorStrip"));
-    stripWidget->setFixedWidth(92);
-    stripWidget->setStyleSheet(QStringLiteral(
-        "QFrame#clipEditorStrip { background: #0f141b; border: 1px solid #1b2430; border-radius: 8px; }"));
-    auto* stripLayout = new QVBoxLayout(stripWidget);
-    stripLayout->setContentsMargins(8, 12, 8, 12);
-    stripLayout->setSpacing(6);
-
-    auto* stripFaderRow = new QHBoxLayout();
-    stripFaderRow->setContentsMargins(0, 0, 0, 0);
-    stripFaderRow->setSpacing(6);
-    stripFaderRow->addStretch(1);
-
-    m_levelMeter = new QProgressBar(stripWidget);
-    m_levelMeter->setRange(0, 1000);
-    m_levelMeter->setValue(0);
-    m_levelMeter->setTextVisible(false);
-    m_levelMeter->setOrientation(Qt::Vertical);
-    m_levelMeter->setFixedWidth(12);
-    m_levelMeter->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-    m_levelMeter->setStyleSheet(meterStyleSheet());
-    stripFaderRow->addWidget(m_levelMeter, 0);
-
-    m_gainSlider = new ClipGainSlider(stripWidget);
-    m_gainSlider->setRange(kClipGainMinValue, kClipGainMaxValue);
-    m_gainSlider->setValue(0);
-    m_gainSlider->setMinimumHeight(128);
-    m_gainSlider->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-    m_gainSlider->setStyleSheet(gainSliderStyleSheet());
-    stripFaderRow->addWidget(m_gainSlider, 0);
-    stripFaderRow->addStretch(1);
-    stripLayout->addLayout(stripFaderRow, 1);
-
-    m_gainLabel = new QLabel(stripWidget);
-    m_gainLabel->setAlignment(Qt::AlignCenter);
-    m_gainLabel->setStyleSheet(QStringLiteral("color: #cad3dc; font-size: 7.5pt;"));
-    stripLayout->addWidget(m_gainLabel);
-
-    editorLayout->addWidget(stripWidget, 0);
+    m_gainStrip = new QuickClipGainWidget(m_editorContent);
+    m_gainStrip->setGainChangedHandler([this](const float gainDb)
+    {
+        emit gainChanged(gainDb);
+    });
+    editorLayout->addWidget(m_gainStrip, 0);
 
     auto* waveformColumn = new QWidget(m_editorContent);
     auto* waveformColumnLayout = new QVBoxLayout(waveformColumn);
@@ -955,14 +857,6 @@ ClipEditorView::ClipEditorView(QWidget* parent)
             m_waveformView->setViewStartMs(value);
         }
     });
-    connect(m_gainSlider, &QSlider::valueChanged, this, [this](const int value)
-    {
-        if (m_gainLabel)
-        {
-            m_gainLabel->setText(gainLabelText(sliderValueToClipGainDb(value)));
-        }
-        emit gainChanged(sliderValueToClipGainDb(value));
-    });
     connect(m_loopButton, &QToolButton::toggled, this, &ClipEditorView::loopSoundChanged);
     connect(m_emptyActionLabel, &QLabel::linkActivated, this, [this](const QString&)
     {
@@ -986,7 +880,7 @@ void ClipEditorView::setState(const std::optional<ClipEditorState>& state)
 
     if (!hasSelection)
     {
-        m_titleLabel->setText(QStringLiteral("Clip Editor"));
+        setLabelText(m_titleLabel, QStringLiteral("Clip Editor"));
         if (m_loopButton)
         {
             const QSignalBlocker blocker{m_loopButton};
@@ -994,20 +888,15 @@ void ClipEditorView::setState(const std::optional<ClipEditorState>& state)
             m_loopButton->setEnabled(false);
             m_loopButton->setVisible(false);
         }
-        m_sourceLabel->clear();
-        m_rangeLabel->clear();
-        m_durationLabel->clear();
-        m_positionLabel->clear();
-        m_gainLabel->clear();
-        if (m_gainSlider)
+        setLabelText(m_sourceLabel, QString{});
+        setLabelText(m_rangeLabel, QString{});
+        setLabelText(m_durationLabel, QString{});
+        setLabelText(m_positionLabel, QString{});
+        if (m_gainStrip)
         {
-            const QSignalBlocker blocker{m_gainSlider};
-            m_gainSlider->setEnabled(false);
-            m_gainSlider->setValue(clipGainDbToSliderValue(0.0F));
-        }
-        if (m_levelMeter)
-        {
-            m_levelMeter->setValue(0);
+            m_gainStrip->setEnabled(false);
+            m_gainStrip->setGainDb(0.0F);
+            m_gainStrip->setMeterLevel(0.0F);
         }
         if (m_waveformScrollBar)
         {
@@ -1016,18 +905,18 @@ void ClipEditorView::setState(const std::optional<ClipEditorState>& state)
             m_waveformScrollBar->setRange(0, 0);
             m_waveformScrollBar->setValue(0);
         }
-        m_emptyTitleLabel->setText(QStringLiteral("Select a node"));
-        m_emptyBodyLabel->setText(QStringLiteral("Select a node with attached audio to edit its clip."));
+        setLabelText(m_emptyTitleLabel, QStringLiteral("Select a node"));
+        setLabelText(m_emptyBodyLabel, QStringLiteral("Select a node with attached audio to edit its clip."));
         if (m_emptyActionLabel)
         {
-            m_emptyActionLabel->clear();
+            setLabelText(m_emptyActionLabel, QString{});
             m_emptyActionLabel->setVisible(false);
         }
         m_waveformView->setState(std::nullopt);
         return;
     }
 
-    m_titleLabel->setText(state->label.isEmpty() ? QStringLiteral("Clip Editor") : state->label);
+    setLabelText(m_titleLabel, state->label.isEmpty() ? QStringLiteral("Clip Editor") : state->label);
     if (m_loopButton)
     {
         const QSignalBlocker blocker{m_loopButton};
@@ -1038,20 +927,15 @@ void ClipEditorView::setState(const std::optional<ClipEditorState>& state)
 
     if (!hasAttachedAudio)
     {
-        m_sourceLabel->clear();
-        m_rangeLabel->clear();
-        m_durationLabel->clear();
-        m_positionLabel->clear();
-        m_gainLabel->clear();
-        if (m_gainSlider)
+        setLabelText(m_sourceLabel, QString{});
+        setLabelText(m_rangeLabel, QString{});
+        setLabelText(m_durationLabel, QString{});
+        setLabelText(m_positionLabel, QString{});
+        if (m_gainStrip)
         {
-            const QSignalBlocker blocker{m_gainSlider};
-            m_gainSlider->setEnabled(false);
-            m_gainSlider->setValue(clipGainDbToSliderValue(0.0F));
-        }
-        if (m_levelMeter)
-        {
-            m_levelMeter->setValue(0);
+            m_gainStrip->setEnabled(false);
+            m_gainStrip->setGainDb(0.0F);
+            m_gainStrip->setMeterLevel(0.0F);
         }
         if (m_waveformScrollBar)
         {
@@ -1060,11 +944,11 @@ void ClipEditorView::setState(const std::optional<ClipEditorState>& state)
             m_waveformScrollBar->setRange(0, 0);
             m_waveformScrollBar->setValue(0);
         }
-        m_emptyTitleLabel->setText(state->label.isEmpty() ? QStringLiteral("Node") : state->label);
-        m_emptyBodyLabel->setText(QStringLiteral("No audio attached"));
+        setLabelText(m_emptyTitleLabel, state->label.isEmpty() ? QStringLiteral("Node") : state->label);
+        setLabelText(m_emptyBodyLabel, QStringLiteral("No audio attached"));
         if (m_emptyActionLabel)
         {
-            m_emptyActionLabel->setText(QStringLiteral("<a href=\"attach\">Attach Audio...</a>"));
+            setLabelText(m_emptyActionLabel, QStringLiteral("<a href=\"attach\">Attach Audio...</a>"));
             m_emptyActionLabel->setVisible(true);
         }
         m_waveformView->setState(std::nullopt);
@@ -1073,31 +957,29 @@ void ClipEditorView::setState(const std::optional<ClipEditorState>& state)
 
     if (m_emptyActionLabel)
     {
-        m_emptyActionLabel->clear();
+        setLabelText(m_emptyActionLabel, QString{});
         m_emptyActionLabel->setVisible(false);
     }
 
-    m_sourceLabel->setText(QStringLiteral("Source  %1").arg(QFileInfo(state->assetPath).fileName()));
-    m_rangeLabel->setText(
+    setLabelText(m_sourceLabel, QStringLiteral("Source  %1").arg(QFileInfo(state->assetPath).fileName()));
+    setLabelText(
+        m_rangeLabel,
         QStringLiteral("In/Out  %1 - %2")
             .arg(formatTimeMs(state->clipStartMs))
             .arg(formatTimeMs(state->clipEndMs)));
-    m_durationLabel->setText(
+    setLabelText(
+        m_durationLabel,
         QStringLiteral("Clip  %1").arg(formatTimeMs(std::max(0, state->clipEndMs - state->clipStartMs))));
-    m_positionLabel->setText(
+    setLabelText(
+        m_positionLabel,
         state->playheadMs.has_value()
             ? QStringLiteral("Playhead  %1").arg(formatTimeMs(*state->playheadMs))
             : QStringLiteral("Playhead  --"));
-    m_gainLabel->setText(gainLabelText(state->gainDb));
-    if (m_gainSlider)
+    if (m_gainStrip)
     {
-        const QSignalBlocker blocker{m_gainSlider};
-        m_gainSlider->setEnabled(true);
-        m_gainSlider->setValue(clipGainDbToSliderValue(state->gainDb));
-    }
-    if (m_levelMeter)
-    {
-        m_levelMeter->setValue(meterValueForLevel(state->level));
+        m_gainStrip->setEnabled(true);
+        m_gainStrip->setGainDb(state->gainDb);
+        m_gainStrip->setMeterLevel(state->level);
     }
     m_waveformView->setState(state);
 }

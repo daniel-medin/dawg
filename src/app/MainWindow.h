@@ -285,7 +285,10 @@ private:
     QString m_clipName;
     QString m_memoryUsageText;
     QString m_processorUsageText;
+    QString m_gpuUsageText;
     QString m_videoMemoryUsageText;
+    QString m_qtQuickLoadText;
+    QString m_qtQuickGraphicsApiText;
     QImage m_lastPresentedFrame;
     QTimer m_clearAllShortcutTimer;
     QTimer m_memoryUsageTimer;

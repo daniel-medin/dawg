@@ -3,5 +3,7 @@
         <file alias="branding/dawg.png">../assets/dawg.png</file>
         <file alias="branding/logo.png">../assets/logo.png</file>
         <file alias="branding/logo-transparent.png">../assets/logo_transparent.png</file>
+        <file alias="qml/ClipGainStrip.qml">qml/ClipGainStrip.qml</file>
+        <file alias="qml/MixStrip.qml">qml/MixStrip.qml</file>
     </qresource>
 </RCC>
