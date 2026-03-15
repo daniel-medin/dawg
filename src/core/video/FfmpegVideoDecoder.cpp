@@ -8,8 +8,20 @@
 #include <utility>
 
 #include <QImage>
+#include <QTransform>
 
 #include <opencv2/imgproc.hpp>
+
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#include <d3d11.h>
+#endif
 
 #if DAWG_HAS_FFMPEG
 extern "C"
@@ -465,7 +477,9 @@ std::optional<VideoFrame> FfmpegVideoDecoder::readFrame()
 
             auto* sourceFrame = m_impl->decodedFrame;
             std::uintptr_t nativeHandle = 0;
+            std::uint32_t nativeSubresourceIndex = 0;
             bool hardwareBacked = false;
+            std::shared_ptr<void> nativeResource;
             if (m_impl->hardwareDecodeEnabled && m_impl->decodedFrame->format == m_impl->hardwarePixelFormat)
             {
                 av_frame_unref(m_impl->transferFrame);
@@ -477,7 +491,24 @@ std::optional<VideoFrame> FfmpegVideoDecoder::readFrame()
 
                 sourceFrame = m_impl->transferFrame;
                 nativeHandle = reinterpret_cast<std::uintptr_t>(m_impl->decodedFrame->data[0]);
+                nativeSubresourceIndex = static_cast<std::uint32_t>(
+                    reinterpret_cast<std::uintptr_t>(m_impl->decodedFrame->data[1]));
                 hardwareBacked = true;
+#ifdef Q_OS_WIN
+                if (auto* nativeTexture = reinterpret_cast<ID3D11Texture2D*>(m_impl->decodedFrame->data[0]))
+                {
+                    nativeTexture->AddRef();
+                    nativeResource = std::shared_ptr<void>(
+                        nativeTexture,
+                        [](void* resource)
+                        {
+                            if (resource)
+                            {
+                                static_cast<ID3D11Texture2D*>(resource)->Release();
+                            }
+                        });
+                }
+#endif
             }
 
             if (!m_impl->swsContext)
@@ -489,7 +520,7 @@ std::optional<VideoFrame> FfmpegVideoDecoder::readFrame()
                     static_cast<AVPixelFormat>(sourceFrame->format),
                     sourceFrame->width,
                     sourceFrame->height,
-                    AV_PIX_FMT_BGR24,
+                    AV_PIX_FMT_BGRA,
                     SWS_BILINEAR,
                     nullptr,
                     nullptr,
@@ -502,9 +533,18 @@ std::optional<VideoFrame> FfmpegVideoDecoder::readFrame()
                 return std::nullopt;
             }
 
-            cv::Mat cpuBgr(sourceFrame->height, sourceFrame->width, CV_8UC3);
-            uint8_t* dstData[4] = {cpuBgr.data, nullptr, nullptr, nullptr};
-            int dstLinesize[4] = {static_cast<int>(cpuBgr.step[0]), 0, 0, 0};
+            QImage cpuImage(
+                sourceFrame->width,
+                sourceFrame->height,
+                QImage::Format_ARGB32);
+            if (cpuImage.isNull())
+            {
+                av_frame_unref(m_impl->decodedFrame);
+                return std::nullopt;
+            }
+
+            uint8_t* dstData[4] = {cpuImage.bits(), nullptr, nullptr, nullptr};
+            int dstLinesize[4] = {static_cast<int>(cpuImage.bytesPerLine()), 0, 0, 0};
             sws_scale(
                 m_impl->swsContext,
                 sourceFrame->data,
@@ -514,25 +554,48 @@ std::optional<VideoFrame> FfmpegVideoDecoder::readFrame()
                 dstData,
                 dstLinesize);
 
-            const auto presentedBgr = rotateFrameBgr(cpuBgr, m_impl->presentationRotationDegrees);
-            const auto outputBgr = scaledFrameBgr(presentedBgr, m_impl->outputScale);
-            QImage cpuImage(
-                outputBgr.data,
-                outputBgr.cols,
-                outputBgr.rows,
-                static_cast<int>(outputBgr.step[0]),
-                QImage::Format_BGR888);
+            QImage presentedImage = cpuImage;
+            switch (m_impl->presentationRotationDegrees)
+            {
+            case 90:
+                presentedImage = cpuImage.transformed(QTransform().rotate(90.0));
+                break;
+            case 180:
+                presentedImage = cpuImage.transformed(QTransform().rotate(180.0));
+                break;
+            case 270:
+                presentedImage = cpuImage.transformed(QTransform().rotate(270.0));
+                break;
+            default:
+                break;
+            }
+            if (m_impl->outputScale < 0.999)
+            {
+                presentedImage = presentedImage.scaled(
+                    std::max(1, static_cast<int>(std::lround(presentedImage.width() * m_impl->outputScale))),
+                    std::max(1, static_cast<int>(std::lround(presentedImage.height() * m_impl->outputScale))),
+                    Qt::IgnoreAspectRatio,
+                    Qt::SmoothTransformation);
+            }
 
             VideoFrame frame;
             frame.index = frameIndex;
             frame.timestampSeconds = timestampSeconds;
             frame.durationSeconds = durationSeconds;
-            frame.frameSize = cv::Size{presentedBgr.cols, presentedBgr.rows};
-            frame.pixelFormatName = QStringLiteral("BGR24");
+            frame.frameSize = cv::Size{
+                m_impl->presentationRotationDegrees == 90 || m_impl->presentationRotationDegrees == 270
+                    ? sourceFrame->height
+                    : sourceFrame->width,
+                m_impl->presentationRotationDegrees == 90 || m_impl->presentationRotationDegrees == 270
+                    ? sourceFrame->width
+                    : sourceFrame->height};
+            frame.pixelFormatName = hardwareBacked ? QStringLiteral("D3D11") : QStringLiteral("BGRA");
             frame.nativeHandle = nativeHandle;
+            frame.nativeSubresourceIndex = nativeSubresourceIndex;
+            frame.rotationDegrees = m_impl->presentationRotationDegrees;
             frame.hardwareBacked = hardwareBacked;
-            frame.cpuBgr = presentedBgr;
-            frame.cpuImage = cpuImage.copy();
+            frame.nativeResource = std::move(nativeResource);
+            frame.cpuImage = presentedImage;
 
             m_impl->pendingSeekFrameIndex = -1;
             m_impl->lastReturnedFrameIndex = frameIndex;

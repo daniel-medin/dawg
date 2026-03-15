@@ -88,8 +88,12 @@ void DebugOverlayWindow::setListText(const QString& text)
 {
     if (m_textLabel)
     {
+        const auto wasEmpty = m_textLabel->text().isEmpty();
         m_textLabel->setText(text);
-        adjustSize();
+        if (wasEmpty)
+        {
+            adjustSize();
+        }
     }
 }
 

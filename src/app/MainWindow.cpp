@@ -2764,7 +2764,7 @@ void MainWindow::updateFrame(const QImage& image, const int frameIndex, const do
 {
     m_lastPresentedFrame = image;
     m_canvas->setPresentedFrame(image, m_controller->currentVideoFrame(), m_controller->videoFrameSize());
-    if (m_nativeViewport)
+    if (m_nativeViewportWindow && m_nativeViewportWindow->isVisible() && m_nativeViewport)
     {
         m_nativeViewport->setPresentedFrame(image, m_controller->currentVideoFrame(), m_controller->videoFrameSize());
     }
@@ -2779,6 +2779,29 @@ void MainWindow::updateFrame(const QImage& image, const int frameIndex, const do
     {
         updateAudioPoolPlaybackIndicators();
     }
+
+    if (m_controller->isPlaying())
+    {
+        if (!m_outputFpsTimer.isValid())
+        {
+            m_outputFpsTimer.start();
+            m_outputFpsFrameCount = 0;
+            m_outputFps = 0.0;
+        }
+
+        ++m_outputFpsFrameCount;
+        const auto elapsedMs = std::max<qint64>(1, m_outputFpsTimer.elapsed());
+        if (elapsedMs >= 250)
+        {
+            const auto measuredFps = static_cast<double>(m_outputFpsFrameCount) * 1000.0 / static_cast<double>(elapsedMs);
+            m_outputFps = m_outputFps > 0.0
+                ? (m_outputFps * 0.4) + (measuredFps * 0.6)
+                : measuredFps;
+            m_outputFpsTimer.restart();
+            m_outputFpsFrameCount = 0;
+        }
+    }
+
     refreshClipEditor();
     updateDebugText();
 }
@@ -2793,7 +2816,15 @@ void MainWindow::updateMemoryUsage()
 
 void MainWindow::updateDebugText()
 {
-    if (!m_debugOverlay)
+    if (!m_debugOverlay || !m_debugVisible)
+    {
+        return;
+    }
+
+    if (m_controller
+        && m_controller->isPlaying()
+        && m_debugTextTimer.isValid()
+        && m_debugTextTimer.elapsed() < 250)
     {
         return;
     }
@@ -2806,6 +2837,17 @@ void MainWindow::updateDebugText()
     const auto clipText = m_clipName.isEmpty() ? QStringLiteral("No clip") : m_clipName;
     const auto fpsText = m_controller->fps() > 0.0
         ? QString::number(m_controller->fps(), 'f', 2)
+        : QStringLiteral("--");
+    const auto outputFpsText = m_controller->isPlaying()
+        ? (m_outputFps > 0.0
+            ? QString::number(m_outputFps, 'f', 2)
+            : (m_outputFpsTimer.isValid() && m_outputFpsTimer.elapsed() > 0
+                ? QString::number(
+                    static_cast<double>(m_outputFpsFrameCount) * 1000.0
+                        / static_cast<double>(std::max<qint64>(1, m_outputFpsTimer.elapsed())),
+                    'f',
+                    2)
+                : QStringLiteral("--")))
         : QStringLiteral("--");
     const auto insertionText = m_controller->isInsertionFollowsPlayback()
         ? QStringLiteral("On")
@@ -2827,14 +2869,15 @@ void MainWindow::updateDebugText()
             "Insert Follow: %3\n"
             "Frame: %4 / %5\n"
             "Time: %6 s\n"
-            "FPS: %7\n"
-            "Nodes: %8\n"
-            "Selected: %9\n"
-            "%10\n"
+            "Video FPS: %7\n"
+            "FPS Output: %8\n"
+            "Nodes: %9\n"
+            "Selected: %10\n"
             "%11\n"
             "%12\n"
             "%13\n"
-            "%14")
+            "%14\n"
+            "%15")
             .arg(clipText)
             .arg(m_controller->isMotionTrackingEnabled() ? QStringLiteral("On") : QStringLiteral("Off"))
             .arg(insertionText)
@@ -2842,6 +2885,7 @@ void MainWindow::updateDebugText()
             .arg(totalFrames)
             .arg(currentSeconds, 0, 'f', 2)
             .arg(fpsText)
+            .arg(outputFpsText)
             .arg(m_controller->trackCount())
             .arg(m_controller->hasSelection() ? QStringLiteral("Yes") : QStringLiteral("No"))
             .arg(processorText)
@@ -2849,12 +2893,13 @@ void MainWindow::updateDebugText()
             .arg(videoMemoryText)
             .arg(decoderText)
             .arg(renderText));
+    m_debugTextTimer.restart();
 }
 
 void MainWindow::refreshOverlays()
 {
     m_canvas->setOverlays(m_controller->currentOverlays());
-    if (m_nativeViewport)
+    if (m_nativeViewportWindow && m_nativeViewportWindow->isVisible() && m_nativeViewport)
     {
         m_nativeViewport->setOverlays(m_controller->currentOverlays());
     }
@@ -2875,6 +2920,16 @@ void MainWindow::updatePlaybackState(const bool playing)
 {
     const auto label = playing ? QStringLiteral("Pause (Space)") : QStringLiteral("Play (Space)");
     m_playAction->setText(label);
+    m_debugTextTimer.invalidate();
+    if (playing)
+    {
+        resetOutputFpsTracking();
+        m_outputFpsTimer.start();
+    }
+    else
+    {
+        resetOutputFpsTracking();
+    }
     if (playing)
     {
         hideCanvasTipsOverlay();
@@ -2936,6 +2991,8 @@ void MainWindow::updateTrackAvailabilityState(const bool hasTracks)
 
 void MainWindow::handleVideoLoaded(const QString& filePath, const int totalFrames, const double fps)
 {
+    resetOutputFpsTracking();
+    m_debugTextTimer.invalidate();
     const QFileInfo fileInfo{filePath};
     m_clipName = fileInfo.fileName();
     if (filePath.isEmpty())
@@ -2968,6 +3025,7 @@ void MainWindow::handleVideoLoaded(const QString& filePath, const int totalFrame
 void MainWindow::updateDebugVisibility(const bool enabled)
 {
     m_debugVisible = enabled;
+    m_debugTextTimer.invalidate();
     if (m_debugOverlay)
     {
         m_debugOverlay->setVisible(enabled);
@@ -3202,6 +3260,13 @@ void MainWindow::updateDetachedVideoUiState()
                                         : QStringLiteral("Detach Video"));
         m_detachVideoAction->setEnabled(m_canvas != nullptr);
     }
+}
+
+void MainWindow::resetOutputFpsTracking()
+{
+    m_outputFpsTimer.invalidate();
+    m_outputFpsFrameCount = 0;
+    m_outputFps = 0.0;
 }
 
 void MainWindow::syncMainVerticalPanelSizes()

@@ -59,18 +59,19 @@ public:
         setAttribute(Qt::WA_OpaquePaintEvent);
         setAttribute(Qt::WA_NoSystemBackground);
         setAutoFillBackground(false);
+        hide();
     }
 
     void setFrame(const QImage& frame)
     {
         m_frame = frame;
-        update();
+        requestPresentRefresh();
     }
 
     void setVideoFrame(const VideoFrame& frame)
     {
         m_videoFrame = frame;
-        update();
+        requestPresentRefresh();
     }
 
     void setSourceFrameSize(const QSize& sourceSize)
@@ -81,13 +82,13 @@ public:
         }
 
         m_sourceFrameSize = sourceSize;
-        update();
+        requestPresentRefresh();
     }
 
     void setRenderService(RenderService* renderService)
     {
         m_renderService = renderService;
-        update();
+        requestPresentRefresh();
     }
 
     void setNativePresentationEnabled(const bool enabled)
@@ -101,8 +102,12 @@ public:
         if (!enabled)
         {
             setNativePresentationActive(false);
+            hide();
+            return;
         }
-        update();
+
+        show();
+        requestPresentRefresh();
     }
 
     [[nodiscard]] QRectF imageRenderRect() const
@@ -144,6 +149,16 @@ protected:
     }
 
 private:
+    void requestPresentRefresh()
+    {
+        if (!m_nativePresentationEnabled || !isVisible())
+        {
+            return;
+        }
+
+        update();
+    }
+
     [[nodiscard]] bool presentFrameToNativeSurface(const QRectF& frameRect)
     {
         if (!m_nativePresentationEnabled

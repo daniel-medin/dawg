@@ -182,18 +182,29 @@ struct D3D11RenderBackend::Impl
     ID3D11SamplerState* samplerState = nullptr;
     ID3D11BlendState* alphaBlendState = nullptr;
     ID3D11RasterizerState* rasterizerState = nullptr;
+    ID3D11VideoDevice* videoDevice = nullptr;
+    ID3D11VideoContext* videoContext = nullptr;
+    ID3D11VideoProcessorEnumerator* videoProcessorEnumerator = nullptr;
+    ID3D11VideoProcessor* videoProcessor = nullptr;
+    ID3D11VideoProcessorOutputView* videoProcessorOutputView = nullptr;
     TextureResource videoTexture;
     TextureResource overlayTexture;
     HWND hwnd = nullptr;
     QSize swapChainSize;
+    QSize videoProcessorInputSize;
+    QSize videoProcessorOutputSize;
+    DXGI_FORMAT videoProcessorInputFormat = DXGI_FORMAT_UNKNOWN;
     QString lastDiagnostic;
     int successfulPresentCount = 0;
 
     ~Impl()
     {
         releaseSwapChainResources();
+        releaseVideoProcessorResources();
         videoTexture.reset();
         overlayTexture.reset();
+        releaseTyped(videoContext);
+        releaseTyped(videoDevice);
         releaseTyped(rasterizerState);
         releaseTyped(alphaBlendState);
         releaseTyped(samplerState);
@@ -215,6 +226,33 @@ struct D3D11RenderBackend::Impl
 
         lastDiagnostic = diagnostic;
         logD3dEvent(category, message);
+    }
+
+    void releaseVideoProcessorResources()
+    {
+        releaseTyped(videoProcessorOutputView);
+        releaseTyped(videoProcessor);
+        releaseTyped(videoProcessorEnumerator);
+        videoProcessorInputSize = {};
+        videoProcessorOutputSize = {};
+        videoProcessorInputFormat = DXGI_FORMAT_UNKNOWN;
+    }
+
+    void releaseDeviceBoundResources()
+    {
+        releaseSwapChainResources();
+        releaseVideoProcessorResources();
+        videoTexture.reset();
+        overlayTexture.reset();
+        releaseTyped(rasterizerState);
+        releaseTyped(alphaBlendState);
+        releaseTyped(samplerState);
+        releaseTyped(vertexBuffer);
+        releaseTyped(inputLayout);
+        releaseTyped(pixelShader);
+        releaseTyped(vertexShader);
+        releaseTyped(videoContext);
+        releaseTyped(videoDevice);
     }
 
     bool initializeDevice()
@@ -258,9 +296,74 @@ struct D3D11RenderBackend::Impl
         return true;
     }
 
+    bool ensureVideoInterfaces()
+    {
+        if (videoDevice && videoContext)
+        {
+            return true;
+        }
+
+        if (!initializeDevice())
+        {
+            return false;
+        }
+
+        releaseTyped(videoContext);
+        releaseTyped(videoDevice);
+        if (FAILED(device->QueryInterface(__uuidof(ID3D11VideoDevice), reinterpret_cast<void**>(&videoDevice)))
+            || FAILED(deviceContext->QueryInterface(__uuidof(ID3D11VideoContext), reinterpret_cast<void**>(&videoContext)))
+            || !videoDevice
+            || !videoContext)
+        {
+            logDiagnostic(QStringLiteral("d3d_video_fail"), QStringLiteral("QueryInterface video device/context failed"), true);
+            releaseTyped(videoContext);
+            releaseTyped(videoDevice);
+            return false;
+        }
+
+        return true;
+    }
+
+    bool adoptTextureDevice(ID3D11Texture2D* texture)
+    {
+        if (!texture)
+        {
+            return false;
+        }
+
+        ID3D11Device* textureDevice = nullptr;
+        texture->GetDevice(&textureDevice);
+        if (!textureDevice)
+        {
+            return false;
+        }
+
+        if (device == textureDevice && deviceContext)
+        {
+            releaseTyped(textureDevice);
+            return ensureVideoInterfaces();
+        }
+
+        releaseDeviceBoundResources();
+        releaseTyped(deviceContext);
+        releaseTyped(device);
+
+        device = textureDevice;
+        device->GetImmediateContext(&deviceContext);
+        if (!deviceContext)
+        {
+            logDiagnostic(QStringLiteral("d3d_device_fail"), QStringLiteral("GetImmediateContext failed"), true);
+            releaseTyped(device);
+            return false;
+        }
+
+        return ensureVideoInterfaces();
+    }
+
     void releaseSwapChainResources()
     {
         releaseTyped(renderTargetView);
+        releaseTyped(videoProcessorOutputView);
         if (swapChain)
         {
             swapChain->SetFullscreenState(FALSE, nullptr);
@@ -562,6 +665,95 @@ struct D3D11RenderBackend::Impl
         return true;
     }
 
+    bool ensureVideoProcessor(const QSize& inputSize, const DXGI_FORMAT inputFormat, const QSize& outputSize)
+    {
+        if (!ensureVideoInterfaces() || !swapChain || !inputSize.isValid() || !outputSize.isValid())
+        {
+            return false;
+        }
+
+        if (videoProcessor
+            && videoProcessorEnumerator
+            && videoProcessorInputSize == inputSize
+            && videoProcessorOutputSize == outputSize
+            && videoProcessorInputFormat == inputFormat
+            && videoProcessorOutputView)
+        {
+            return true;
+        }
+
+        releaseVideoProcessorResources();
+
+        D3D11_VIDEO_PROCESSOR_CONTENT_DESC contentDescription{};
+        contentDescription.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+        contentDescription.InputWidth = static_cast<UINT>(std::max(1, inputSize.width()));
+        contentDescription.InputHeight = static_cast<UINT>(std::max(1, inputSize.height()));
+        contentDescription.OutputWidth = static_cast<UINT>(std::max(1, outputSize.width()));
+        contentDescription.OutputHeight = static_cast<UINT>(std::max(1, outputSize.height()));
+        contentDescription.InputFrameRate.Numerator = 60;
+        contentDescription.InputFrameRate.Denominator = 1;
+        contentDescription.OutputFrameRate.Numerator = 60;
+        contentDescription.OutputFrameRate.Denominator = 1;
+        contentDescription.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+
+        if (FAILED(videoDevice->CreateVideoProcessorEnumerator(&contentDescription, &videoProcessorEnumerator))
+            || !videoProcessorEnumerator)
+        {
+            logDiagnostic(QStringLiteral("d3d_video_fail"), QStringLiteral("CreateVideoProcessorEnumerator failed"), true);
+            releaseVideoProcessorResources();
+            return false;
+        }
+
+        if (FAILED(videoDevice->CreateVideoProcessor(videoProcessorEnumerator, 0, &videoProcessor))
+            || !videoProcessor)
+        {
+            logDiagnostic(QStringLiteral("d3d_video_fail"), QStringLiteral("CreateVideoProcessor failed"), true);
+            releaseVideoProcessorResources();
+            return false;
+        }
+
+        ID3D11Texture2D* backBuffer = nullptr;
+        const auto getBufferResult = swapChain->GetBuffer(
+            0,
+            __uuidof(ID3D11Texture2D),
+            reinterpret_cast<void**>(&backBuffer));
+        if (FAILED(getBufferResult) || !backBuffer)
+        {
+            logDiagnostic(
+                QStringLiteral("d3d_video_fail"),
+                QStringLiteral("GetBuffer for output view hr=%1").arg(hresultToString(getBufferResult)),
+                true);
+            releaseTyped(backBuffer);
+            releaseVideoProcessorResources();
+            return false;
+        }
+
+        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC outputViewDescription{};
+        outputViewDescription.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+        outputViewDescription.Texture2D.MipSlice = 0;
+        const auto outputViewResult =
+            videoDevice->CreateVideoProcessorOutputView(
+                backBuffer,
+                videoProcessorEnumerator,
+                &outputViewDescription,
+                &videoProcessorOutputView);
+        releaseTyped(backBuffer);
+        if (FAILED(outputViewResult) || !videoProcessorOutputView)
+        {
+            logDiagnostic(
+                QStringLiteral("d3d_video_fail"),
+                QStringLiteral("CreateVideoProcessorOutputView hr=%1").arg(hresultToString(outputViewResult)),
+                true);
+            releaseVideoProcessorResources();
+            return false;
+        }
+
+        videoProcessorInputSize = inputSize;
+        videoProcessorOutputSize = outputSize;
+        videoProcessorInputFormat = inputFormat;
+        return true;
+    }
+
     bool ensureTexture(TextureResource& resource, const QSize& imageSize)
     {
         if (!device || !imageSize.isValid())
@@ -704,6 +896,91 @@ struct D3D11RenderBackend::Impl
         return true;
     }
 
+    bool drawHardwareFrame(const VideoFrame& frame, const QSize& surfaceSize, const QRectF& targetRect)
+    {
+        if (!frame.hasNativeTexture() || frame.rotationDegrees != 0)
+        {
+            return false;
+        }
+
+        auto* inputTexture = reinterpret_cast<ID3D11Texture2D*>(frame.nativeHandle);
+        if (!inputTexture || !adoptTextureDevice(inputTexture))
+        {
+            return false;
+        }
+
+        D3D11_TEXTURE2D_DESC textureDescription{};
+        inputTexture->GetDesc(&textureDescription);
+        const auto inputSize = QSize{
+            static_cast<int>(textureDescription.Width),
+            static_cast<int>(textureDescription.Height)};
+        if (!ensureVideoProcessor(inputSize, textureDescription.Format, surfaceSize))
+        {
+            return false;
+        }
+
+        ID3D11VideoProcessorInputView* inputView = nullptr;
+        D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC inputViewDescription{};
+        inputViewDescription.FourCC = 0;
+        inputViewDescription.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
+        inputViewDescription.Texture2D.MipSlice = 0;
+        inputViewDescription.Texture2D.ArraySlice = frame.nativeSubresourceIndex;
+        const auto inputViewResult = videoDevice->CreateVideoProcessorInputView(
+            inputTexture,
+            videoProcessorEnumerator,
+            &inputViewDescription,
+            &inputView);
+        if (FAILED(inputViewResult) || !inputView)
+        {
+            logDiagnostic(
+                QStringLiteral("d3d_video_fail"),
+                QStringLiteral("CreateVideoProcessorInputView hr=%1 slice=%2 format=%3")
+                    .arg(hresultToString(inputViewResult))
+                    .arg(frame.nativeSubresourceIndex)
+                    .arg(static_cast<quint32>(textureDescription.Format), 0, 16),
+                true);
+            releaseTyped(inputView);
+            return false;
+        }
+
+        RECT sourceRect{
+            0,
+            0,
+            static_cast<LONG>(textureDescription.Width),
+            static_cast<LONG>(textureDescription.Height)};
+        RECT destinationRect{
+            static_cast<LONG>(std::lround(targetRect.left())),
+            static_cast<LONG>(std::lround(targetRect.top())),
+            static_cast<LONG>(std::lround(targetRect.right())),
+            static_cast<LONG>(std::lround(targetRect.bottom()))};
+        RECT outputRect{
+            0,
+            0,
+            static_cast<LONG>(surfaceSize.width()),
+            static_cast<LONG>(surfaceSize.height())};
+
+        videoContext->VideoProcessorSetOutputTargetRect(videoProcessor, TRUE, &outputRect);
+        videoContext->VideoProcessorSetStreamSourceRect(videoProcessor, 0, TRUE, &sourceRect);
+        videoContext->VideoProcessorSetStreamDestRect(videoProcessor, 0, TRUE, &destinationRect);
+        videoContext->VideoProcessorSetStreamFrameFormat(videoProcessor, 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
+
+        D3D11_VIDEO_PROCESSOR_STREAM stream{};
+        stream.Enable = TRUE;
+        stream.pInputSurface = inputView;
+        const auto bltResult = videoContext->VideoProcessorBlt(videoProcessor, videoProcessorOutputView, 0, 1, &stream);
+        releaseTyped(inputView);
+        if (FAILED(bltResult))
+        {
+            logDiagnostic(
+                QStringLiteral("d3d_video_fail"),
+                QStringLiteral("VideoProcessorBlt hr=%1").arg(hresultToString(bltResult)),
+                true);
+            return false;
+        }
+
+        return true;
+    }
+
     bool present(
         QWidget* widget,
         const QSize& surfaceSize,
@@ -711,29 +988,27 @@ struct D3D11RenderBackend::Impl
         const QRectF& targetRect,
         const QImage& overlayImage)
     {
-        if (!widget || !ensureSwapChain(reinterpret_cast<HWND>(widget->winId()), surfaceSize))
+        if (!widget)
         {
-            logDiagnostic(
-                QStringLiteral("d3d_present_fail"),
-                QStringLiteral("precheck widget=%1 surface=%2x%3 frame=%4x%5")
-                    .arg(widget != nullptr ? QStringLiteral("yes") : QStringLiteral("no"))
-                    .arg(surfaceSize.width())
-                    .arg(surfaceSize.height())
-                    .arg(frame.cpuImage.width())
-                    .arg(frame.cpuImage.height()),
-                true);
             return false;
         }
 
-        const auto videoUploadImage = frame.cpuImage.convertToFormat(QImage::Format_RGB32);
-        if (!uploadImage(videoTexture, videoUploadImage, QImage::Format_RGB32))
+        if (frame.hasNativeTexture())
+        {
+            static_cast<void>(adoptTextureDevice(reinterpret_cast<ID3D11Texture2D*>(frame.nativeHandle)));
+        }
+
+        if (!ensureSwapChain(reinterpret_cast<HWND>(widget->winId()), surfaceSize))
         {
             logDiagnostic(
                 QStringLiteral("d3d_present_fail"),
-                QStringLiteral("videoUpload frame=%1 size=%2x%3")
-                    .arg(frame.index)
-                    .arg(videoUploadImage.width())
-                    .arg(videoUploadImage.height()),
+                QStringLiteral("precheck widget=%1 surface=%2x%3 cpu=%4 native=%5 frame=%6")
+                    .arg(widget != nullptr ? QStringLiteral("yes") : QStringLiteral("no"))
+                    .arg(surfaceSize.width())
+                    .arg(surfaceSize.height())
+                    .arg(frame.hasCpuImage() ? QStringLiteral("yes") : QStringLiteral("no"))
+                    .arg(frame.hasNativeTexture() ? QStringLiteral("yes") : QStringLiteral("no"))
+                    .arg(frame.index),
                 true);
             return false;
         }
@@ -768,10 +1043,33 @@ struct D3D11RenderBackend::Impl
         deviceContext->RSSetViewports(1, &viewport);
         deviceContext->ClearRenderTargetView(renderTargetView, clearColor);
 
-        if (!drawTexturedQuad(videoTexture.shaderResourceView, targetRect, surfaceSize, false))
+        auto videoDrawn = drawHardwareFrame(frame, surfaceSize, targetRect);
+        if (!videoDrawn)
         {
-            logDiagnostic(QStringLiteral("d3d_present_fail"), QStringLiteral("draw video quad failed"), true);
-            return false;
+            if (!frame.hasCpuImage())
+            {
+                logDiagnostic(QStringLiteral("d3d_present_fail"), QStringLiteral("no cpu or hardware frame available"), true);
+                return false;
+            }
+
+            const auto videoUploadImage = frame.cpuImage.convertToFormat(QImage::Format_ARGB32);
+            if (!uploadImage(videoTexture, videoUploadImage, QImage::Format_ARGB32))
+            {
+                logDiagnostic(
+                    QStringLiteral("d3d_present_fail"),
+                    QStringLiteral("videoUpload frame=%1 size=%2x%3")
+                        .arg(frame.index)
+                        .arg(videoUploadImage.width())
+                        .arg(videoUploadImage.height()),
+                    true);
+                return false;
+            }
+
+            if (!drawTexturedQuad(videoTexture.shaderResourceView, targetRect, surfaceSize, false))
+            {
+                logDiagnostic(QStringLiteral("d3d_present_fail"), QStringLiteral("draw video quad failed"), true);
+                return false;
+            }
         }
 
         const QRectF fullRect{0.0, 0.0, static_cast<double>(surfaceSize.width()), static_cast<double>(surfaceSize.height())};
@@ -860,7 +1158,7 @@ bool D3D11RenderBackend::presentToNativeWindow(
     const QImage& overlayImage)
 {
 #ifdef Q_OS_WIN
-    if (!widget || frame.cpuImage.isNull())
+    if (!widget || !frame.isValid())
     {
         return false;
     }

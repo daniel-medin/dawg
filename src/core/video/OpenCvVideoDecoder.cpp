@@ -89,6 +89,8 @@ std::optional<VideoFrame> OpenCvVideoDecoder::readFrame()
         .frameSize = cv::Size{frame.cols, frame.rows},
         .pixelFormatName = QStringLiteral("BGR24"),
         .nativeHandle = 0,
+        .nativeSubresourceIndex = 0,
+        .rotationDegrees = 0,
         .hardwareBacked = false,
         .cpuBgr = frame,
         .cpuImage = image.copy()

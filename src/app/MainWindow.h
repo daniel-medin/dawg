@@ -4,6 +4,7 @@
 
 #include <QAction>
 #include <QCloseEvent>
+#include <QElapsedTimer>
 #include <QFrame>
 #include <QImage>
 #include <QLabel>
@@ -117,6 +118,7 @@ private:
     void showTrackMixGainPopup(const QUuid& trackId, const QPoint& globalPosition);
     void updateTrackMixGainPopupValue(float gainDb);
     void updateDetachedVideoUiState();
+    void resetOutputFpsTracking();
     [[nodiscard]] std::optional<int> timelineLoopTargetFrame() const;
     [[nodiscard]] bool hasOpenProject() const;
     [[nodiscard]] bool ensureProjectForMediaAction(const QString& actionLabel);
@@ -280,6 +282,10 @@ private:
     int m_activeNodeNudgeKey = 0;
     QPointF m_activeNodeNudgeDelta;
     bool m_nodeNudgeFastMode = false;
+    QElapsedTimer m_outputFpsTimer;
+    QElapsedTimer m_debugTextTimer;
+    int m_outputFpsFrameCount = 0;
+    double m_outputFps = 0.0;
     bool m_videoDetached = false;
     bool m_shuttingDown = false;
     QString m_currentProjectFilePath;

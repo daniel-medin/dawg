@@ -1321,8 +1321,8 @@ bool PlayerController::createTrackWithAudioAtCurrentFrame(const QString& filePat
     }
 
     const auto imageCenter = QPointF{
-        static_cast<double>(m_currentFrame.cpuBgr.cols) * 0.5,
-        static_cast<double>(m_currentFrame.cpuBgr.rows) * 0.5
+        static_cast<double>(m_currentFrame.frameSize.width) * 0.5,
+        static_cast<double>(m_currentFrame.frameSize.height) * 0.5
     };
     return createTrackWithAudioAtCurrentFrame(filePath, imageCenter);
 }
@@ -1590,7 +1590,10 @@ bool PlayerController::copySelectedTracks()
 
 bool PlayerController::pasteCopiedTracksAtCurrentFrame()
 {
-    if (!hasVideoLoaded() || m_copiedTracks.empty() || m_currentFrame.cpuBgr.empty())
+    if (!hasVideoLoaded()
+        || m_copiedTracks.empty()
+        || m_currentFrame.frameSize.width <= 0
+        || m_currentFrame.frameSize.height <= 0)
     {
         return false;
     }
@@ -1598,8 +1601,8 @@ bool PlayerController::pasteCopiedTracksAtCurrentFrame()
     saveUndoState();
 
     const auto imageCenter = QPointF{
-        static_cast<double>(m_currentFrame.cpuBgr.cols) * 0.5,
-        static_cast<double>(m_currentFrame.cpuBgr.rows) * 0.5
+        static_cast<double>(m_currentFrame.frameSize.width) * 0.5,
+        static_cast<double>(m_currentFrame.frameSize.height) * 0.5
     };
     const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
 
@@ -3402,10 +3405,11 @@ void PlayerController::syncAttachedAudioForCurrentFrame()
         m_audioEngine->setTrackGain(track.id, trackGainDb);
 
         float pan = 0.0F;
-        if (track.autoPanEnabled && m_currentFrame.cpuBgr.cols > 1)
+        if (track.autoPanEnabled && m_currentFrame.frameSize.width > 1)
         {
             const auto samplePoint = track.interpolatedSampleAt(m_currentFrame.index).value_or(QPointF{});
-            const auto normalizedPan = ((samplePoint.x() / static_cast<double>(m_currentFrame.cpuBgr.cols - 1)) * 2.0) - 1.0;
+            const auto normalizedPan =
+                ((samplePoint.x() / static_cast<double>(m_currentFrame.frameSize.width - 1)) * 2.0) - 1.0;
             pan = std::clamp(static_cast<float>(normalizedPan), -1.0F, 1.0F);
         }
         m_audioEngine->setTrackPan(track.id, pan);
