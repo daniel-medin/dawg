@@ -5,6 +5,8 @@ import QtQuick.Window 2.15
 
 Rectangle {
     id: root
+    property real inactiveTitleOpacity: 0.56
+    property real titleTextOpacity: windowChrome.active ? 1.0 : inactiveTitleOpacity
 
     color: theme.titleBarBackground
     border.width: 1
@@ -51,6 +53,22 @@ Rectangle {
         return mapped ? mapped : Qt.point(0, 0)
     }
 
+    Label {
+        id: centeredProjectTitle
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.max(120, root.width - 560)
+        text: windowChrome.projectTitle
+        visible: text.length > 0
+        color: theme.titleText
+        opacity: root.titleTextOpacity
+        font.pixelSize: 14
+        font.weight: Font.DemiBold
+        horizontalAlignment: Text.AlignHCenter
+        elide: Text.ElideRight
+        z: 1
+    }
+
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: 12
@@ -66,13 +84,14 @@ Rectangle {
         }
 
         Label {
-            text: windowChrome.windowTitle
+            text: windowChrome.appTitle
             color: theme.titleText
+            opacity: root.titleTextOpacity
             font.pixelSize: 14
             font.weight: Font.DemiBold
             elide: Text.ElideRight
-            Layout.preferredWidth: 260
-            Layout.maximumWidth: 340
+            Layout.preferredWidth: 90
+            Layout.maximumWidth: 120
             Layout.alignment: Qt.AlignVCenter
         }
 
@@ -101,6 +120,7 @@ Rectangle {
                     contentItem: Label {
                         text: menuButton.text
                         color: theme.titleText
+                        opacity: root.titleTextOpacity
                         font.pixelSize: 13
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter

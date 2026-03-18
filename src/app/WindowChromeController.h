@@ -8,6 +8,8 @@ class WindowChromeController final : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString windowTitle READ windowTitle NOTIFY windowTitleChanged)
+    Q_PROPERTY(QString appTitle READ appTitle CONSTANT)
+    Q_PROPERTY(QString projectTitle READ projectTitle NOTIFY windowTitleChanged)
     Q_PROPERTY(QString iconSource READ iconSource CONSTANT)
     Q_PROPERTY(QString frameText READ frameText NOTIFY frameTextChanged)
     Q_PROPERTY(bool maximized READ maximized NOTIFY maximizedChanged)
@@ -18,6 +20,8 @@ public:
     explicit WindowChromeController(MainWindow& window, QObject* parent = nullptr);
 
     [[nodiscard]] QString windowTitle() const;
+    [[nodiscard]] QString appTitle() const;
+    [[nodiscard]] QString projectTitle() const;
     [[nodiscard]] QString iconSource() const;
     [[nodiscard]] QString frameText() const;
     [[nodiscard]] bool maximized() const;

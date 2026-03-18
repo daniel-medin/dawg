@@ -2,6 +2,7 @@ import QtQuick 2.15
 
 Item {
     id: root
+    property bool handlesOnly: false
 
     AppTheme {
         id: theme
@@ -22,6 +23,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: theme.shellBackground
+        visible: !root.handlesOnly
     }
 
     Rectangle {
@@ -30,6 +32,7 @@ Item {
         width: rectValue(shellLayoutController.canvasRect, "width")
         height: rectValue(shellLayoutController.canvasRect, "height")
         visible: rectVisible(shellLayoutController.canvasRect)
+                 && !root.handlesOnly
         color: "#090c10"
         border.width: 1
         border.color: "#151b23"
@@ -41,6 +44,7 @@ Item {
         width: rectValue(shellLayoutController.timelineRect, "width")
         height: rectValue(shellLayoutController.timelineRect, "height")
         visible: rectVisible(shellLayoutController.timelineRect)
+                 && !root.handlesOnly
         color: "#050608"
         border.width: 1
         border.color: "#151b23"
@@ -52,6 +56,7 @@ Item {
         width: rectValue(shellLayoutController.clipEditorRect, "width")
         height: rectValue(shellLayoutController.clipEditorRect, "height")
         visible: rectVisible(shellLayoutController.clipEditorRect)
+                 && !root.handlesOnly
         color: "#07090c"
         border.width: 1
         border.color: "#151b23"
@@ -63,6 +68,7 @@ Item {
         width: rectValue(shellLayoutController.mixRect, "width")
         height: rectValue(shellLayoutController.mixRect, "height")
         visible: rectVisible(shellLayoutController.mixRect)
+                 && !root.handlesOnly
         color: "#080b10"
         border.width: 1
         border.color: "#151b23"
@@ -74,6 +80,7 @@ Item {
         width: rectValue(shellLayoutController.audioPoolRect, "width")
         height: rectValue(shellLayoutController.audioPoolRect, "height")
         visible: rectVisible(shellLayoutController.audioPoolRect)
+                 && !root.handlesOnly
         color: "#07090c"
         border.width: 1
         border.color: "#151b23"

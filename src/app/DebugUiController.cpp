@@ -297,11 +297,6 @@ void DebugUiController::updateFrame(const QImage& image, const int frameIndex, c
     {
         m_window.m_windowChromeController->setFrameText(frameText);
     }
-    if (m_window.m_audioPoolQuickWidget && m_window.m_audioPoolQuickWidget->isVisible())
-    {
-        m_window.updateAudioPoolPlaybackIndicators();
-    }
-
     if (m_window.m_controller->isPlaying())
     {
         if (!m_window.m_outputFpsTimer.isValid())

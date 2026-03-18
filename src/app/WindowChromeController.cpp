@@ -24,6 +24,16 @@ QString WindowChromeController::windowTitle() const
     return m_window.windowTitle();
 }
 
+QString WindowChromeController::appTitle() const
+{
+    return QStringLiteral("dawg");
+}
+
+QString WindowChromeController::projectTitle() const
+{
+    return m_window.currentProjectTitle();
+}
+
 QString WindowChromeController::iconSource() const
 {
     return QStringLiteral("qrc:/branding/dawg.png");

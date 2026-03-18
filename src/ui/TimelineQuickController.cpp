@@ -166,8 +166,16 @@ void TimelineQuickController::setCurrentFrame(const int frameIndex)
     m_currentFrame = clampedFrame;
     m_lastRequestedFrame = m_currentFrame;
     m_pendingRequestedFrame = -1;
+    const auto previousViewStartFrame = m_viewStartFrame;
     ensureFrameVisible(m_currentFrame);
-    refreshVisuals();
+    if (std::abs(m_viewStartFrame - previousViewStartFrame) > 0.001)
+    {
+        refreshVisuals();
+        return;
+    }
+
+    m_markerX = xForFrame(m_currentFrame);
+    emit visualsChanged();
 }
 
 void TimelineQuickController::setLoopRange(const std::optional<int> startFrame, const std::optional<int> endFrame)

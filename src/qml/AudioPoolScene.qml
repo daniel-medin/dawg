@@ -101,10 +101,8 @@ Rectangle {
                 onClicked: {
                     root.openMenu("header", -1, [
                         { key: "importAudio", text: "Import Audio... (Ctrl+Shift+I)" },
-                        { separator: true },
                         { key: "showLength", text: "Show Length", checkable: true, checked: audioPoolController.showLength },
                         { key: "showSize", text: "Show Size", checkable: true, checked: audioPoolController.showSize },
-                        { separator: true },
                         { key: "closePanel", text: "Close (P)" }
                     ], headerMenuButton)
                 }
@@ -405,13 +403,12 @@ Rectangle {
         background: Rectangle {
             radius: 10
             color: theme.menuBackground
-            border.color: theme.menuBorder
-            border.width: 1
+            border.width: 0
         }
 
         contentItem: Column {
             id: menuColumn
-            spacing: 2
+            spacing: 0
 
             Repeater {
                 model: root.activeMenuItems
@@ -422,27 +419,17 @@ Rectangle {
                     required property var modelData
 
                     implicitWidth: 220
-                    implicitHeight: modelData.separator ? 10 : 32
+                    implicitHeight: 32
 
                     Rectangle {
                         anchors.fill: parent
                         radius: 6
-                        color: !modelData.separator && menuMouseArea.containsMouse
+                        color: menuMouseArea.containsMouse
                             ? theme.menuItemHover
                             : "transparent"
                     }
 
-                    Rectangle {
-                        visible: modelData.separator
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        height: 1
-                        color: theme.menuBorder
-                    }
-
                     RowLayout {
-                        visible: !modelData.separator
                         anchors.fill: parent
                         anchors.leftMargin: 10
                         anchors.rightMargin: 10
@@ -468,7 +455,7 @@ Rectangle {
                         id: menuMouseArea
 
                         anchors.fill: parent
-                        enabled: !modelData.separator && modelData.enabled !== false
+                        enabled: modelData.enabled !== false
                         hoverEnabled: enabled
                         onClicked: root.triggerMenuAction(modelData.key)
                     }

@@ -41,8 +41,8 @@ Item {
         clip: true
 
         ShellLayoutScene {
-            id: shellLayoutScene
-            objectName: "shellLayoutScene"
+            id: shellLayoutBackground
+            objectName: "shellLayoutBackground"
             anchors.fill: parent
             z: 0
         }
@@ -100,6 +100,14 @@ Item {
             height: rectValue(shellLayoutController.audioPoolRect, "height")
             visible: rectVisible(shellLayoutController.audioPoolRect)
             z: 1
+        }
+
+        ShellLayoutScene {
+            id: shellLayoutHandles
+            objectName: "shellLayoutScene"
+            anchors.fill: parent
+            handlesOnly: true
+            z: 10
         }
 
         ShellOverlay {

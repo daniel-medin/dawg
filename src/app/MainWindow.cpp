@@ -1156,6 +1156,16 @@ QString MainWindow::windowTitle() const
     return title();
 }
 
+QString MainWindow::currentProjectTitle() const
+{
+    if (m_currentProjectName.isEmpty())
+    {
+        return QString{};
+    }
+
+    return m_currentProjectName + (m_projectDirty ? QStringLiteral("*") : QString{});
+}
+
 void MainWindow::setWindowIcon(const QIcon& windowIcon)
 {
     setIcon(windowIcon);
@@ -1980,6 +1990,12 @@ void MainWindow::refreshOverlays()
     {
         m_nativeViewport->setOverlays(m_controller->currentOverlays());
     }
+
+    if (m_controller && m_controller->isPlaying())
+    {
+        return;
+    }
+
     refreshTimeline();
     refreshClipEditor();
 }
@@ -2672,7 +2688,7 @@ void MainWindow::setTimelineState(const int totalFrames, const double fps)
 
 void MainWindow::setTimelineCurrentFrame(const int frameIndex)
 {
-    if (m_timelineQuickController)
+    if (m_timelineQuickController && m_timelineQuickWidget && m_timelineQuickWidget->isVisible())
     {
         m_timelineQuickController->setCurrentFrame(frameIndex);
     }

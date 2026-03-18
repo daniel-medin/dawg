@@ -54,6 +54,7 @@ public:
     [[nodiscard]] bool openProjectFilePath(const QString& projectFilePath);
     void setWindowTitle(const QString& title);
     [[nodiscard]] QString windowTitle() const;
+    [[nodiscard]] QString currentProjectTitle() const;
     void setWindowIcon(const QIcon& icon);
     [[nodiscard]] QIcon windowIcon() const;
     [[nodiscard]] bool isMaximized() const;
