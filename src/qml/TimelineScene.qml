@@ -9,6 +9,10 @@ Item {
         return mapValue && mapValue[key] !== undefined ? mapValue[key] : 0
     }
 
+    function boolValue(mapValue, key) {
+        return mapValue && mapValue[key] !== undefined ? Boolean(mapValue[key]) : false
+    }
+
     function globalPoint(localX, localY) {
         var mapped = timelineRoot.mapToGlobal(Qt.point(localX, localY))
         return mapped ? mapped : Qt.point(0, 0)
@@ -114,7 +118,7 @@ Item {
     }
 
     Rectangle {
-        visible: timelineController.loopRangeGeometry.selectionVisible
+        visible: boolValue(timelineController.loopRangeGeometry, "selectionVisible")
         x: rectValue(timelineController.loopRangeGeometry.selectionRect, "x")
         y: rectValue(timelineController.loopRangeGeometry.selectionRect, "y")
         width: rectValue(timelineController.loopRangeGeometry.selectionRect, "width")
@@ -126,7 +130,7 @@ Item {
     }
 
     Rectangle {
-        visible: timelineController.loopRangeGeometry.startHandleVisible
+        visible: boolValue(timelineController.loopRangeGeometry, "startHandleVisible")
         x: rectValue(timelineController.loopRangeGeometry.startHandleRect, "x")
         y: rectValue(timelineController.loopRangeGeometry.startHandleRect, "y")
         width: rectValue(timelineController.loopRangeGeometry.startHandleRect, "width")
@@ -136,7 +140,7 @@ Item {
     }
 
     Rectangle {
-        visible: timelineController.loopRangeGeometry.endHandleVisible
+        visible: boolValue(timelineController.loopRangeGeometry, "endHandleVisible")
         x: rectValue(timelineController.loopRangeGeometry.endHandleRect, "x")
         y: rectValue(timelineController.loopRangeGeometry.endHandleRect, "y")
         width: rectValue(timelineController.loopRangeGeometry.endHandleRect, "width")

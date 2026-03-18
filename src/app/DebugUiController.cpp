@@ -17,11 +17,10 @@
 
 #include "app/MainWindow.h"
 #include "app/PlayerController.h"
+#include "app/WindowChromeController.h"
 #include "ui/DebugOverlayWindow.h"
-#include "ui/QuickMixStripWidget.h"
 #include "ui/NativeVideoViewport.h"
-#include "ui/TimelineView.h"
-#include "ui/VideoCanvas.h"
+#include "ui/VideoViewportQuickController.h"
 
 namespace
 {
@@ -280,7 +279,7 @@ void DebugUiController::resetOutputFpsTracking()
 void DebugUiController::updateFrame(const QImage& image, const int frameIndex, const double timestampSeconds)
 {
     m_window.m_lastPresentedFrame = image;
-    m_window.m_canvas->setPresentedFrame(image, m_window.m_controller->currentVideoFrame(), m_window.m_controller->videoFrameSize());
+    m_window.m_videoViewportQuickController->setPresentedFrame(image, m_window.m_controller->currentVideoFrame(), m_window.m_controller->videoFrameSize());
     if (m_window.m_nativeViewportWindow && m_window.m_nativeViewportWindow->isVisible() && m_window.m_nativeViewport)
     {
         m_window.m_nativeViewport->setPresentedFrame(
@@ -290,12 +289,15 @@ void DebugUiController::updateFrame(const QImage& image, const int frameIndex, c
     }
     const auto displayFrameIndex = std::max(0, frameIndex);
     const auto displayTimestampSeconds = std::max(0.0, timestampSeconds);
-    m_window.m_timeline->setCurrentFrame(displayFrameIndex);
-    m_window.m_frameLabel->setText(
-        QStringLiteral("Frame %1  |  %2 s")
-            .arg(displayFrameIndex)
-            .arg(displayTimestampSeconds, 0, 'f', 2));
-    if (m_window.m_audioPoolPanel && m_window.m_audioPoolPanel->isVisible())
+    m_window.setTimelineCurrentFrame(displayFrameIndex);
+    const auto frameText = QStringLiteral("Frame %1  |  %2 s")
+        .arg(displayFrameIndex)
+        .arg(displayTimestampSeconds, 0, 'f', 2);
+    if (m_window.m_windowChromeController)
+    {
+        m_window.m_windowChromeController->setFrameText(frameText);
+    }
+    if (m_window.m_audioPoolQuickWidget && m_window.m_audioPoolQuickWidget->isVisible())
     {
         m_window.updateAudioPoolPlaybackIndicators();
     }
@@ -351,11 +353,6 @@ void DebugUiController::updateDebugText()
         return;
     }
 
-    const auto totalFrames = std::max(0, m_window.m_controller->totalFrames());
-    const auto currentFrame = m_window.m_controller->hasVideoLoaded() ? m_window.m_controller->currentFrameIndex() : 0;
-    const auto currentSeconds = m_window.m_controller->fps() > 0.0
-        ? static_cast<double>(currentFrame) / m_window.m_controller->fps()
-        : 0.0;
     const auto clipText = m_window.m_clipName.isEmpty() ? QStringLiteral("No clip") : m_window.m_clipName;
     const auto fpsText = m_window.m_controller->fps() > 0.0
         ? QString::number(m_window.m_controller->fps(), 'f', 2)
@@ -392,8 +389,6 @@ void DebugUiController::updateDebugText()
     const auto renderText = m_window.m_controller->renderBackendName().isEmpty()
         ? QStringLiteral("Render --")
         : QStringLiteral("Render %1").arg(m_window.m_controller->renderBackendName());
-    m_window.m_qtQuickLoadText = QuickMixStripWidget::loadStatusText();
-    m_window.m_qtQuickGraphicsApiText = QuickMixStripWidget::graphicsApiText();
     const auto qtQuickText = QStringLiteral("Qt Quick %1")
         .arg(m_window.m_qtQuickGraphicsApiText.isEmpty()
                 ? QStringLiteral("Unknown")
@@ -408,26 +403,21 @@ void DebugUiController::updateDebugText()
             "Clip: %1\n"
             "Motion: %2\n"
             "Insert Follow: %3\n"
-            "Frame: %4 / %5\n"
-            "Time: %6 s\n"
-            "Video FPS: %7\n"
-            "FPS Output: %8\n"
-            "Nodes: %9\n"
-            "Selected: %10\n"
+            "Video FPS: %4\n"
+            "FPS Output: %5\n"
+            "Nodes: %6\n"
+            "Selected: %7\n"
+            "%8\n"
+            "%9\n"
+            "%10\n"
             "%11\n"
             "%12\n"
             "%13\n"
             "%14\n"
-            "%15\n"
-            "%16\n"
-            "%17\n"
-            "%18")
+            "%15")
             .arg(clipText)
             .arg(m_window.m_controller->isMotionTrackingEnabled() ? QStringLiteral("On") : QStringLiteral("Off"))
             .arg(insertionText)
-            .arg(currentFrame)
-            .arg(totalFrames)
-            .arg(currentSeconds, 0, 'f', 2)
             .arg(fpsText)
             .arg(outputFpsText)
             .arg(m_window.m_controller->trackCount())
@@ -451,12 +441,12 @@ void DebugUiController::handleVideoLoaded(const QString& filePath, const int tot
     m_window.m_clipName = fileInfo.fileName();
     if (filePath.isEmpty())
     {
-        m_window.m_timeline->clear();
+        m_window.clearTimeline();
     }
     else
     {
-        m_window.m_timeline->setVideoPath(filePath);
-        m_window.m_timeline->setTimeline(totalFrames, fps);
+        m_window.setTimelineVideoPath(filePath);
+        m_window.setTimelineState(totalFrames, fps);
     }
     if (m_window.m_nativeViewportWindow)
     {

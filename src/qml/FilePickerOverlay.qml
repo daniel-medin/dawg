@@ -1,0 +1,209 @@
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+
+Item {
+    id: root
+    visible: filePickerController.visible
+    focus: filePickerController.visible
+    implicitWidth: 840
+    implicitHeight: 580
+
+    AppTheme {
+        id: theme
+    }
+
+    Keys.onEscapePressed: filePickerController.cancel()
+
+    Rectangle {
+        anchors.fill: parent
+        radius: 14
+        color: "#14181f"
+        border.width: 1
+        border.color: "#2b3442"
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 14
+            spacing: 10
+
+            Label {
+                Layout.fillWidth: true
+                text: filePickerController.title
+                color: theme.titleText
+                font.pixelSize: 16
+                font.weight: Font.DemiBold
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    text: "Up"
+                    onClicked: filePickerController.goUp()
+                }
+
+                TextField {
+                    id: pathField
+                    Layout.fillWidth: true
+                    text: filePickerController.currentPath
+                    selectByMouse: true
+                    onAccepted: filePickerController.currentPath = text
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                visible: filePickerController.saveMode
+
+                Label {
+                    text: "File"
+                    color: theme.subtitleText
+                }
+
+                TextField {
+                    id: fileNameField
+                    Layout.fillWidth: true
+                    text: filePickerController.fileName
+                    selectByMouse: true
+                    onTextChanged: filePickerController.fileName = text
+                    onAccepted: filePickerController.acceptSelection()
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 12
+
+                Rectangle {
+                    Layout.preferredWidth: 140
+                    Layout.fillHeight: true
+                    radius: 10
+                    color: "#10151c"
+                    border.width: 1
+                    border.color: "#202834"
+
+                    ListView {
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        model: filePickerController.sidebarLocations
+                        spacing: 4
+
+                        delegate: Button {
+                            required property var modelData
+                            width: ListView.view.width
+                            text: modelData.label
+                            flat: true
+                            onClicked: filePickerController.openSidebarLocation(modelData.path)
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: 10
+                    color: "#10151c"
+                    border.width: 1
+                    border.color: "#202834"
+
+                    ListView {
+                        id: listView
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        clip: true
+                        model: filePickerController.entries
+                        spacing: 2
+
+                        delegate: Rectangle {
+                            id: row
+                            required property int index
+                            required property string name
+                            required property string path
+                            required property bool directory
+                            required property string sizeText
+
+                            width: ListView.view.width
+                            height: 34
+                            radius: 8
+                            color: filePickerController.selectedPath === path
+                                ? "#213247"
+                                : (rowArea.containsMouse ? "#18202b" : "transparent")
+                            border.width: filePickerController.selectedPath === path ? 1 : 0
+                            border.color: "#4f78a3"
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                spacing: 8
+
+                                Label {
+                                    text: row.directory ? "\u25B8" : "\u2022"
+                                    color: row.directory ? "#9ec3ef" : "#91a0b1"
+                                    font.pixelSize: 12
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: row.name
+                                    color: "#e7eef6"
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                }
+
+                                Label {
+                                    text: row.sizeText
+                                    color: "#91a0b1"
+                                    font.pixelSize: 11
+                                }
+                            }
+
+                            MouseArea {
+                                id: rowArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: filePickerController.selectEntry(row.index)
+                                onDoubleClicked: filePickerController.activateEntry(row.index)
+                            }
+                        }
+
+                        ScrollBar.vertical: ScrollBar {}
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Label {
+                    Layout.fillWidth: true
+                    text: filePickerController.selectedPath
+                    color: theme.subtitleText
+                    font.pixelSize: 11
+                    elide: Text.ElideMiddle
+                }
+
+                Button {
+                    text: "Cancel"
+                    onClicked: filePickerController.cancel()
+                }
+
+                Button {
+                    text: filePickerController.actionText
+                    highlighted: true
+                    enabled: filePickerController.saveMode
+                        ? filePickerController.fileName.length > 0
+                        : (filePickerController.directoryMode
+                        ? filePickerController.currentPath.length > 0
+                        : filePickerController.selectedPath.length > 0)
+                    onClicked: filePickerController.acceptSelection()
+                }
+            }
+        }
+    }
+}

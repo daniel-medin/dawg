@@ -1,14 +1,12 @@
 #include "app/MediaImportController.h"
 
-#include <QDialog>
 #include <QDir>
 #include <QFile>
-#include <QFileDialog>
 #include <QFileInfo>
-#include <QMessageBox>
 #include <QStandardPaths>
-#include <QUrl>
 
+#include "app/DialogController.h"
+#include "app/FilePickerController.h"
 #include "app/MainWindow.h"
 #include "app/PlayerController.h"
 
@@ -67,20 +65,22 @@ bool MediaImportController::ensureProjectForMediaAction(const QString& actionLab
         return true;
     }
 
-    QMessageBox messageBox(&m_window);
-    messageBox.setIcon(QMessageBox::Information);
-    messageBox.setWindowTitle(QStringLiteral("Project Required"));
-    messageBox.setText(QStringLiteral("Create or open a project before you %1.").arg(actionLabel));
-    auto* newButton = messageBox.addButton(QStringLiteral("New Project"), QMessageBox::AcceptRole);
-    auto* openButton = messageBox.addButton(QStringLiteral("Open Project"), QMessageBox::ActionRole);
-    messageBox.addButton(QStringLiteral("Cancel"), QMessageBox::RejectRole);
-    messageBox.exec();
+    const auto result = m_window.m_dialogController->execMessage(
+        QStringLiteral("Project Required"),
+        QStringLiteral("Create or open a project before you %1.").arg(actionLabel),
+        {},
+        {
+            DialogController::Button::NewProject,
+            DialogController::Button::OpenProject,
+            DialogController::Button::Cancel,
+        },
+        DialogController::Button::NewProject);
 
-    if (messageBox.clickedButton() == newButton)
+    if (result == DialogController::Button::NewProject)
     {
         m_window.newProject();
     }
-    else if (messageBox.clickedButton() == openButton)
+    else if (result == DialogController::Button::OpenProject)
     {
         m_window.openProject();
     }
@@ -141,61 +141,14 @@ std::optional<QString> MediaImportController::copyMediaIntoProject(
     return QDir::cleanPath(targetPath);
 }
 
-void MediaImportController::applyFileDialogChrome(QFileDialog& dialog) const
-{
-    dialog.setOption(QFileDialog::DontUseNativeDialog, true);
-
-    QList<QUrl> sidebarUrls;
-    const auto addSidebarUrl = [&sidebarUrls](const QUrl& url)
-    {
-        if (!url.isValid() || sidebarUrls.contains(url))
-        {
-            return;
-        }
-        sidebarUrls.push_back(url);
-    };
-    const auto addSidebarLocation = [&addSidebarUrl](const QStandardPaths::StandardLocation location)
-    {
-        const auto path = QStandardPaths::writableLocation(location);
-        if (!path.isEmpty())
-        {
-            addSidebarUrl(QUrl::fromLocalFile(path));
-        }
-    };
-
-    addSidebarUrl(QUrl(QStringLiteral("file:///")));
-    addSidebarLocation(QStandardPaths::DesktopLocation);
-    addSidebarLocation(QStandardPaths::HomeLocation);
-    addSidebarLocation(QStandardPaths::DocumentsLocation);
-    addSidebarLocation(QStandardPaths::MoviesLocation);
-    addSidebarLocation(QStandardPaths::MusicLocation);
-    for (const auto& url : dialog.sidebarUrls())
-    {
-        addSidebarUrl(url);
-    }
-
-    if (!sidebarUrls.isEmpty())
-    {
-        dialog.setSidebarUrls(sidebarUrls);
-    }
-}
-
 QString MediaImportController::chooseOpenFileName(
     const QString& title,
     const QString& directory,
     const QString& filter) const
 {
-    const auto initialDirectory = directory.isEmpty() ? QString{} : directory;
-    QFileDialog dialog(&m_window, title, initialDirectory, filter);
-    dialog.setAcceptMode(QFileDialog::AcceptOpen);
-    dialog.setFileMode(QFileDialog::ExistingFile);
-    applyFileDialogChrome(dialog);
-    if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty())
-    {
-        return {};
-    }
-
-    return dialog.selectedFiles().constFirst();
+    return m_window.m_filePickerController
+        ? m_window.m_filePickerController->execOpenFile(title, directory, filter)
+        : QString{};
 }
 
 QString MediaImportController::chooseExistingDirectory(const QString& title, const QString& directory) const
@@ -203,17 +156,9 @@ QString MediaImportController::chooseExistingDirectory(const QString& title, con
     const auto initialDirectory = directory.isEmpty()
         ? QStandardPaths::writableLocation(QStandardPaths::DesktopLocation)
         : directory;
-    QFileDialog dialog(&m_window, title, initialDirectory);
-    dialog.setAcceptMode(QFileDialog::AcceptOpen);
-    dialog.setFileMode(QFileDialog::Directory);
-    dialog.setOption(QFileDialog::ShowDirsOnly, true);
-    applyFileDialogChrome(dialog);
-    if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty())
-    {
-        return {};
-    }
-
-    return dialog.selectedFiles().constFirst();
+    return m_window.m_filePickerController
+        ? m_window.m_filePickerController->execOpenDirectory(title, initialDirectory)
+        : QString{};
 }
 
 void MediaImportController::openVideo()
@@ -228,13 +173,13 @@ void MediaImportController::openVideo()
         || !currentProjectState.audioPoolAssetPaths.empty()
         || !currentProjectState.trackerState.tracks.empty())
     {
-        const auto choice = QMessageBox::question(
-            &m_window,
+        const auto choice = m_window.m_dialogController->execMessage(
             QStringLiteral("Replace Project Video"),
             QStringLiteral("Opening a new video will clear the current nodes and audio pool for this project. Continue?"),
-            QMessageBox::Yes | QMessageBox::No,
-            QMessageBox::No);
-        if (choice != QMessageBox::Yes)
+            {},
+            {DialogController::Button::Yes, DialogController::Button::No},
+            DialogController::Button::No);
+        if (choice != DialogController::Button::Yes)
         {
             return;
         }
@@ -253,7 +198,11 @@ void MediaImportController::openVideo()
     const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("video"), &errorMessage);
     if (!copiedFilePath.has_value())
     {
-        QMessageBox::warning(&m_window, QStringLiteral("Import Video"), errorMessage);
+        m_window.m_dialogController->execMessage(
+            QStringLiteral("Import Video"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
         return;
     }
 
@@ -292,7 +241,11 @@ void MediaImportController::importSound()
     const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("audio"), &errorMessage);
     if (!copiedFilePath.has_value())
     {
-        QMessageBox::warning(&m_window, QStringLiteral("Import Audio"), errorMessage);
+        m_window.m_dialogController->execMessage(
+            QStringLiteral("Import Audio"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
         return;
     }
 
@@ -319,7 +272,11 @@ void MediaImportController::importAudioToPool()
     const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("audio"), &errorMessage);
     if (!copiedFilePath.has_value())
     {
-        QMessageBox::warning(&m_window, QStringLiteral("Import Audio"), errorMessage);
+        m_window.m_dialogController->execMessage(
+            QStringLiteral("Import Audio"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
         return;
     }
 

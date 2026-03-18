@@ -7,7 +7,7 @@
 
 #include "core/audio/AudioEngine.h"
 #include "core/tracking/TrackTypes.h"
-#include "ui/TimelineView.h"
+#include "ui/TimelineTypes.h"
 
 namespace
 {

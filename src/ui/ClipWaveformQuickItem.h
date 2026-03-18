@@ -6,7 +6,7 @@
 #include <QImage>
 #include <QQuickPaintedItem>
 
-#include "ui/ClipEditorView.h"
+#include "ui/ClipEditorTypes.h"
 
 class ClipWaveformQuickItem : public QQuickPaintedItem
 {

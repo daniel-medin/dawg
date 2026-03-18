@@ -4,6 +4,7 @@
 #include <cmath>
 #include <memory>
 
+#include <QCursor>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QWheelEvent>

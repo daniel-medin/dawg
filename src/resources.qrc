@@ -3,9 +3,22 @@
         <file alias="branding/dawg.png">../assets/dawg.png</file>
         <file alias="branding/logo.png">../assets/logo.png</file>
         <file alias="branding/logo-transparent.png">../assets/logo_transparent.png</file>
+        <file alias="qml/AppShell.qml">qml/AppShell.qml</file>
         <file alias="qml/ClipGainStrip.qml">qml/ClipGainStrip.qml</file>
         <file alias="qml/ClipEditorScene.qml">qml/ClipEditorScene.qml</file>
+        <file alias="qml/DebugOverlayScene.qml">qml/DebugOverlayScene.qml</file>
+        <file alias="qml/MixScene.qml">qml/MixScene.qml</file>
         <file alias="qml/MixStrip.qml">qml/MixStrip.qml</file>
+        <file alias="qml/AppTheme.qml">qml/AppTheme.qml</file>
+        <file alias="qml/AudioPoolScene.qml">qml/AudioPoolScene.qml</file>
+        <file alias="qml/ContextMenuOverlay.qml">qml/ContextMenuOverlay.qml</file>
+        <file alias="qml/DialogOverlay.qml">qml/DialogOverlay.qml</file>
+        <file alias="qml/FilePickerOverlay.qml">qml/FilePickerOverlay.qml</file>
+        <file alias="qml/QuickTitleBar.qml">qml/QuickTitleBar.qml</file>
+        <file alias="qml/ShellLayoutScene.qml">qml/ShellLayoutScene.qml</file>
+        <file alias="qml/ShellOverlay.qml">qml/ShellOverlay.qml</file>
         <file alias="qml/TimelineScene.qml">qml/TimelineScene.qml</file>
+        <file alias="qml/VideoViewportScene.qml">qml/VideoViewportScene.qml</file>
+        <file alias="qtquickcontrols2.conf">qtquickcontrols2.conf</file>
     </qresource>
 </RCC>

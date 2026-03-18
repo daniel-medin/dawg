@@ -31,9 +31,8 @@
 #include "core/audio/AudioEngine.h"
 #include "core/tracking/MotionTracker.h"
 #include "core/video/VideoFrame.h"
-#include "ui/ClipEditorView.h"
-#include "ui/MixView.h"
-#include "ui/TimelineView.h"
+#include "ui/MixTypes.h"
+#include "ui/TimelineTypes.h"
 
 class PlayerController final : public QObject
 {

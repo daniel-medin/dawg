@@ -2,53 +2,83 @@
 
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include <QAction>
 #include <QCloseEvent>
 #include <QElapsedTimer>
-#include <QFrame>
+#include <QIcon>
 #include <QImage>
-#include <QLabel>
-#include <QMainWindow>
 #include <QPoint>
 #include <QPointF>
-#include <QPushButton>
+#include <QQuickItem>
+#include <QQuickView>
 #include <QShortcut>
-#include <QSplitter>
 #include <QTimer>
-#include <QToolButton>
-#include <QVBoxLayout>
 
 #include "app/ProjectDocument.h"
+#include "ui/ClipEditorTypes.h"
+#include "ui/MixTypes.h"
+#include "ui/TimelineTypes.h"
 
 class PlayerController;
 class DebugOverlayWindow;
-class ClipEditorView;
-class MixView;
+class ClipEditorQuickController;
+class ClipWaveformQuickItem;
+class MixQuickController;
 class NativeVideoViewport;
 class MainWindowActions;
 class ProjectWindowController;
 class PanelLayoutController;
 class DebugUiController;
 class MediaImportController;
-class QMenu;
-class QSlider;
-class TimelineView;
-class VideoCanvas;
+class ActionRegistry;
+class AudioPoolQuickController;
+class ContextMenuController;
+class DialogController;
+class FilePickerController;
+class ShellLayoutController;
+class ShellOverlayController;
+class QWidget;
+class TimelineQuickController;
+class VideoViewportQuickController;
+class WindowChromeController;
 
-class MainWindow final : public QMainWindow
+class MainWindow final : public QQuickView
 {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(QWindow* parent = nullptr);
     ~MainWindow() override;
     [[nodiscard]] bool openProjectFilePath(const QString& projectFilePath);
+    void setWindowTitle(const QString& title);
+    [[nodiscard]] QString windowTitle() const;
+    void setWindowIcon(const QIcon& icon);
+    [[nodiscard]] QIcon windowIcon() const;
+    [[nodiscard]] bool isMaximized() const;
+    [[nodiscard]] QByteArray saveGeometry() const;
+    bool restoreGeometry(const QByteArray& geometry);
+
+    Q_INVOKABLE void requestImportVideo();
+    Q_INVOKABLE void requestSeedPoint(double imageX, double imageY);
+    Q_INVOKABLE void requestSelectedTrackMoved(double imageX, double imageY);
+    Q_INVOKABLE void requestTrackSelected(const QString& trackId);
+    Q_INVOKABLE void requestTrackActivated(const QString& trackId);
+    Q_INVOKABLE void requestTracksSelected(const QVariantList& trackIds);
+    Q_INVOKABLE void requestTrackGainPopup(const QString& trackId, double localX, double localY);
+    Q_INVOKABLE void requestTrackGainAdjust(const QString& trackId, int wheelDelta, double localX, double localY);
+    Q_INVOKABLE void requestTrackContextMenu(const QString& trackId, double localX, double localY);
+    Q_INVOKABLE void requestAudioDropped(const QString& assetPath, double imageX, double imageY);
+    [[nodiscard]] QPoint mapQuickLocalToGlobal(double localX, double localY) const;
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+#ifdef Q_OS_WIN
+    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+#endif
 
 private slots:
     void newProject();
@@ -104,8 +134,11 @@ private:
     friend class PanelLayoutController;
     friend class DebugUiController;
     friend class MediaImportController;
+    friend class ActionRegistry;
+    friend class AudioPoolQuickController;
 
     void showNodeContextMenu(const QUuid& trackId, const QPoint& globalPosition, bool includeSoundActions);
+    void showLoopContextMenu(const QPoint& globalPosition);
     void buildMenus();
     void buildUi();
     void refreshTimeline();
@@ -126,6 +159,7 @@ private:
     void syncMainVerticalPanelSizes();
     void adjustTrackMixGainFromWheel(const QUuid& trackId, int wheelDelta, const QPoint& globalPosition);
     void showTrackMixGainPopup(const QUuid& trackId, const QPoint& globalPosition);
+    void hideTrackMixGainPopup();
     void updateTrackMixGainPopupValue(float gainDb);
     void updateDetachedVideoUiState();
     void resetOutputFpsTracking();
@@ -155,7 +189,6 @@ private:
     void addRecentProjectPath(const QString& projectFilePath);
     void removeRecentProjectPath(const QString& projectFilePath);
     void rebuildRecentProjectsMenu();
-    void applyFileDialogChrome(class QFileDialog& dialog) const;
     [[nodiscard]] QString chooseOpenFileName(
         const QString& title,
         const QString& directory,
@@ -163,6 +196,27 @@ private:
     [[nodiscard]] QString chooseExistingDirectory(
         const QString& title,
         const QString& directory = {}) const;
+    [[nodiscard]] bool needsMixRebuild(const std::vector<MixLaneStrip>& laneStrips) const;
+    void syncMixStripStates();
+    void rebuildMixStrips();
+    void updateMixQuickDiagnostics();
+    void handleMixQuickStatusChanged();
+    void syncShellLayoutViewport();
+    void syncShellPanelGeometry();
+    void handleTimelineQuickStatusChanged();
+    void handleClipEditorQuickStatusChanged();
+    void clearTimeline();
+    void setTimelineVideoPath(const QString& videoPath);
+    void setTimelineState(int totalFrames, double fps);
+    void setTimelineCurrentFrame(int frameIndex);
+    void setTimelineSeekOnClickEnabled(bool enabled);
+    void setTimelineThumbnailsVisible(bool visible);
+    [[nodiscard]] std::optional<int> timelineLoopShortcutFrame() const;
+    [[nodiscard]] bool timelineHasSelectedLoopRange() const;
+    [[nodiscard]] bool timelineHasFocus() const;
+    [[nodiscard]] int timelineMinimumHeight() const;
+    void updateTimelineMinimumHeight();
+    void syncClipWaveformItem();
 
     PlayerController* m_controller = nullptr;
     std::unique_ptr<MainWindowActions> m_actionsController;
@@ -170,39 +224,41 @@ private:
     std::unique_ptr<PanelLayoutController> m_panelLayoutController;
     std::unique_ptr<DebugUiController> m_debugUiController;
     std::unique_ptr<MediaImportController> m_mediaImportController;
-    VideoCanvas* m_canvas = nullptr;
-    TimelineView* m_timeline = nullptr;
-    ClipEditorView* m_clipEditorView = nullptr;
-    MixView* m_mixView = nullptr;
-    QSplitter* m_contentSplitter = nullptr;
-    QSplitter* m_mainVerticalSplitter = nullptr;
-    QWidget* m_mainContent = nullptr;
-    QFrame* m_canvasPanel = nullptr;
-    QFrame* m_timelinePanel = nullptr;
-    QFrame* m_clipEditorPanel = nullptr;
-    QFrame* m_mixPanel = nullptr;
-    QLabel* m_frameLabel = nullptr;
-    QLabel* m_statusToast = nullptr;
-    QLabel* m_canvasTipsOverlay = nullptr;
+    ActionRegistry* m_actionRegistry = nullptr;
+    WindowChromeController* m_windowChromeController = nullptr;
+    QQuickItem* m_shellRootItem = nullptr;
+    QQuickItem* m_titleBarItem = nullptr;
+    QQuickItem* m_contentAreaItem = nullptr;
+    ShellLayoutController* m_shellLayoutController = nullptr;
+    QQuickItem* m_videoViewportQuickWidget = nullptr;
+    VideoViewportQuickController* m_videoViewportQuickController = nullptr;
+    QQuickItem* m_timelineQuickWidget = nullptr;
+    TimelineQuickController* m_timelineQuickController = nullptr;
+    QQuickItem* m_clipEditorQuickWidget = nullptr;
+    ClipEditorQuickController* m_clipEditorQuickController = nullptr;
+    ClipWaveformQuickItem* m_clipWaveformItem = nullptr;
+    QQuickItem* m_mixQuickWidget = nullptr;
+    MixQuickController* m_mixQuickController = nullptr;
     DebugOverlayWindow* m_debugOverlay = nullptr;
     QWidget* m_nativeViewportWindow = nullptr;
     NativeVideoViewport* m_nativeViewport = nullptr;
-    QWidget* m_detachedVideoWindow = nullptr;
+    QQuickView* m_detachedVideoWindow = nullptr;
     QByteArray m_detachedVideoWindowGeometry;
-    QFrame* m_audioPoolPanel = nullptr;
-    QWidget* m_videoAudioRow = nullptr;
-    QLabel* m_videoAudioLabel = nullptr;
-    QToolButton* m_videoAudioMuteButton = nullptr;
-    QWidget* m_audioPoolListContainer = nullptr;
-    QVBoxLayout* m_audioPoolListLayout = nullptr;
-    QToolButton* m_audioPoolMenuButton = nullptr;
-    QWidget* m_trackGainPopup = nullptr;
-    QSlider* m_trackGainPopupSlider = nullptr;
-    QLabel* m_trackGainPopupValueLabel = nullptr;
+    QQuickItem* m_audioPoolQuickWidget = nullptr;
+    AudioPoolQuickController* m_audioPoolQuickController = nullptr;
+    QQuickItem* m_contextMenuQuickWidget = nullptr;
+    ContextMenuController* m_contextMenuController = nullptr;
+    QQuickItem* m_dialogOverlayQuickWidget = nullptr;
+    DialogController* m_dialogController = nullptr;
+    QQuickItem* m_filePickerQuickWidget = nullptr;
+    FilePickerController* m_filePickerController = nullptr;
+    QQuickItem* m_shellOverlayQuickWidget = nullptr;
+    ShellOverlayController* m_shellOverlayController = nullptr;
     QUuid m_trackGainPopupTrackId;
+    QUuid m_contextMenuTrackId;
+    QString m_contextMenuNodeLabel;
     QAction* m_newProjectAction = nullptr;
     QAction* m_openProjectAction = nullptr;
-    QMenu* m_openRecentMenu = nullptr;
     QAction* m_saveProjectAction = nullptr;
     QAction* m_saveProjectAsAction = nullptr;
     QAction* m_openAction = nullptr;
@@ -290,6 +346,11 @@ private:
     QString m_videoMemoryUsageText;
     QString m_qtQuickLoadText;
     QString m_qtQuickGraphicsApiText;
+    std::optional<ClipEditorState> m_clipEditorState;
+    float m_masterMixGainDb = 0.0F;
+    bool m_masterMixMuted = false;
+    std::vector<TimelineTrackSpan> m_timelineTrackSpans;
+    std::vector<MixLaneStrip> m_mixLaneStrips;
     QImage m_lastPresentedFrame;
     QTimer m_clearAllShortcutTimer;
     QTimer m_memoryUsageTimer;

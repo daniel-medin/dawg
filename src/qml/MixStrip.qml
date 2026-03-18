@@ -56,13 +56,18 @@ Rectangle {
     radius: 10
     implicitWidth: 94
     implicitHeight: 220
+    clip: true
 
-    Column {
+    Item {
+        id: contentHost
+
         anchors.fill: parent
         anchors.margins: 8
-        spacing: 6
 
         Row {
+            id: buttonRow
+
+            anchors.top: parent.top
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: 4
 
@@ -87,6 +92,7 @@ Rectangle {
                 MouseArea {
                     anchors.fill: parent
                     enabled: root.soloEnabled
+                    preventStealing: true
                     cursorShape: root.soloEnabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                     onClicked: {
                         root.soloed = !root.soloed
@@ -114,6 +120,7 @@ Rectangle {
 
                 MouseArea {
                     anchors.fill: parent
+                    preventStealing: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         root.muted = !root.muted
@@ -124,6 +131,10 @@ Rectangle {
         }
 
         Rectangle {
+            id: accentBar
+
+            anchors.top: buttonRow.bottom
+            anchors.topMargin: 6
             width: parent.width
             height: 6
             radius: 3
@@ -131,6 +142,10 @@ Rectangle {
         }
 
         Text {
+            id: titleLabel
+
+            anchors.top: accentBar.bottom
+            anchors.topMargin: 6
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
@@ -141,6 +156,10 @@ Rectangle {
         }
 
         Text {
+            id: detailLabel
+
+            anchors.top: titleLabel.bottom
+            anchors.topMargin: 4
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
@@ -149,9 +168,40 @@ Rectangle {
             text: root.detailText
         }
 
+        Text {
+            id: footerLabel
+
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            horizontalAlignment: Text.AlignHCenter
+            color: "#6e8094"
+            font.pixelSize: 9
+            font.letterSpacing: 1.0
+            text: root.footerText
+        }
+
+        Text {
+            id: gainLabel
+
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: footerLabel.top
+            anchors.bottomMargin: 4
+            horizontalAlignment: Text.AlignHCenter
+            color: "#cad3dc"
+            font.pixelSize: 10
+            text: root.gainLabelText(root.gainDb)
+        }
+
         Item {
+            id: faderArea
+
+            property real areaHeight: Math.max(24, gainLabel.y - (detailLabel.y + detailLabel.height) - 12)
+            x: 0
+            y: detailLabel.y + detailLabel.height + 6
             width: parent.width
-            height: Math.max(96, parent.height - 120)
+            height: areaHeight
 
             Row {
                 anchors.centerIn: parent
@@ -203,6 +253,7 @@ Rectangle {
 
                     MouseArea {
                         anchors.fill: parent
+                        preventStealing: true
                         cursorShape: Qt.PointingHandCursor
 
                         function applyFromY(mouseY) {
@@ -254,23 +305,6 @@ Rectangle {
                     }
                 }
             }
-        }
-
-        Text {
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            color: "#cad3dc"
-            font.pixelSize: 10
-            text: root.gainLabelText(root.gainDb)
-        }
-
-        Text {
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            color: "#6e8094"
-            font.pixelSize: 9
-            font.letterSpacing: 1.0
-            text: root.footerText
         }
     }
 }

@@ -1,5 +1,49 @@
 # Quick Shell Migration Log
 
+## 2026-03-18T20:45:00+01:00
+
+- Subsystem: Runtime warning cleanup and final migration notes
+- Status: Cleanup pass complete
+- Blocker: No shell-architecture blocker remains. The shell migration is complete; remaining work is manual smoke coverage and any future conversion of the small utility QWidget surfaces if desired.
+- Attempted fix: Removed the startup `videoViewport/frame/0` image-provider request by clearing the default frame source and only binding the viewport `Image` source when a real frame exists, then refreshed the README and migration notes so they match the Quick-root architecture and current residual widget usage.
+- Verification: Rebuilt `build/windows-msvc-current` successfully and relaunched the app after the cleanup pass.
+- Next action: Keep the wrapper files deleted, leave `dawg.code-workspace` untracked unless explicitly wanted, and use manual smoke testing for the remaining user-facing polish checks.
+
+## 2026-03-18T21:05:00+01:00
+
+- Subsystem: Track gain popup
+- Status: Reached parity
+- Blocker: The last normal shell interaction that still used a widget popup was the per-track gain control.
+- Attempted fix: Moved the gain popup onto `ShellOverlayController` and `ShellOverlay.qml`, replaced the old `QFrame` and `QSlider` popup in `MainWindow`, and kept the same Ctrl-open, live gain-update, and Ctrl-release dismissal workflow.
+- Verification: Rebuilt `build/windows-msvc-current` successfully and launched `build/windows-msvc-current/Debug/dawg.exe` with no startup console output in this session.
+- Next action: Treat the track gain popup as part of the Quick shell now; only the native helper/debug surfaces remain intentionally QWidget-based.
+
+## 2026-03-18T20:20:00+01:00
+
+- Subsystem: Final shell collapse and cleanup
+- Status: Reached parity for the shell migration target
+- Blocker: No shell-architecture blocker remains. Residual polish work is limited to existing runtime warnings in the timeline thumbnail/image-provider path and some small QWidget utility surfaces that are no longer part of the root shell architecture.
+- Attempted fix: Replaced the `QMainWindow` root with a frameless `QQuickView`, loaded a single `AppShell.qml` `ApplicationWindow` scene, moved the attached and detached viewport hosting onto Quick-owned windows/items, pinned Qt Quick to `Direct3D11` on Windows, removed the widget-era shell stylesheet, deleted stale compatibility files (`VideoCanvas`, `TimelineView`, `ClipEditorView`, `MixView`, `QuickMixStripWidget`), moved remaining shared view structs into neutral `ClipEditorTypes.h` and `MixTypes.h`, and removed the unused `Qt6::QuickWidgets` dependency.
+- Verification: Regenerated and rebuilt `build/windows-msvc-current` successfully, launched `build/windows-msvc-current/Debug/dawg.exe`, observed startup project UI-state restore in the runtime log, and confirmed the runtime line `Qt Quick graphics API: D3D11`.
+- Regression pass: Startup restore and shell bring-up were verified from the launched build and runtime log. The session environment did not expose an interactable app window handle back to automation, so attach/detach video, recent-project menu interaction, file-picker flows, context menus, audio drag/drop, and debug-overlay toggles remain user-facing smoke checks rather than automated checks from this session.
+- Next action: Treat the migration as complete, then do a polish pass on the existing timeline/image-provider warnings and any remaining widget utility popups you still want converted.
+
+## 2026-03-16T14:50:00+01:00
+
+- Subsystem: VideoCanvas QWidget boundary
+- Status: Reached partial parity
+- Blocker: The attached/detached video is now Quick-owned directly in MainWindow, but the shell still carries widget tooltip/status scaffolding and child-widget host containers rather than a pure Quick ApplicationWindow.
+- Attempted fix: Replaced VideoCanvas (QWidget containing QQuickWidget) with direct QQuickWidget + VideoViewportQuickController in MainWindow, added Q_INVOKABLE methods for QML bridge (requestImportVideo, requestSeedPoint, requestTrackSelected, etc.), moved audio drag/drop handling to MainWindow::eventFilter, updated PanelLayoutController to use the new Quick widget for attach/detach video.
+- Next action: Continue removing remaining widget shell scaffolding.
+
+## 2026-03-16T15:45:00+01:00
+
+- Subsystem: QFrame panel wrappers (complete removal)
+- Status: Reached partial parity
+- Blocker: The shell still depends on QMainWindow widget infrastructure.
+- Attempted fix: Completely removed all QFrame panel wrappers (m_canvasPanel, m_timelinePanel, m_clipEditorPanel, m_mixPanel, m_audioPoolPanel). All QQuickWidgets are now direct children of m_mainContent, with geometry managed by ShellLayoutController. Updated all references in MainWindow.cpp, DebugUiController.cpp, and PanelLayoutController.cpp.
+- Next action: Delete stale compatibility files, then consider final shell collapse to Quick ApplicationWindow.
+
 ## 2026-03-15T23:32:55+01:00
 
 - Subsystem: Foundation
@@ -173,22 +217,18 @@
   - widget `QMenu` node/loop context menus
   - widget `QMessageBox` / `QInputDialog` prompt path
   - widget `QFileDialog` path for migrated project/media flows
+  - VideoCanvas QWidget boundary (replaced with direct QQuickWidget + VideoViewportQuickController)
+  - QFrame panel wrappers (canvas, timeline, clip editor, mix, audio pool - now direct QQuickWidget children of m_mainContent)
 - Still remaining in active shell path:
-  - `src/ui/VideoCanvas.cpp` as a QWidget host boundary for the viewport
-  - `src/app/MainWindow.cpp` widget shell scaffolding around status/tooltips and the remaining child-widget host container
-  - stale compatibility files that are still in-tree but no longer on the active shell path
+  - no root-shell migration blocker remains
 
 ### Important runtime notes
 
 - Popup darkening regression was fixed by moving Quick context menu/dialog/file picker hosts off full-window overlay widgets and into popup-sized top-level Quick widgets.
 - Outside-click dismissal for the node context menu is already wired in `src/app/MainWindow.cpp`.
-- Known non-shell warnings still present in runtime log:
-  - timeline thumbnail provider misses from `qrc:/qml/TimelineScene.qml`
-  - some timeline QML `undefined to bool` warnings
-  - occasional video frame image-provider warning at startup
+- The startup video image-provider warning was removed in the final cleanup pass by avoiding empty `image://videoViewport/...` requests before a frame exists.
 
 ## Remaining blockers
 
-- `src/ui/VideoCanvas.cpp`: the attached and detached video path is Quick-backed internally, but still hosted as a QWidget boundary rather than a pure Quick item/window.
-- `src/app/MainWindow.cpp`: the shell still carries widget tooltip/status/style scaffolding and a child-widget host container rather than a pure Quick `ApplicationWindow` content tree.
-- compatibility files like `src/ui/TimelineView.cpp`, `src/ui/ClipEditorView.cpp`, and `src/ui/MixView.cpp` are still in the tree and can be deleted once the active shell path is fully clear.
+- No remaining blocker for the shell migration itself.
+- Remaining work is user-facing smoke coverage and optional future conversion of the narrow QWidget utility surfaces that are still intentional.

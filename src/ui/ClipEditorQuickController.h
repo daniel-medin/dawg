@@ -5,7 +5,7 @@
 #include <QObject>
 #include <QString>
 
-#include "ui/ClipEditorView.h"
+#include "ui/ClipEditorTypes.h"
 
 class ClipEditorQuickController : public QObject
 {

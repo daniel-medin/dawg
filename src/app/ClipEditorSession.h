@@ -7,7 +7,7 @@
 #include <QTimer>
 #include <QUuid>
 
-#include "ui/ClipEditorView.h"
+#include "ui/ClipEditorTypes.h"
 
 class AudioEngine;
 class AudioPlaybackCoordinator;

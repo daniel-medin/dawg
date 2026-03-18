@@ -1,12 +1,19 @@
 #include <QApplication>
 #include <QColor>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QIcon>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QPalette>
+#include <QQuickStyle>
+#include <QQuickWindow>
 #include <QSettings>
 #include <QStyleFactory>
+#include <QTextStream>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -18,6 +25,72 @@
 
 namespace
 {
+QString& runtimeLogPath()
+{
+    static QString path;
+    return path;
+}
+
+QMutex& runtimeLogMutex()
+{
+    static QMutex mutex;
+    return mutex;
+}
+
+void runtimeMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& message)
+{
+    const auto path = runtimeLogPath();
+    if (!path.isEmpty())
+    {
+        QMutexLocker locker(&runtimeLogMutex());
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+        {
+            QTextStream stream(&file);
+            QString level;
+            switch (type)
+            {
+            case QtDebugMsg:
+                level = QStringLiteral("DEBUG");
+                break;
+            case QtInfoMsg:
+                level = QStringLiteral("INFO");
+                break;
+            case QtWarningMsg:
+                level = QStringLiteral("WARN");
+                break;
+            case QtCriticalMsg:
+                level = QStringLiteral("ERROR");
+                break;
+            case QtFatalMsg:
+                level = QStringLiteral("FATAL");
+                break;
+            }
+
+            stream << QDateTime::currentDateTime().toString(Qt::ISODateWithMs)
+                   << ' ' << level;
+            if (context.file && *context.file)
+            {
+                stream << ' ' << context.file;
+                if (context.line > 0)
+                {
+                    stream << ':' << context.line;
+                }
+            }
+            stream << " | " << message << '\n';
+        }
+    }
+
+    const auto local = message.toLocal8Bit();
+    fprintf(stderr, "%s\n", local.constData());
+    fflush(stderr);
+
+    if (type == QtFatalMsg)
+    {
+        abort();
+    }
+}
+
 #ifdef Q_OS_WIN
 void registerDawgFileAssociation()
 {
@@ -58,7 +131,14 @@ void registerDawgFileAssociation()
 int main(int argc, char* argv[])
 {
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+#ifdef Q_OS_WIN
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
+#endif
+    QQuickStyle::setStyle(QStringLiteral("FluentWinUI3"));
     QApplication app(argc, argv);
+    runtimeLogPath() = QDir(app.applicationDirPath()).filePath(QStringLiteral("dawg-runtime.log"));
+    QFile::remove(runtimeLogPath());
+    qInstallMessageHandler(runtimeMessageHandler);
     app.setApplicationName("dawg");
     app.setOrganizationName("Daniel Medin");
     app.setWindowIcon(QIcon(QStringLiteral(":/branding/dawg.png")));
@@ -92,6 +172,13 @@ int main(int argc, char* argv[])
 
     MainWindow window;
     window.show();
+    if (!window.isMaximized()
+        && (window.width() < window.minimumWidth() || window.height() < window.minimumHeight()))
+    {
+        window.resize(
+            std::max(1400, window.minimumWidth()),
+            std::max(900, window.minimumHeight()));
+    }
 
     const auto arguments = QCoreApplication::arguments();
     if (arguments.size() > 1)

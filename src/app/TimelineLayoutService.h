@@ -6,8 +6,8 @@
 #include <QUuid>
 
 #include "core/tracking/TrackTypes.h"
-#include "ui/MixView.h"
-#include "ui/TimelineView.h"
+#include "ui/MixTypes.h"
+#include "ui/TimelineTypes.h"
 
 class AudioEngine;
 

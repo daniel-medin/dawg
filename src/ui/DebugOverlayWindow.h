@@ -1,21 +1,24 @@
 #pragma once
 
-#include <QFrame>
+#include <QObject>
 #include <QPoint>
+#include <QQuickView>
+#include <QString>
 
-class QLabel;
-
-class DebugOverlayWindow final : public QFrame
+class DebugOverlayWindow final : public QQuickView
 {
     Q_OBJECT
 
 public:
-    explicit DebugOverlayWindow(QWidget* parent = nullptr);
+    explicit DebugOverlayWindow(QWindow* parent = nullptr);
 
     void setListText(const QString& text);
 
 signals:
     void closeRequested();
+
+private slots:
+    void handleCloseClicked();
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
@@ -23,7 +26,6 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
 
 private:
-    QLabel* m_textLabel = nullptr;
     bool m_dragging = false;
     QPoint m_dragOffset;
 };

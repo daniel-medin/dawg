@@ -18,6 +18,12 @@ void NodeController::seedTrack(const QPointF& imagePoint)
         return;
     }
 
+    const auto previousUndoTrackerState = m_controller.m_undoTrackerState;
+    const auto previousUndoSelectedTrackIds = m_controller.m_undoSelectedTrackIds;
+    const auto previousRedoTrackerState = m_controller.m_redoTrackerState;
+    const auto previousRedoSelectedTrackIds = m_controller.m_redoSelectedTrackIds;
+    m_controller.saveUndoState();
+
     const auto result = m_controller.m_trackEditService->seedTrack(
         m_controller.m_videoPlaybackCoordinator->currentFrame().index,
         imagePoint,
@@ -26,6 +32,10 @@ void NodeController::seedTrack(const QPointF& imagePoint)
         m_controller.m_videoPlaybackCoordinator->fps());
     if (!result.created)
     {
+        m_controller.m_undoTrackerState = previousUndoTrackerState;
+        m_controller.m_undoSelectedTrackIds = previousUndoSelectedTrackIds;
+        m_controller.m_redoTrackerState = previousRedoTrackerState;
+        m_controller.m_redoSelectedTrackIds = previousRedoSelectedTrackIds;
         return;
     }
 
@@ -69,6 +79,12 @@ bool NodeController::createTrackWithAudioAtCurrentFrame(const QString& filePath,
         return false;
     }
 
+    const auto previousUndoTrackerState = m_controller.m_undoTrackerState;
+    const auto previousUndoSelectedTrackIds = m_controller.m_undoSelectedTrackIds;
+    const auto previousRedoTrackerState = m_controller.m_redoTrackerState;
+    const auto previousRedoSelectedTrackIds = m_controller.m_redoSelectedTrackIds;
+    m_controller.saveUndoState();
+
     const auto result = m_controller.m_trackEditService->createTrackWithAudio(
         m_controller.m_videoPlaybackCoordinator->currentFrame().index,
         imagePoint,
@@ -76,12 +92,16 @@ bool NodeController::createTrackWithAudioAtCurrentFrame(const QString& filePath,
         m_controller.m_videoPlaybackCoordinator->totalFrames(),
         m_controller.m_videoPlaybackCoordinator->fps(),
         filePath,
-        [this](const TrackPoint& track)
-        {
-            return m_controller.trimmedEndFrameForTrack(track);
-        });
+          [this](const TrackPoint& track)
+          {
+              return m_controller.trimmedEndFrameForTrack(track);
+          });
     if (!result.success)
     {
+        m_controller.m_undoTrackerState = previousUndoTrackerState;
+        m_controller.m_undoSelectedTrackIds = previousUndoSelectedTrackIds;
+        m_controller.m_redoTrackerState = previousRedoTrackerState;
+        m_controller.m_redoSelectedTrackIds = previousRedoSelectedTrackIds;
         emit m_controller.statusChanged(QStringLiteral("Failed to attach sound to the new node."));
         return false;
     }

@@ -12,7 +12,7 @@ set(CMAKE_AUTOUIC ON)
 
 option(DAWG_ENABLE_FFMPEG "Link against FFmpeg when available." ON)
 
-find_package(Qt6 6.6 REQUIRED COMPONENTS Widgets Quick QuickWidgets Qml CoreTools)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Quick QuickControls2 Qml CoreTools)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc video videoio)
 find_package(JUCE CONFIG REQUIRED)
 find_package(PkgConfig QUIET)
@@ -29,6 +29,16 @@ add_executable(dawg WIN32
     src/app/MainWindow.h
     src/app/AudioPlaybackCoordinator.cpp
     src/app/AudioPlaybackCoordinator.h
+    src/app/ActionRegistry.cpp
+    src/app/ActionRegistry.h
+    src/app/AudioPoolQuickController.cpp
+    src/app/AudioPoolQuickController.h
+    src/app/ContextMenuController.cpp
+    src/app/ContextMenuController.h
+    src/app/DialogController.cpp
+    src/app/DialogController.h
+    src/app/FilePickerController.cpp
+    src/app/FilePickerController.h
     src/app/AudioPoolService.cpp
     src/app/AudioPoolService.h
     src/app/ClipEditorSession.cpp
@@ -59,12 +69,18 @@ add_executable(dawg WIN32
     src/app/ProjectSessionAdapter.h
     src/app/SelectionController.cpp
     src/app/SelectionController.h
+    src/app/ShellLayoutController.cpp
+    src/app/ShellLayoutController.h
+    src/app/ShellOverlayController.cpp
+    src/app/ShellOverlayController.h
     src/app/TrackEditService.cpp
     src/app/TrackEditService.h
     src/app/TransportController.cpp
     src/app/TransportController.h
     src/app/VideoPlaybackCoordinator.cpp
     src/app/VideoPlaybackCoordinator.h
+    src/app/WindowChromeController.cpp
+    src/app/WindowChromeController.h
     src/core/audio/AudioDurationProbe.cpp
     src/core/audio/AudioDurationProbe.h
     src/core/audio/AudioEngine.cpp
@@ -95,29 +111,27 @@ add_executable(dawg WIN32
     src/core/video/VideoFrameQueue.h
     src/core/video/VideoPlaybackService.cpp
     src/core/video/VideoPlaybackService.h
-    src/ui/VideoCanvas.cpp
-    src/ui/VideoCanvas.h
+    src/ui/VideoViewportQuickController.cpp
+    src/ui/VideoViewportQuickController.h
     src/ui/NativeVideoViewport.cpp
     src/ui/NativeVideoViewport.h
     src/ui/DebugOverlayWindow.cpp
     src/ui/DebugOverlayWindow.h
-    src/ui/ClipEditorView.cpp
-    src/ui/ClipEditorView.h
+    src/ui/ClipEditorTypes.h
     src/ui/ClipEditorQuickController.cpp
     src/ui/ClipEditorQuickController.h
     src/ui/ClipWaveformQuickItem.cpp
     src/ui/ClipWaveformQuickItem.h
-    src/ui/MixView.cpp
-    src/ui/MixView.h
-    src/ui/QuickMixStripWidget.cpp
-    src/ui/QuickMixStripWidget.h
+    src/ui/MixTypes.h
+    src/ui/MixQuickController.cpp
+    src/ui/MixQuickController.h
+    src/ui/QuickEngineSupport.cpp
+    src/ui/QuickEngineSupport.h
     src/ui/TimelineQuickController.cpp
     src/ui/TimelineQuickController.h
     src/ui/TimelineThumbnailCache.cpp
     src/ui/TimelineThumbnailCache.h
     src/ui/TimelineTypes.h
-    src/ui/TimelineView.cpp
-    src/ui/TimelineView.h
 )
 
 target_include_directories(dawg PRIVATE src)
@@ -126,7 +140,7 @@ target_link_libraries(dawg
     PRIVATE
         Qt6::Widgets
         Qt6::Quick
-        Qt6::QuickWidgets
+        Qt6::QuickControls2
         Qt6::Qml
         ${OpenCV_LIBS}
         juce::juce_audio_basics
@@ -148,7 +162,7 @@ else()
 endif()
 
 if(MSVC)
-    target_compile_options(dawg PRIVATE /W4 /permissive-)
+    target_compile_options(dawg PRIVATE /W4 /permissive- /FS)
 else()
     target_compile_options(dawg PRIVATE -Wall -Wextra -Wpedantic)
 endif()

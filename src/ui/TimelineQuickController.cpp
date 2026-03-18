@@ -29,7 +29,10 @@ int roundedFpsFrames(const double fps)
 QString thumbnailSourceUrl(const QString& videoPath, const int frameIndex)
 {
     const auto encodedPath = QString::fromLatin1(QUrl::toPercentEncoding(videoPath));
-    return QStringLiteral("image://timeline-thumbnail/%1/%2").arg(encodedPath).arg(frameIndex);
+    return QStringLiteral("image://timeline-thumbnail/")
+        + encodedPath
+        + QLatin1Char('/')
+        + QString::number(frameIndex);
 }
 }
 

@@ -3,8 +3,6 @@
 #include <optional>
 
 #include <QString>
-
-class QFileDialog;
 class MainWindow;
 
 class MediaImportController
@@ -17,7 +15,6 @@ public:
         const QString& sourcePath,
         const QString& subdirectory,
         QString* errorMessage = nullptr) const;
-    void applyFileDialogChrome(QFileDialog& dialog) const;
     [[nodiscard]] QString chooseOpenFileName(
         const QString& title,
         const QString& directory,

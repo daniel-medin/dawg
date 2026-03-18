@@ -6,13 +6,14 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
-#include <QInputDialog>
 #include <QLineEdit>
-#include <QMenu>
-#include <QMessageBox>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QStandardPaths>
 
+#include "app/ActionRegistry.h"
+#include "app/DialogController.h"
+#include "app/FilePickerController.h"
 #include "app/MainWindow.h"
 #include "app/PlayerController.h"
 
@@ -302,8 +303,8 @@ void ProjectWindowController::updateWindowTitle()
         {
             detachedParts.push_back(m_window.m_currentProjectName);
         }
-        m_window.m_detachedVideoWindow->setWindowTitle(detachedParts.join(QStringLiteral(" - ")));
-        m_window.m_detachedVideoWindow->setWindowIcon(m_window.windowIcon());
+        m_window.m_detachedVideoWindow->setTitle(detachedParts.join(QStringLiteral(" - ")));
+        m_window.m_detachedVideoWindow->setIcon(m_window.windowIcon());
     }
 }
 
@@ -431,52 +432,9 @@ void ProjectWindowController::removeRecentProjectPath(const QString& projectFile
 
 void ProjectWindowController::rebuildRecentProjectsMenu()
 {
-    if (!m_window.m_openRecentMenu)
+    if (m_window.m_actionRegistry)
     {
-        return;
-    }
-
-    m_window.m_openRecentMenu->clear();
-    m_window.m_openRecentMenu->setToolTipsVisible(true);
-
-    const auto storedPaths = recentProjectPaths();
-    QStringList existingPaths;
-    existingPaths.reserve(storedPaths.size());
-    for (const auto& storedPath : storedPaths)
-    {
-        if (QFileInfo::exists(storedPath))
-        {
-            existingPaths.push_back(storedPath);
-        }
-    }
-
-    if (existingPaths != storedPaths)
-    {
-        storeRecentProjectPaths(existingPaths);
-    }
-
-    if (existingPaths.isEmpty())
-    {
-        auto* placeholderAction = m_window.m_openRecentMenu->addAction(QStringLiteral("No Recent Projects"));
-        placeholderAction->setEnabled(false);
-        return;
-    }
-
-    for (const auto& projectPath : existingPaths)
-    {
-        const QFileInfo projectInfo(projectPath);
-        const auto displayName = projectInfo.completeBaseName().isEmpty()
-            ? projectInfo.fileName()
-            : projectInfo.completeBaseName();
-        const auto parentPath = QDir::toNativeSeparators(projectInfo.absolutePath());
-        auto* recentAction =
-            m_window.m_openRecentMenu->addAction(QStringLiteral("%1  -  %2").arg(displayName, parentPath));
-        recentAction->setToolTip(QDir::toNativeSeparators(projectPath));
-        recentAction->setStatusTip(QDir::toNativeSeparators(projectPath));
-        QObject::connect(recentAction, &QAction::triggered, &m_window, [this, projectPath]()
-        {
-            static_cast<void>(openProjectFileWithPrompt(projectPath, QStringLiteral("open another project")));
-        });
+        m_window.m_actionRegistry->rebuild();
     }
 }
 
@@ -487,24 +445,25 @@ bool ProjectWindowController::promptToSaveIfDirty(const QString& actionLabel)
         return true;
     }
 
-    QMessageBox messageBox(&m_window);
-    messageBox.setIcon(QMessageBox::Warning);
-    messageBox.setWindowTitle(QStringLiteral("Unsaved Changes"));
     const auto projectLabel =
         m_window.m_currentProjectName.isEmpty() ? m_window.m_currentProjectFilePath : m_window.m_currentProjectName;
-    messageBox.setText(QStringLiteral("Do you want to save the changes made to \"%1\"?").arg(projectLabel));
-    messageBox.setInformativeText(
-        QStringLiteral("Your changes will be lost if you don't save them before you %1.").arg(actionLabel));
-    messageBox.setStandardButtons(QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
-    messageBox.setDefaultButton(QMessageBox::Save);
-    const auto result = messageBox.exec();
+    const auto result = m_window.m_dialogController->execMessage(
+        QStringLiteral("Unsaved Changes"),
+        QStringLiteral("Do you want to save the changes made to \"%1\"?").arg(projectLabel),
+        QStringLiteral("Your changes will be lost if you don't save them before you %1.").arg(actionLabel),
+        {
+            DialogController::Button::Save,
+            DialogController::Button::Discard,
+            DialogController::Button::Cancel,
+        },
+        DialogController::Button::Save);
 
-    if (result == QMessageBox::Save)
+    if (result == DialogController::Button::Save)
     {
         return saveProjectToCurrentPath();
     }
 
-    return result == QMessageBox::Discard;
+    return result == DialogController::Button::Discard;
 }
 
 bool ProjectWindowController::saveProjectToCurrentPath()
@@ -562,7 +521,11 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
         const auto relativeVideoPath = makeRelativePath(controllerState.videoPath, &errorMessage);
         if (!relativeVideoPath.has_value())
         {
-            QMessageBox::warning(&m_window, QStringLiteral("Save Project"), errorMessage);
+            m_window.m_dialogController->execMessage(
+                QStringLiteral("Save Project"),
+                errorMessage,
+                {},
+                {DialogController::Button::Ok});
             return false;
         }
         controllerState.videoPath = *relativeVideoPath;
@@ -573,7 +536,11 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
         const auto relativeAssetPath = makeRelativePath(assetPath, &errorMessage);
         if (!relativeAssetPath.has_value())
         {
-            QMessageBox::warning(&m_window, QStringLiteral("Save Project"), errorMessage);
+            m_window.m_dialogController->execMessage(
+                QStringLiteral("Save Project"),
+                errorMessage,
+                {},
+                {DialogController::Button::Ok});
             return false;
         }
         assetPath = *relativeAssetPath;
@@ -588,7 +555,11 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
         const auto relativeAssetPath = makeRelativePath(track.attachedAudio->assetPath, &errorMessage);
         if (!relativeAssetPath.has_value())
         {
-            QMessageBox::warning(&m_window, QStringLiteral("Save Project"), errorMessage);
+            m_window.m_dialogController->execMessage(
+                QStringLiteral("Save Project"),
+                errorMessage,
+                {},
+                {DialogController::Button::Ok});
             return false;
         }
         track.attachedAudio->assetPath = *relativeAssetPath;
@@ -602,7 +573,11 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
 
     if (!dawg::project::saveDocument(projectFilePath, document, &errorMessage))
     {
-        QMessageBox::warning(&m_window, QStringLiteral("Save Project"), errorMessage);
+        m_window.m_dialogController->execMessage(
+            QStringLiteral("Save Project"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
         return false;
     }
 
@@ -620,34 +595,45 @@ bool ProjectWindowController::saveProjectAsNewCopy()
         return false;
     }
 
-    bool ok = false;
-    const auto projectName = QInputDialog::getText(
-        &m_window,
-        QStringLiteral("Save Project As"),
-        QStringLiteral("Project name:"),
-        QLineEdit::Normal,
-        m_window.m_currentProjectName,
-        &ok);
-    if (!ok)
+    const auto suggestedProjectFileName =
+        dawg::project::projectFileNameForName(dawg::project::sanitizeProjectName(m_window.m_currentProjectName));
+    const auto suggestedDirectory = m_window.m_currentProjectRootPath.isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+        : QFileInfo(m_window.m_currentProjectRootPath).absolutePath();
+    const auto selectedProjectFilePath = m_window.m_filePickerController
+        ? m_window.m_filePickerController->execSaveFile(
+            QStringLiteral("Save Project As"),
+            suggestedDirectory,
+            suggestedProjectFileName,
+            QStringLiteral("DAWG Projects (*%1)").arg(QString::fromLatin1(dawg::project::kProjectFileSuffix)))
+        : QString{};
+    if (selectedProjectFilePath.isEmpty())
     {
         return false;
     }
 
-    const auto sanitizedProjectName = dawg::project::sanitizeProjectName(projectName);
-    const auto parentDirectory = m_window.chooseExistingDirectory(QStringLiteral("Choose Destination Folder"));
-    if (parentDirectory.isEmpty())
+    const QFileInfo selectedProjectFileInfo(selectedProjectFilePath);
+    const auto sanitizedProjectName = dawg::project::sanitizeProjectName(selectedProjectFileInfo.completeBaseName());
+    if (sanitizedProjectName.isEmpty())
     {
+        m_window.m_dialogController->execMessage(
+            QStringLiteral("Save Project As"),
+            QStringLiteral("Choose a valid project name."),
+            {},
+            {DialogController::Button::Ok});
         return false;
     }
 
+    const auto parentDirectory = selectedProjectFileInfo.absolutePath();
     const auto targetRootPath = QDir(parentDirectory).filePath(sanitizedProjectName);
     QDir targetRoot(targetRootPath);
     if (targetRoot.exists() && !targetRoot.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty())
     {
-        QMessageBox::warning(
-            &m_window,
+        m_window.m_dialogController->execMessage(
             QStringLiteral("Save Project As"),
-            QStringLiteral("Destination folder already exists and is not empty:\n%1").arg(targetRootPath));
+            QStringLiteral("Destination folder already exists and is not empty:\n%1").arg(targetRootPath),
+            {},
+            {DialogController::Button::Ok});
         return false;
     }
 
@@ -655,10 +641,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
         || !QDir().mkpath(targetRoot.filePath(QStringLiteral("video")))
         || !QDir().mkpath(targetRoot.filePath(QStringLiteral("settings"))))
     {
-        QMessageBox::warning(
-            &m_window,
+        m_window.m_dialogController->execMessage(
             QStringLiteral("Save Project As"),
-            QStringLiteral("Failed to create destination project folders."));
+            QStringLiteral("Failed to create destination project folders."),
+            {},
+            {DialogController::Button::Ok});
         return false;
     }
 
@@ -705,7 +692,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
             copyIntoTargetProject(controllerState.videoPath, QStringLiteral("video"), &errorMessage);
         if (!copiedVideoPath.has_value())
         {
-            QMessageBox::warning(&m_window, QStringLiteral("Save Project As"), errorMessage);
+            m_window.m_dialogController->execMessage(
+                QStringLiteral("Save Project As"),
+                errorMessage,
+                {},
+                {DialogController::Button::Ok});
             return false;
         }
         controllerState.videoPath = *copiedVideoPath;
@@ -724,7 +715,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
             copyIntoTargetProject(assetPath, QStringLiteral("audio"), &errorMessage);
         if (!copiedAudioPath.has_value())
         {
-            QMessageBox::warning(&m_window, QStringLiteral("Save Project As"), errorMessage);
+            m_window.m_dialogController->execMessage(
+                QStringLiteral("Save Project As"),
+                errorMessage,
+                {},
+                {DialogController::Button::Ok});
             return false;
         }
         copiedAudioPaths.insert(assetPath, *copiedAudioPath);
@@ -749,7 +744,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
             copyIntoTargetProject(track.attachedAudio->assetPath, QStringLiteral("audio"), &errorMessage);
         if (!copiedAudioPath.has_value())
         {
-            QMessageBox::warning(&m_window, QStringLiteral("Save Project As"), errorMessage);
+            m_window.m_dialogController->execMessage(
+                QStringLiteral("Save Project As"),
+                errorMessage,
+                {},
+                {DialogController::Button::Ok});
             return false;
         }
         copiedAudioPaths.insert(track.attachedAudio->assetPath, *copiedAudioPath);
@@ -784,7 +783,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
     };
     if (!dawg::project::saveDocument(targetProjectFilePath, document, &errorMessage))
     {
-        QMessageBox::warning(&m_window, QStringLiteral("Save Project As"), errorMessage);
+        m_window.m_dialogController->execMessage(
+            QStringLiteral("Save Project As"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
         return false;
     }
 
@@ -793,7 +796,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
     m_window.m_projectStateChangeInProgress = false;
     if (!restored)
     {
-        QMessageBox::warning(&m_window, QStringLiteral("Save Project As"), errorMessage);
+        m_window.m_dialogController->execMessage(
+            QStringLiteral("Save Project As"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
         return false;
     }
 
@@ -810,7 +817,11 @@ bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
     const auto document = dawg::project::loadDocument(projectFilePath, &errorMessage);
     if (!document.has_value())
     {
-        QMessageBox::warning(&m_window, QStringLiteral("Open Project"), errorMessage);
+        m_window.m_dialogController->execMessage(
+            QStringLiteral("Open Project"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
         return false;
     }
 
@@ -861,7 +872,11 @@ bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
 
     if (!restored)
     {
-        QMessageBox::warning(&m_window, QStringLiteral("Open Project"), errorMessage);
+        m_window.m_dialogController->execMessage(
+            QStringLiteral("Open Project"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
         return false;
     }
 
@@ -893,10 +908,11 @@ bool ProjectWindowController::openProjectFileWithPrompt(const QString& projectFi
     if (!QFileInfo::exists(normalizedProjectPath))
     {
         removeRecentProjectPath(normalizedProjectPath);
-        QMessageBox::warning(
-            &m_window,
+        m_window.m_dialogController->execMessage(
             QStringLiteral("Open Project"),
-            QStringLiteral("Project file not found:\n%1").arg(QDir::toNativeSeparators(normalizedProjectPath)));
+            QStringLiteral("Project file not found:\n%1").arg(QDir::toNativeSeparators(normalizedProjectPath)),
+            {},
+            {DialogController::Button::Ok});
         return false;
     }
 
@@ -910,10 +926,11 @@ bool ProjectWindowController::createProjectAt(const QString& projectName, const 
     QDir projectRoot(projectRootPath);
     if (projectRoot.exists() && !projectRoot.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty())
     {
-        QMessageBox::warning(
-            &m_window,
+        m_window.m_dialogController->execMessage(
             QStringLiteral("New Project"),
-            QStringLiteral("Project folder already exists and is not empty:\n%1").arg(projectRootPath));
+            QStringLiteral("Project folder already exists and is not empty:\n%1").arg(projectRootPath),
+            {},
+            {DialogController::Button::Ok});
         return false;
     }
 
@@ -921,10 +938,11 @@ bool ProjectWindowController::createProjectAt(const QString& projectName, const 
         || !QDir().mkpath(projectRoot.filePath(QStringLiteral("video")))
         || !QDir().mkpath(projectRoot.filePath(QStringLiteral("settings"))))
     {
-        QMessageBox::warning(
-            &m_window,
+        m_window.m_dialogController->execMessage(
             QStringLiteral("New Project"),
-            QStringLiteral("Failed to create project folders in:\n%1").arg(projectRootPath));
+            QStringLiteral("Failed to create project folders in:\n%1").arg(projectRootPath),
+            {},
+            {DialogController::Button::Ok});
         return false;
     }
 
@@ -954,26 +972,22 @@ void ProjectWindowController::newProject()
         return;
     }
 
-    bool ok = false;
-    const auto projectName = QInputDialog::getText(
-        &m_window,
-        QStringLiteral("New Project"),
-        QStringLiteral("Project name:"),
-        QLineEdit::Normal,
-        QStringLiteral("Untitled Project"),
-        &ok);
-    if (!ok)
+    const auto selectedProjectFilePath = m_window.m_filePickerController
+        ? m_window.m_filePickerController->execSaveFile(
+            QStringLiteral("New Project"),
+            QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
+            QStringLiteral("Untitled Project%1").arg(QString::fromLatin1(dawg::project::kProjectFileSuffix)),
+            QStringLiteral("DAWG Projects (*%1)").arg(QString::fromLatin1(dawg::project::kProjectFileSuffix)))
+        : QString{};
+    if (selectedProjectFilePath.isEmpty())
     {
         return;
     }
 
-    const auto parentDirectory = m_window.chooseExistingDirectory(QStringLiteral("Choose Project Location"));
-    if (parentDirectory.isEmpty())
-    {
-        return;
-    }
-
-    static_cast<void>(createProjectAt(projectName, parentDirectory));
+    const QFileInfo selectedProjectFileInfo(selectedProjectFilePath);
+    static_cast<void>(createProjectAt(
+        selectedProjectFileInfo.completeBaseName(),
+        selectedProjectFileInfo.absolutePath()));
 }
 
 void ProjectWindowController::openProject()
