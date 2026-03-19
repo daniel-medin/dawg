@@ -8,6 +8,8 @@ Item {
     focus: contextMenuController.visible
     implicitWidth: menuPanel.width
     implicitHeight: menuPanel.implicitHeight
+    width: implicitWidth
+    height: implicitHeight
 
     AppTheme {
         id: theme
@@ -18,8 +20,8 @@ Item {
     Rectangle {
         id: menuPanel
 
-        anchors.fill: parent
         width: 220
+        height: implicitHeight
         implicitHeight: contentColumn.implicitHeight + 16
         radius: 10
         color: "#14181f"
@@ -29,6 +31,12 @@ Item {
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onPressed: function(mouse) {
+                mouse.accepted = true
+            }
+            onReleased: function(mouse) {
+                mouse.accepted = true
+            }
         }
 
         ColumnLayout {
@@ -107,7 +115,14 @@ Item {
                         anchors.fill: parent
                         enabled: !modelData.separator && modelData.enabled
                         hoverEnabled: true
-                        onClicked: contextMenuController.triggerItem(modelData.key)
+                        preventStealing: true
+                        onPressed: function(mouse) {
+                            mouse.accepted = true
+                        }
+                        onReleased: function(mouse) {
+                            contextMenuController.triggerItem(modelData.key)
+                            mouse.accepted = true
+                        }
                     }
                 }
             }

@@ -1,6 +1,7 @@
 #include "app/NodeController.h"
 
 #include <algorithm>
+#include <limits>
 
 #include <QFileInfo>
 
@@ -277,6 +278,110 @@ void NodeController::selectNextVisibleTrack()
         m_controller.m_selectionFadeTimer.stop();
     }
 
+    m_controller.refreshOverlays();
+    emit m_controller.selectionChanged(m_controller.m_selectionController->hasSelection());
+}
+
+void NodeController::selectNextTimelineTrack()
+{
+    if (!m_controller.hasVideoLoaded() || m_controller.m_tracker.tracks().empty())
+    {
+        clearSelection();
+        emit m_controller.statusChanged(QStringLiteral("No nodes are available."));
+        return;
+    }
+
+    std::vector<const TrackPoint*> orderedTracks;
+    orderedTracks.reserve(m_controller.m_tracker.tracks().size());
+    for (const auto& track : m_controller.m_tracker.tracks())
+    {
+        orderedTracks.push_back(&track);
+    }
+
+    std::stable_sort(
+        orderedTracks.begin(),
+        orderedTracks.end(),
+        [](const TrackPoint* left, const TrackPoint* right)
+        {
+            if (!left || !right)
+            {
+                return left != nullptr;
+            }
+
+            if (left->startFrame != right->startFrame)
+            {
+                return left->startFrame < right->startFrame;
+            }
+
+            const auto leftEndFrame = left->endFrame.value_or(std::numeric_limits<int>::max());
+            const auto rightEndFrame = right->endFrame.value_or(std::numeric_limits<int>::max());
+            if (leftEndFrame != rightEndFrame)
+            {
+                return leftEndFrame < rightEndFrame;
+            }
+
+            if (left->label != right->label)
+            {
+                return left->label < right->label;
+            }
+
+            return left->id < right->id;
+        });
+
+    int nextIndex = 0;
+    const auto selectedTrackId = m_controller.m_selectionController->selectedTrackId();
+    if (!selectedTrackId.isNull())
+    {
+        const auto currentIt = std::find_if(
+            orderedTracks.cbegin(),
+            orderedTracks.cend(),
+            [&selectedTrackId](const TrackPoint* track)
+            {
+                return track && track->id == selectedTrackId;
+            });
+        if (currentIt != orderedTracks.cend())
+        {
+            nextIndex = (static_cast<int>(std::distance(orderedTracks.cbegin(), currentIt)) + 1)
+                % static_cast<int>(orderedTracks.size());
+        }
+    }
+    else
+    {
+        const auto currentFrame = m_controller.currentFrameIndex();
+        const auto firstAtOrAfterCurrentFrame = std::find_if(
+            orderedTracks.cbegin(),
+            orderedTracks.cend(),
+            [currentFrame](const TrackPoint* track)
+            {
+                return track && track->startFrame >= currentFrame;
+            });
+        if (firstAtOrAfterCurrentFrame != orderedTracks.cend())
+        {
+            nextIndex = static_cast<int>(std::distance(orderedTracks.cbegin(), firstAtOrAfterCurrentFrame));
+        }
+    }
+
+    const auto* nextTrack = orderedTracks[static_cast<std::size_t>(nextIndex)];
+    if (!nextTrack)
+    {
+        return;
+    }
+
+    if (!m_controller.m_selectionController->setSelectedTrackId(nextTrack->id))
+    {
+        return;
+    }
+
+    if (m_controller.m_selectionController->fadingDeselectedTrackOpacity() > 0.0F)
+    {
+        m_controller.m_selectionFadeTimer.start();
+    }
+    else
+    {
+        m_controller.m_selectionFadeTimer.stop();
+    }
+
+    m_controller.seekToFrame(std::max(0, nextTrack->startFrame));
     m_controller.refreshOverlays();
     emit m_controller.selectionChanged(m_controller.m_selectionController->hasSelection());
 }
@@ -873,6 +978,11 @@ void PlayerController::selectTrack(const QUuid& trackId)
 void PlayerController::selectNextVisibleTrack()
 {
     m_nodeController->selectNextVisibleTrack();
+}
+
+void PlayerController::selectNextTimelineTrack()
+{
+    m_nodeController->selectNextTimelineTrack();
 }
 
 void PlayerController::clearSelection()

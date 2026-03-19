@@ -218,10 +218,9 @@ void ActionRegistry::rebuild()
     addAction(editMenu, QStringLiteral("insertionFollowsPlayback"), m_window.m_insertionFollowsPlaybackAction);
     addAction(editMenu, QStringLiteral("selectAll"), m_window.m_selectAllAction);
     addAction(editMenu, QStringLiteral("unselectAll"), m_window.m_unselectAllAction);
+    addAction(editMenu, QStringLiteral("selectNextNode"), m_window.m_selectNextNodeAction);
 
     auto* nodeMenu = addMenu(QStringLiteral("Node"));
-    addAction(nodeMenu, QStringLiteral("selectNextNode"), m_window.m_selectNextNodeAction);
-    addSeparator(nodeMenu);
     addAction(nodeMenu, QStringLiteral("moveNodeUp"), m_window.m_moveNodeUpAction);
     addAction(nodeMenu, QStringLiteral("moveNodeDown"), m_window.m_moveNodeDownAction);
     addAction(nodeMenu, QStringLiteral("moveNodeLeft"), m_window.m_moveNodeLeftAction);

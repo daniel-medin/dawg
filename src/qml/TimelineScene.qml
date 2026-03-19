@@ -5,6 +5,11 @@ Item {
 
     focus: true
 
+    Keys.onTabPressed: function(event) {
+        videoViewportBridge.requestSelectNextNode()
+        event.accepted = true
+    }
+
     function rectValue(mapValue, key) {
         return mapValue && mapValue[key] !== undefined ? mapValue[key] : 0
     }
@@ -54,7 +59,7 @@ Item {
         }
 
         Repeater {
-            model: timelineController.playbackActive ? [] : timelineController.thumbnailTiles
+            model: timelineController.thumbnailTiles
 
             Item {
                 property var tileData: modelData

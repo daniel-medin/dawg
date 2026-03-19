@@ -1,5 +1,7 @@
 #include "app/ContextMenuController.h"
 
+#include <QTimer>
+
 ContextMenuController::ContextMenuController(QObject* parent)
     : QObject(parent)
 {
@@ -56,7 +58,10 @@ void ContextMenuController::hide()
 void ContextMenuController::triggerItem(const QString& key)
 {
     hide();
-    emit itemTriggered(key);
+    QTimer::singleShot(0, this, [this, key]()
+    {
+        emit itemTriggered(key);
+    });
 }
 
 void ContextMenuController::dismiss()

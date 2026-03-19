@@ -21,6 +21,7 @@ public:
     void selectTracks(const QList<QUuid>& trackIds);
     void selectTrack(const QUuid& trackId);
     void selectNextVisibleTrack();
+    void selectNextTimelineTrack();
     void clearSelection();
     bool copySelectedTracks();
     bool pasteCopiedTracksAtCurrentFrame();

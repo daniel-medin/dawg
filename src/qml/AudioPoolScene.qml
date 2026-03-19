@@ -224,6 +224,7 @@ Rectangle {
                     required property string sizeText
                     required property color statusColor
                     required property string connectionSummary
+                    property bool previewHeld: false
 
                     width: listView.width
                     height: 30
@@ -246,6 +247,7 @@ Rectangle {
                         anchors.fill: parent
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         hoverEnabled: true
+                        preventStealing: true
                         propagateComposedEvents: true
                         z: 0
 
@@ -263,21 +265,32 @@ Rectangle {
 
                             if ((mouse.modifiers & Qt.ControlModifier) !== 0) {
                                 clickTimer.stop()
+                                rowRoot.previewHeld = true
                                 audioPoolController.startPreview(rowRoot.index)
                                 mouse.accepted = true
                             }
                         }
 
                         onReleased: function(mouse) {
-                            if ((mouse.modifiers & Qt.ControlModifier) !== 0 || mouse.button === Qt.LeftButton) {
+                            if (rowRoot.previewHeld) {
+                                rowRoot.previewHeld = false
+                                audioPoolController.stopPreview()
+                                mouse.accepted = true
+                            }
+                        }
+
+                        onCanceled: {
+                            if (rowRoot.previewHeld) {
+                                rowRoot.previewHeld = false
                                 audioPoolController.stopPreview()
                             }
                         }
 
-                        onCanceled: audioPoolController.stopPreview()
-
                         onClicked: function(mouse) {
-                            if (mouse.button === Qt.RightButton || (mouse.modifiers & Qt.ControlModifier) !== 0) {
+                            if (mouse.button === Qt.RightButton) {
+                                return
+                            }
+                            if ((mouse.modifiers & Qt.ControlModifier) !== 0) {
                                 return
                             }
                             clickTimer.restart()
@@ -376,6 +389,7 @@ Rectangle {
                     DragHandler {
                         id: dragHandler
                         target: null
+                        enabled: !rowRoot.previewHeld
                     }
                 }
 

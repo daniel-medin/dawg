@@ -6,6 +6,7 @@ Rectangle {
     id: root
     color: "#0c1016"
     clip: true
+    focus: true
 
     property point pressPoint: Qt.point(0, 0)
     property rect selectionRect: Qt.rect(0, 0, 0, 0)
@@ -13,6 +14,11 @@ Rectangle {
     property bool marqueeSelecting: false
     property string draggedTrackId: ""
     property string hoveredTrackId: ""
+
+    Keys.onTabPressed: function(event) {
+        videoViewportBridge.requestSelectNextVisibleNode()
+        event.accepted = true
+    }
 
     readonly property var frameRectData: videoViewportController.frameRect(width, height)
     readonly property rect frameRect: Qt.rect(
@@ -170,6 +176,8 @@ Rectangle {
             if (!videoViewportController.hasFrame) {
                 return
             }
+
+            root.forceActiveFocus()
 
             const trackId = videoViewportController.trackIdAt(mouse.x, mouse.y, root.width, root.height)
             if (mouse.button === Qt.RightButton) {

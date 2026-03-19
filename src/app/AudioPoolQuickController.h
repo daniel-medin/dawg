@@ -45,6 +45,7 @@ public:
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
     void replaceItems(std::vector<AudioPoolItem> items);
+    void updatePlaybackState(const std::vector<AudioPoolItem>& items);
     void syncVideoAudioState(
         bool hasVideoAudio,
         const QString& videoAudioLabel,
@@ -83,10 +84,12 @@ signals:
 
 private:
     [[nodiscard]] const AudioPoolItem* itemAt(int index) const;
+    void setPreviewItemKey(const QString& key);
     void markProjectDirtyForDisplayChange();
 
     MainWindow& m_window;
     std::vector<AudioPoolItem> m_items;
+    QString m_previewItemKey;
     bool m_showLength = true;
     bool m_showSize = true;
     bool m_hasVideoAudio = false;

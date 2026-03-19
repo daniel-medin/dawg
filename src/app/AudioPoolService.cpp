@@ -54,12 +54,12 @@ std::vector<AudioPoolItem> AudioPoolService::items(
     const AudioEngine& audioEngine,
     const QString& previewAssetPath) const
 {
+    Q_UNUSED(previewAssetPath);
     std::vector<AudioPoolItem> items;
     items.reserve(m_assetPaths.size());
 
     for (const auto& assetPath : m_assetPaths)
     {
-        const auto isPreviewPlaying = !previewAssetPath.isEmpty() && previewAssetPath == assetPath;
         const QFileInfo assetInfo(assetPath);
         const auto assetDurationMs = audioEngine.durationMs(assetPath).value_or(-1);
         const auto assetSizeBytes = static_cast<std::int64_t>(assetInfo.exists() ? assetInfo.size() : -1);
@@ -97,10 +97,8 @@ std::vector<AudioPoolItem> AudioPoolService::items(
                 .trackId = {},
                 .displayName = fileName,
                 .connectedNodeCount = 0,
-                .isPlaying = isPreviewPlaying,
-                .connectionSummary = isPreviewPlaying
-                    ? QStringLiteral("Previewing")
-                    : QStringLiteral("Not connected"),
+                .isPlaying = false,
+                .connectionSummary = QStringLiteral("Not connected"),
                 .durationMs = assetDurationMs,
                 .fileSizeBytes = assetSizeBytes
             });
@@ -122,12 +120,10 @@ std::vector<AudioPoolItem> AudioPoolService::items(
                 .trackId = connectedTrack.id,
                 .displayName = displayName,
                 .connectedNodeCount = connectedNodeCount,
-                .isPlaying = connectedTrack.isPlaying || isPreviewPlaying,
+                .isPlaying = connectedTrack.isPlaying,
                 .connectionSummary = connectedTrack.isPlaying
                     ? QStringLiteral("Playing on %1").arg(connectedTrack.label)
-                    : (isPreviewPlaying
-                        ? QStringLiteral("Previewing")
-                        : QStringLiteral("Connected to %1").arg(connectedTrack.label)),
+                    : QStringLiteral("Connected to %1").arg(connectedTrack.label),
                 .durationMs = assetDurationMs,
                 .fileSizeBytes = assetSizeBytes
             });

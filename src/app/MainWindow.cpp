@@ -712,33 +712,71 @@ QString mixGainDisplayText(const float gainDb)
     return QStringLiteral("%1 dB").arg(gainDb, 0, 'f', 1);
 }
 
-int timelineLaneCount(const std::vector<TimelineTrackSpan>& trackSpans)
+QPoint clampContextMenuPosition(
+    const QQuickItem* contentAreaItem,
+    const QPointF& requestedPosition,
+    const QVariantList& items,
+    const bool hasTitle)
 {
-    int maxLaneIndex = -1;
-    for (const auto& trackSpan : trackSpans)
+    if (!contentAreaItem)
     {
-        maxLaneIndex = std::max(maxLaneIndex, trackSpan.laneIndex);
+        return QPoint{
+            static_cast<int>(std::lround(requestedPosition.x())),
+            static_cast<int>(std::lround(requestedPosition.y()))};
     }
 
-    return std::max(0, maxLaneIndex + 1);
+    constexpr int menuWidth = 220;
+    constexpr int edgeMargin = 8;
+    constexpr int itemHeight = 30;
+    constexpr int separatorHeight = 10;
+    constexpr int sectionSpacing = 4;
+    constexpr int verticalChrome = 16;
+    constexpr int titleHeight = 26;
+
+    int menuHeight = verticalChrome;
+    if (hasTitle)
+    {
+        menuHeight += titleHeight + sectionSpacing;
+    }
+
+    for (int index = 0; index < items.size(); ++index)
+    {
+        const auto item = items.at(index).toMap();
+        menuHeight += item.value(QStringLiteral("separator")).toBool() ? separatorHeight : itemHeight;
+        if (index + 1 < items.size())
+        {
+            menuHeight += sectionSpacing;
+        }
+    }
+
+    const auto contentWidth = static_cast<int>(std::lround(contentAreaItem->width()));
+    const auto contentHeight = static_cast<int>(std::lround(contentAreaItem->height()));
+    const auto requestedX = static_cast<int>(std::lround(requestedPosition.x()));
+    const auto requestedY = static_cast<int>(std::lround(requestedPosition.y()));
+
+    const auto clampedX = std::clamp(
+        requestedX,
+        edgeMargin,
+        std::max(edgeMargin, contentWidth - menuWidth - edgeMargin));
+
+    auto clampedY = requestedY;
+    if (requestedY + menuHeight > contentHeight - edgeMargin)
+    {
+        clampedY = requestedY - menuHeight;
+    }
+    clampedY = std::clamp(
+        clampedY,
+        edgeMargin,
+        std::max(edgeMargin, contentHeight - menuHeight - edgeMargin));
+
+    return QPoint{clampedX, clampedY};
 }
 
 int timelinePreferredHeight(const std::vector<TimelineTrackSpan>& trackSpans)
 {
-    constexpr int baseHeight = 154;
-    constexpr int verticalPadding = 90;
-    constexpr int rowHeight = 10;
-    constexpr int rowGap = 2;
-
-    if (trackSpans.empty())
-    {
-        return baseHeight;
-    }
-
-    const auto trackLaneCount = timelineLaneCount(trackSpans);
-    return std::max(
-        baseHeight,
-        verticalPadding + trackLaneCount * rowHeight + std::max(0, trackLaneCount - 1) * rowGap + 16);
+    Q_UNUSED(trackSpans);
+    constexpr int baseHeight = 148;
+    return baseHeight;
 }
 
 }
@@ -1290,18 +1328,6 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         }
     }
 
-    if (m_contextMenuController && m_contextMenuController->visible() && m_contextMenuQuickWidget)
-    {
-        if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick)
-        {
-            auto* mouseEvent = static_cast<QMouseEvent*>(event);
-            if (!itemContainsPoint(m_contextMenuQuickWidget, mouseEvent->position()))
-            {
-                m_contextMenuController->dismiss();
-            }
-        }
-    }
-
     if (event->type() == QEvent::ShortcutOverride)
     {
         auto* keyEvent = static_cast<QKeyEvent*>(event);
@@ -1309,6 +1335,14 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             && keyEvent->key() == Qt::Key_Space
             && keyEvent->modifiers() == Qt::NoModifier
             && clipEditorFocused())
+        {
+            event->accept();
+            return true;
+        }
+        if (!keyEvent->isAutoRepeat()
+            && keyEvent->key() == Qt::Key_Tab
+            && keyEvent->modifiers() == Qt::NoModifier
+            && timelineHasFocus())
         {
             event->accept();
             return true;
@@ -1330,6 +1364,14 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
     if (event->type() == QEvent::KeyPress)
     {
         auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if (!keyEvent->isAutoRepeat()
+            && keyEvent->key() == Qt::Key_Tab
+            && keyEvent->modifiers() == Qt::NoModifier
+            && timelineHasFocus())
+        {
+            selectNextVisibleNode();
+            return true;
+        }
         if (!keyEvent->isAutoRepeat()
             && keyEvent->key() == Qt::Key_Space
             && keyEvent->modifiers() == Qt::NoModifier
@@ -1835,6 +1877,16 @@ void MainWindow::requestAudioDropped(const QString& assetPath, const double imag
     m_controller->createTrackWithAudioAtCurrentFrame(assetPath, QPointF{imageX, imageY});
 }
 
+void MainWindow::requestSelectNextNode()
+{
+    selectNextVisibleNode();
+}
+
+void MainWindow::requestSelectNextVisibleNode()
+{
+    m_controller->selectNextVisibleTrack();
+}
+
 QPoint MainWindow::mapQuickLocalToGlobal(const double localX, const double localY) const
 {
     if (!m_videoViewportQuickWidget)
@@ -1993,6 +2045,12 @@ void MainWindow::redoNodeEdit()
 
 void MainWindow::selectNextVisibleNode()
 {
+    if (timelineHasFocus())
+    {
+        m_controller->selectNextTimelineTrack();
+        return;
+    }
+
     m_controller->selectNextVisibleTrack();
 }
 
@@ -2191,7 +2249,12 @@ void MainWindow::refreshAudioPool()
 
 void MainWindow::updateAudioPoolPlaybackIndicators()
 {
-    refreshAudioPool();
+    if (!m_audioPoolQuickController)
+    {
+        return;
+    }
+
+    m_audioPoolQuickController->updatePlaybackState(m_controller->audioPoolItems());
 }
 
 void MainWindow::updateVideoAudioRow()
@@ -2419,10 +2482,11 @@ void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalP
     m_contextMenuTrackId = trackId;
     m_contextMenuNodeLabel = nodeLabel;
     const auto localPosition = m_contentAreaItem->mapFromScene(mapFromGlobal(globalPosition));
+    const auto menuPosition = clampContextMenuPosition(m_contentAreaItem, localPosition, items, !nodeLabel.isEmpty());
     m_contextMenuController->showMenu(
         nodeLabel,
-        static_cast<int>(std::lround(localPosition.x())),
-        static_cast<int>(std::lround(localPosition.y())),
+        menuPosition.x(),
+        menuPosition.y(),
         items);
     updateOverlayPositions();
 }
@@ -2447,12 +2511,13 @@ void MainWindow::showLoopContextMenu(const QPoint& globalPosition)
         {QStringLiteral("checked"), false},
         {QStringLiteral("separator"), false}}};
     const auto localPosition = m_contentAreaItem->mapFromScene(mapFromGlobal(globalPosition));
+    const auto menuPosition = clampContextMenuPosition(m_contentAreaItem, localPosition, items, true);
     m_contextMenuTrackId = {};
     m_contextMenuNodeLabel.clear();
     m_contextMenuController->showMenu(
         QStringLiteral("Loop Range"),
-        static_cast<int>(std::lround(localPosition.x())),
-        static_cast<int>(std::lround(localPosition.y())),
+        menuPosition.x(),
+        menuPosition.y(),
         items);
     updateOverlayPositions();
 }
@@ -2998,6 +3063,13 @@ void MainWindow::buildUi()
         if (m_saveProjectAsAction)
         {
             m_saveProjectAsAction->trigger();
+        }
+    }, Qt::ApplicationShortcut);
+    new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), this, [this]()
+    {
+        if (m_importSoundAction && m_importSoundAction->isEnabled())
+        {
+            m_importSoundAction->trigger();
         }
     }, Qt::ApplicationShortcut);
 

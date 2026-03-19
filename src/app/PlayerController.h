@@ -99,6 +99,7 @@ public:
     bool setMixLaneGainForTrack(const QUuid& trackId, float gainDb);
     [[nodiscard]] std::optional<float> adjustMixLaneGainForTrack(const QUuid& trackId, float deltaDb);
     void selectNextVisibleTrack();
+    void selectNextTimelineTrack();
     bool startAudioPoolPreview(const QString& filePath);
     void stopAudioPoolPreview();
     bool startSelectedTrackClipPreview();

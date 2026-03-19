@@ -1070,7 +1070,7 @@ QRectF TimelineQuickController::computeTrackAreaRect() const
 QVector<int> TimelineQuickController::computeThumbnailFrames() const
 {
     QVector<int> frameIndices;
-    if (!m_showThumbnails || m_playbackActive || m_totalFrames <= 0 || m_videoPath.isEmpty())
+    if (!m_showThumbnails || m_totalFrames <= 0 || m_videoPath.isEmpty())
     {
         return frameIndices;
     }

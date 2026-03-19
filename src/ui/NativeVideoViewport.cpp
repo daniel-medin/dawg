@@ -276,11 +276,7 @@ void NativeVideoViewport::paintOverlayContent(QPainter& painter, const QRectF& f
 
         if (m_showAllLabels || overlay.showLabel)
         {
-            auto label = overlay.label;
-            if (overlay.hasAttachedAudio)
-            {
-                label += QStringLiteral(" [snd]");
-            }
+            const auto label = overlay.label;
 
             auto labelFont = painter.font();
             labelFont.setPointSizeF(9.0);

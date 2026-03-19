@@ -71,6 +71,8 @@ public:
     Q_INVOKABLE void requestTrackGainAdjust(const QString& trackId, int wheelDelta, double localX, double localY);
     Q_INVOKABLE void requestTrackContextMenu(const QString& trackId, double localX, double localY);
     Q_INVOKABLE void requestAudioDropped(const QString& assetPath, double imageX, double imageY);
+    Q_INVOKABLE void requestSelectNextNode();
+    Q_INVOKABLE void requestSelectNextVisibleNode();
     [[nodiscard]] QPoint mapQuickLocalToGlobal(double localX, double localY) const;
 
 protected:

@@ -94,6 +94,7 @@ QVariant AudioPoolQuickController::data(const QModelIndex& index, const int role
     }
 
     const auto& item = m_items[static_cast<std::size_t>(index.row())];
+    const auto isPreviewing = item.key == m_previewItemKey;
     switch (role)
     {
     case KeyRole:
@@ -105,14 +106,20 @@ QVariant AudioPoolQuickController::data(const QModelIndex& index, const int role
     case ConnectedNodeCountRole:
         return item.connectedNodeCount;
     case IsPlayingRole:
-        return item.isPlaying;
+        return item.isPlaying || isPreviewing;
     case ConnectionSummaryRole:
-        return item.connectionSummary;
+        return isPreviewing && !item.isPlaying
+            ? QStringLiteral("Previewing")
+            : item.connectionSummary;
     case DurationTextRole:
         return formatAudioPoolDuration(item.durationMs);
     case SizeTextRole:
         return formatAudioPoolSize(item.fileSizeBytes);
     case StatusColorRole:
+        if (isPreviewing)
+        {
+            return QColor(QStringLiteral("#63c987"));
+        }
         return statusColorFor(item);
     case ConnectedRole:
         return item.connectedNodeCount > 0;
@@ -146,6 +153,37 @@ void AudioPoolQuickController::replaceItems(std::vector<AudioPoolItem> items)
     if (previousCount != static_cast<int>(m_items.size()))
     {
         emit countChanged();
+    }
+}
+
+void AudioPoolQuickController::updatePlaybackState(const std::vector<AudioPoolItem>& items)
+{
+    if (m_items.size() != items.size())
+    {
+        replaceItems(items);
+        return;
+    }
+
+    for (std::size_t index = 0; index < m_items.size(); ++index)
+    {
+        if (m_items[index].key != items[index].key || m_items[index].assetPath != items[index].assetPath)
+        {
+            replaceItems(items);
+            return;
+        }
+    }
+
+    for (int row = 0; row < static_cast<int>(m_items.size()); ++row)
+    {
+        const auto itemIndex = static_cast<std::size_t>(row);
+        if (m_items[itemIndex].isPlaying == items[itemIndex].isPlaying)
+        {
+            continue;
+        }
+
+        m_items[itemIndex].isPlaying = items[itemIndex].isPlaying;
+        const auto modelIndex = index(row, 0);
+        emit dataChanged(modelIndex, modelIndex, {IsPlayingRole, StatusColorRole, ConnectionSummaryRole});
     }
 }
 
@@ -264,13 +302,17 @@ void AudioPoolQuickController::startPreview(const int index)
 {
     if (const auto* item = itemAt(index); item)
     {
-        m_window.m_controller->startAudioPoolPreview(item->assetPath);
+        if (m_window.m_controller->startAudioPoolPreview(item->assetPath))
+        {
+            setPreviewItemKey(item->key);
+        }
     }
 }
 
 void AudioPoolQuickController::stopPreview()
 {
     m_window.m_controller->stopAudioPoolPreview();
+    setPreviewItemKey({});
 }
 
 void AudioPoolQuickController::deleteAudio(const int index)
@@ -307,6 +349,42 @@ const AudioPoolItem* AudioPoolQuickController::itemAt(const int index) const
     }
 
     return &m_items[static_cast<std::size_t>(index)];
+}
+
+void AudioPoolQuickController::setPreviewItemKey(const QString& key)
+{
+    if (m_previewItemKey == key)
+    {
+        return;
+    }
+
+    int previousRow = -1;
+    int nextRow = -1;
+    for (int row = 0; row < static_cast<int>(m_items.size()); ++row)
+    {
+        const auto& item = m_items[static_cast<std::size_t>(row)];
+        if (item.key == m_previewItemKey)
+        {
+            previousRow = row;
+        }
+        if (item.key == key)
+        {
+            nextRow = row;
+        }
+    }
+
+    m_previewItemKey = key;
+
+    if (previousRow >= 0)
+    {
+        const auto modelIndex = index(previousRow, 0);
+        emit dataChanged(modelIndex, modelIndex, {IsPlayingRole, StatusColorRole, ConnectionSummaryRole});
+    }
+    if (nextRow >= 0 && nextRow != previousRow)
+    {
+        const auto modelIndex = index(nextRow, 0);
+        emit dataChanged(modelIndex, modelIndex, {IsPlayingRole, StatusColorRole, ConnectionSummaryRole});
+    }
 }
 
 void AudioPoolQuickController::markProjectDirtyForDisplayChange()

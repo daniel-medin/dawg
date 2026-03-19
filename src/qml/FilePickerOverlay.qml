@@ -42,6 +42,23 @@ Item {
                 Button {
                     text: "Up"
                     onClicked: filePickerController.goUp()
+
+                    contentItem: Label {
+                        text: parent.text
+                        color: theme.titleText
+                        font.pixelSize: 12
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    background: Rectangle {
+                        radius: 8
+                        color: parent.down
+                            ? theme.pressedFill
+                            : (parent.hovered ? theme.hoverFill : "#18202b")
+                        border.width: 1
+                        border.color: "#324155"
+                    }
                 }
 
                 TextField {
@@ -49,7 +66,18 @@ Item {
                     Layout.fillWidth: true
                     text: filePickerController.currentPath
                     selectByMouse: true
+                    color: theme.titleText
+                    selectedTextColor: "#0f141b"
+                    selectionColor: "#76a9de"
+                    placeholderTextColor: theme.subtitleText
                     onAccepted: filePickerController.currentPath = text
+
+                    background: Rectangle {
+                        radius: 8
+                        color: "#10151c"
+                        border.width: 1
+                        border.color: pathField.activeFocus ? "#76a9de" : "#2b3442"
+                    }
                 }
             }
 
@@ -68,8 +96,19 @@ Item {
                     Layout.fillWidth: true
                     text: filePickerController.fileName
                     selectByMouse: true
+                    color: theme.titleText
+                    selectedTextColor: "#0f141b"
+                    selectionColor: "#76a9de"
+                    placeholderTextColor: theme.subtitleText
                     onTextChanged: filePickerController.fileName = text
                     onAccepted: filePickerController.acceptSelection()
+
+                    background: Rectangle {
+                        radius: 8
+                        color: "#10151c"
+                        border.width: 1
+                        border.color: fileNameField.activeFocus ? "#76a9de" : "#2b3442"
+                    }
                 }
             }
 
@@ -98,6 +137,23 @@ Item {
                             text: modelData.label
                             flat: true
                             onClicked: filePickerController.openSidebarLocation(modelData.path)
+
+                            contentItem: Label {
+                                text: parent.text
+                                color: theme.titleText
+                                font.pixelSize: 12
+                                horizontalAlignment: Text.AlignLeft
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 8
+                                elide: Text.ElideRight
+                            }
+
+                            background: Rectangle {
+                                radius: 8
+                                color: parent.down
+                                    ? theme.pressedFill
+                                    : (parent.hovered ? theme.hoverFill : "transparent")
+                            }
                         }
                     }
                 }
@@ -191,6 +247,23 @@ Item {
                 Button {
                     text: "Cancel"
                     onClicked: filePickerController.cancel()
+
+                    contentItem: Label {
+                        text: parent.text
+                        color: theme.titleText
+                        font.pixelSize: 12
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    background: Rectangle {
+                        radius: 8
+                        color: parent.down
+                            ? theme.pressedFill
+                            : (parent.hovered ? theme.hoverFill : "#18202b")
+                        border.width: 1
+                        border.color: "#324155"
+                    }
                 }
 
                 Button {
@@ -202,6 +275,23 @@ Item {
                         ? filePickerController.currentPath.length > 0
                         : filePickerController.selectedPath.length > 0)
                     onClicked: filePickerController.acceptSelection()
+
+                    contentItem: Label {
+                        text: parent.text
+                        color: enabled ? "#eef3f8" : theme.menuItemDisabled
+                        font.pixelSize: 12
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    background: Rectangle {
+                        radius: 8
+                        color: !parent.enabled
+                            ? "#1c222b"
+                            : (parent.down ? "#2e5f94" : (parent.hovered ? "#3b78bc" : "#315f93"))
+                        border.width: 1
+                        border.color: !parent.enabled ? "#2b3442" : "#76a9de"
+                    }
                 }
             }
         }
