@@ -72,6 +72,7 @@
 #include "ui/QuickEngineSupport.h"
 #include "ui/TimelineQuickController.h"
 #include "ui/TimelineThumbnailCache.h"
+#include "ui/VideoOverlayQuickItem.h"
 #include "ui/VideoViewportQuickItem.h"
 #include "ui/VideoViewportQuickController.h"
 #include <qqml.h>
@@ -311,6 +312,7 @@ void ensureQuickTypesRegistered()
     static const bool registered = []()
     {
         qmlRegisterType<ClipWaveformQuickItem>("Dawg", 1, 0, "ClipWaveformQuickItem");
+        qmlRegisterType<VideoOverlayQuickItem>("Dawg", 1, 0, "VideoOverlayQuickItem");
         qmlRegisterType<VideoViewportQuickItem>("Dawg", 1, 0, "VideoViewportQuickItem");
         return true;
     }();

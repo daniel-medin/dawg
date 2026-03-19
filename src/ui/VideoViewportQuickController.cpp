@@ -120,26 +120,6 @@ void VideoViewportQuickController::setSourceFrameSize(const QSize& sourceSize)
 void VideoViewportQuickController::setOverlays(const std::vector<TrackOverlay>& overlays)
 {
     m_overlayData = overlays;
-
-    QVariantList nextModels;
-    nextModels.reserve(static_cast<qsizetype>(overlays.size()));
-    for (const auto& overlay : overlays)
-    {
-        QVariantMap item;
-        item.insert(QStringLiteral("trackId"), overlay.id.toString(QUuid::WithoutBraces));
-        item.insert(QStringLiteral("label"), overlay.label);
-        item.insert(QStringLiteral("color"), overlay.color);
-        item.insert(QStringLiteral("imageX"), overlay.imagePoint.x());
-        item.insert(QStringLiteral("imageY"), overlay.imagePoint.y());
-        item.insert(QStringLiteral("selected"), overlay.isSelected);
-        item.insert(QStringLiteral("highlightOpacity"), overlay.highlightOpacity);
-        item.insert(QStringLiteral("showLabel"), overlay.showLabel);
-        item.insert(QStringLiteral("hasAttachedAudio"), overlay.hasAttachedAudio);
-        item.insert(QStringLiteral("autoPanEnabled"), overlay.autoPanEnabled);
-        nextModels.push_back(item);
-    }
-
-    m_overlayModels = nextModels;
     emit overlaysChanged();
 }
 
@@ -189,7 +169,7 @@ QString VideoViewportQuickController::frameSource() const
 
 QVariantList VideoViewportQuickController::overlays() const
 {
-    return m_overlayModels;
+    return {};
 }
 
 bool VideoViewportQuickController::showAllLabels() const
@@ -230,6 +210,11 @@ const VideoFrame& VideoViewportQuickController::currentVideoFrame() const
 int VideoViewportQuickController::frameRevision() const
 {
     return m_frameRevision;
+}
+
+const std::vector<TrackOverlay>& VideoViewportQuickController::overlayData() const
+{
+    return m_overlayData;
 }
 
 QVariantMap VideoViewportQuickController::frameRect(const qreal viewWidth, const qreal viewHeight) const

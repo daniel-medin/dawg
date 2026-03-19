@@ -46,6 +46,7 @@ public:
     [[nodiscard]] const QImage& currentFrame() const;
     [[nodiscard]] const VideoFrame& currentVideoFrame() const;
     [[nodiscard]] int frameRevision() const;
+    [[nodiscard]] const std::vector<TrackOverlay>& overlayData() const;
 
     Q_INVOKABLE QVariantMap frameRect(qreal viewWidth, qreal viewHeight) const;
     Q_INVOKABLE QVariantMap widgetToImagePoint(
@@ -85,7 +86,6 @@ private:
     VideoFrame m_videoFrame;
     QSize m_sourceFrameSize;
     std::vector<TrackOverlay> m_overlayData;
-    QVariantList m_overlayModels;
     bool m_hasFrame = false;
     bool m_showAllLabels = false;
     double m_displayScaleFactor = 1.0;

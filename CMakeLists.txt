@@ -134,6 +134,8 @@ add_executable(dawg WIN32
     src/ui/TimelineThumbnailCache.cpp
     src/ui/TimelineThumbnailCache.h
     src/ui/TimelineTypes.h
+    src/ui/VideoOverlayQuickItem.cpp
+    src/ui/VideoOverlayQuickItem.h
 )
 
 target_include_directories(dawg PRIVATE src)

@@ -88,79 +88,9 @@ Rectangle {
         anchors.fill: parent
         visible: videoViewportController.hasFrame
 
-        Repeater {
-            model: videoViewportController.overlays
-
-            delegate: Item {
-                required property var modelData
-
-                readonly property real centerX: root.frameRect.x + modelData.imageX * root.scaleX
-                readonly property real centerY: root.frameRect.y + modelData.imageY * root.scaleY
-                readonly property bool showLabel: videoViewportController.showAllLabels || modelData.showLabel
-
-                x: centerX - 16
-                y: centerY - 16
-                width: 220
-                height: 64
-
-                Rectangle {
-                    x: 9
-                    y: 9
-                    width: 14
-                    height: 14
-                    radius: 7
-                    color: modelData.color
-                    border.width: 2
-                    border.color: "black"
-                }
-
-                Rectangle {
-                    visible: modelData.autoPanEnabled
-                    x: 13.5
-                    y: 13.5
-                    width: 5
-                    height: 5
-                    radius: 2.5
-                    color: "#08090c"
-                    border.width: 1
-                    border.color: "#b9c2cc"
-                }
-
-                Rectangle {
-                    visible: modelData.highlightOpacity > 0.0
-                    x: 4
-                    y: 4
-                    width: 24
-                    height: 24
-                    radius: 12
-                    color: "transparent"
-                    border.width: 2
-                    border.color: Qt.rgba(1.0, 1.0, 1.0, modelData.highlightOpacity)
-                }
-
-                Rectangle {
-                    id: labelBubble
-                    visible: parent.showLabel
-                    x: 26
-                    y: 0
-                    width: Math.max(34, labelText.implicitWidth + 16)
-                    height: Math.max(22, labelText.implicitHeight + 6)
-                    radius: 6
-                    color: modelData.selected ? "#eb222a39" : "#dc101218"
-
-                    Text {
-                        id: labelText
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        verticalAlignment: Text.AlignVCenter
-                        horizontalAlignment: Text.AlignLeft
-                        text: modelData.hasAttachedAudio ? modelData.label + " [snd]" : modelData.label
-                        color: "white"
-                        font.pointSize: 9
-                    }
-                }
-            }
+        VideoOverlayQuickItem {
+            anchors.fill: parent
+            controller: videoViewportController
         }
 
         Rectangle {
