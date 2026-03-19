@@ -292,8 +292,7 @@ Rectangle {
                     preventStealing: true
                     cursorShape: root.soloEnabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                     onClicked: {
-                        root.soloed = !root.soloed
-                        root.soloToggled(root.soloed)
+                        root.soloToggled(!root.soloed)
                     }
                 }
             }
@@ -320,8 +319,7 @@ Rectangle {
                     preventStealing: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        root.muted = !root.muted
-                        root.muteToggled(root.muted)
+                        root.muteToggled(!root.muted)
                     }
                 }
             }

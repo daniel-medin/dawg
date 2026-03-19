@@ -53,7 +53,7 @@ This is not intended to feel like a traditional DAW with lots of horizontal audi
 
 ## Tech Stack
 
-- `Qt 6 Quick` for the main application shell, panels, menus, overlays, and normal frontend interactions
+- `Qt 6 Quick` for the main desktop shell and frontend UI; `Qt Widgets` remain only for a few narrow helper/debug surfaces
 - `JUCE` for the audio backend and mixer/meter path
 - `FFmpeg` for the main video decode path
 - `OpenCV` for motion tracking and some fallback video utilities
