@@ -26,12 +26,12 @@ class TimelineQuickController : public QObject
     Q_PROPERTY(QVariantList thumbnailTiles READ thumbnailTiles NOTIFY visualsChanged)
     Q_PROPERTY(QVariantList trackGeometries READ trackGeometries NOTIFY visualsChanged)
     Q_PROPERTY(QVariantMap loopRangeGeometry READ loopRangeGeometry NOTIFY visualsChanged)
-    Q_PROPERTY(double markerX READ markerX NOTIFY visualsChanged)
-    Q_PROPERTY(bool hasLoopIndicator READ hasLoopIndicator NOTIFY visualsChanged)
-    Q_PROPERTY(double loopIndicatorX READ loopIndicatorX NOTIFY visualsChanged)
-    Q_PROPERTY(bool hasHoverLine READ hasHoverLine NOTIFY visualsChanged)
-    Q_PROPERTY(double hoverX READ hoverX NOTIFY visualsChanged)
-    Q_PROPERTY(int cursorShape READ cursorShape NOTIFY visualsChanged)
+    Q_PROPERTY(double markerX READ markerX NOTIFY markerChanged)
+    Q_PROPERTY(bool hasLoopIndicator READ hasLoopIndicator NOTIFY overlayChanged)
+    Q_PROPERTY(double loopIndicatorX READ loopIndicatorX NOTIFY overlayChanged)
+    Q_PROPERTY(bool hasHoverLine READ hasHoverLine NOTIFY overlayChanged)
+    Q_PROPERTY(double hoverX READ hoverX NOTIFY overlayChanged)
+    Q_PROPERTY(int cursorShape READ cursorShape NOTIFY cursorShapeChanged)
 
 public:
     explicit TimelineQuickController(QObject* parent = nullptr);
@@ -86,6 +86,9 @@ signals:
     void trackGainPopupRequested(const QUuid& trackId, const QPoint& globalPosition);
     void loopContextMenuRequested(const QPoint& globalPosition);
     void visualsChanged();
+    void markerChanged();
+    void overlayChanged();
+    void cursorShapeChanged();
 
 private:
     struct LoopRangeGeometry

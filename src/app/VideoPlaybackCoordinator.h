@@ -99,6 +99,8 @@ public:
     [[nodiscard]] bool renderHardwareAccelerated() const;
     [[nodiscard]] RenderService& renderService();
     [[nodiscard]] const RenderService& renderService() const;
+    void setPreferredD3D11Device(void* device);
+    void setNativePresentationEnabled(bool enabled);
     [[nodiscard]] double frameTimestampSeconds(int frameIndex) const;
     [[nodiscard]] VideoPlaybackRuntimeStats runtimeStats() const;
     [[nodiscard]] PresentedFrame presentCurrentFrame(bool playbackActive);
@@ -141,4 +143,5 @@ private:
     QElapsedTimer m_playbackElapsedTimer;
     QElapsedTimer m_perfPlaybackTickTimer;
     std::uint64_t m_lastLoggedQueueStarvationCount = 0;
+    bool m_nativePresentationEnabled = false;
 };

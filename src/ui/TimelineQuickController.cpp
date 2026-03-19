@@ -175,7 +175,7 @@ void TimelineQuickController::setCurrentFrame(const int frameIndex)
     }
 
     m_markerX = xForFrame(m_currentFrame);
-    emit visualsChanged();
+    emit markerChanged();
 }
 
 void TimelineQuickController::setLoopRange(const std::optional<int> startFrame, const std::optional<int> endFrame)
@@ -611,6 +611,7 @@ void TimelineQuickController::handleHoverMove(const double x, const double y, co
 
 void TimelineQuickController::handleHoverLeave()
 {
+    const auto previousCursorShape = m_cursorShape;
     if (m_hoveredLoopFrame.has_value() || m_hoveredTimelineX.has_value())
     {
         m_hoveredLoopFrame.reset();
@@ -619,6 +620,10 @@ void TimelineQuickController::handleHoverLeave()
     QToolTip::hideText();
     m_cursorShape = static_cast<int>(Qt::ArrowCursor);
     refreshVisuals();
+    if (m_cursorShape != previousCursorShape)
+    {
+        emit cursorShapeChanged();
+    }
 }
 
 std::vector<TimelineQuickController::TimelineTrackGeometry> TimelineQuickController::computeTrackGeometries() const
@@ -839,12 +844,18 @@ void TimelineQuickController::updateCursorAndTooltip(const QPointF& position, co
     if (m_cursorShape != nextCursor)
     {
         m_cursorShape = nextCursor;
-        emit visualsChanged();
+        emit cursorShapeChanged();
     }
 }
 
 void TimelineQuickController::refreshVisuals()
 {
+    const auto previousMarkerX = m_markerX;
+    const auto previousHasLoopIndicator = m_hasLoopIndicator;
+    const auto previousLoopIndicatorX = m_loopIndicatorX;
+    const auto previousHasHoverLine = m_hasHoverLine;
+    const auto previousHoverX = m_hoverX;
+
     const auto timelineRect = computeTimelineRect();
     const auto filmstripRect = computeFilmstripRect();
     const auto loopRect = computeLoopBarRect();
@@ -943,6 +954,17 @@ void TimelineQuickController::refreshVisuals()
     m_hoverX = m_hasHoverLine ? std::clamp(*m_hoveredTimelineX, loopRect.left(), loopRect.right()) : 0.0;
 
     emit visualsChanged();
+    if (std::abs(m_markerX - previousMarkerX) > 0.001)
+    {
+        emit markerChanged();
+    }
+    if (m_hasLoopIndicator != previousHasLoopIndicator
+        || std::abs(m_loopIndicatorX - previousLoopIndicatorX) > 0.001
+        || m_hasHoverLine != previousHasHoverLine
+        || std::abs(m_hoverX - previousHoverX) > 0.001)
+    {
+        emit overlayChanged();
+    }
 }
 
 QRectF TimelineQuickController::computeTimelineRect() const

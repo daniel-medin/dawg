@@ -308,13 +308,10 @@ void DebugUiController::updateFrame(const QImage& image, const int frameIndex, c
 
         ++m_window.m_outputFpsFrameCount;
         const auto elapsedMs = std::max<qint64>(1, m_window.m_outputFpsTimer.elapsed());
-        if (elapsedMs >= 250)
+        if (elapsedMs >= 1000)
         {
-            const auto measuredFps =
+            m_window.m_outputFps =
                 static_cast<double>(m_window.m_outputFpsFrameCount) * 1000.0 / static_cast<double>(elapsedMs);
-            m_window.m_outputFps = m_window.m_outputFps > 0.0
-                ? (m_window.m_outputFps * 0.4) + (measuredFps * 0.6)
-                : measuredFps;
             m_window.m_outputFpsTimer.restart();
             m_window.m_outputFpsFrameCount = 0;
         }

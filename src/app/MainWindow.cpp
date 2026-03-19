@@ -43,6 +43,8 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <windowsx.h>
+#include <d3d11.h>
+#include <d3d11_4.h>
 #include <dxgi1_4.h>
 #include <psapi.h>
 #endif
@@ -70,11 +72,52 @@
 #include "ui/QuickEngineSupport.h"
 #include "ui/TimelineQuickController.h"
 #include "ui/TimelineThumbnailCache.h"
+#include "ui/VideoViewportQuickItem.h"
 #include "ui/VideoViewportQuickController.h"
 #include <qqml.h>
 
 namespace
 {
+#ifdef Q_OS_WIN
+void enableD3D11MultithreadProtection(ID3D11Device* device)
+{
+    if (!device)
+    {
+        return;
+    }
+
+    ID3D11DeviceContext* deviceContext = nullptr;
+    device->GetImmediateContext(&deviceContext);
+    if (!deviceContext)
+    {
+        return;
+    }
+
+    ID3D11Multithread* multithread = nullptr;
+    if (SUCCEEDED(deviceContext->QueryInterface(__uuidof(ID3D11Multithread), reinterpret_cast<void**>(&multithread)))
+        && multithread)
+    {
+        multithread->SetMultithreadProtected(TRUE);
+        multithread->Release();
+    }
+
+    deviceContext->Release();
+}
+#endif
+
+void clearStuckWaitCursor(QWindow* window)
+{
+    if (window)
+    {
+        window->unsetCursor();
+    }
+
+    while (qApp && qApp->overrideCursor())
+    {
+        qApp->restoreOverrideCursor();
+    }
+}
+
 QUrl quickTitleBarUrl()
 {
     return QUrl(QStringLiteral("qrc:/qml/QuickTitleBar.qml"));
@@ -263,11 +306,12 @@ QString graphicsApiToString(const QSGRendererInterface::GraphicsApi api)
     return QStringLiteral("Unknown");
 }
 
-void ensureClipEditorQuickTypesRegistered()
+void ensureQuickTypesRegistered()
 {
     static const bool registered = []()
     {
         qmlRegisterType<ClipWaveformQuickItem>("Dawg", 1, 0, "ClipWaveformQuickItem");
+        qmlRegisterType<VideoViewportQuickItem>("Dawg", 1, 0, "VideoViewportQuickItem");
         return true;
     }();
     Q_UNUSED(registered);
@@ -278,6 +322,7 @@ constexpr auto kRecentProjectPathsSettingsKey = "project/recentProjectPaths";
 constexpr int kMaxRecentProjectCount = 10;
 constexpr int kMixGainPopupMinValue = -1000;
 constexpr int kMixGainPopupMaxValue = 120;
+constexpr qint64 kAudioPoolPlaybackRefreshIntervalMs = 100;
 
 int mixGainDbToSliderValue(const float gainDb)
 {
@@ -706,6 +751,7 @@ MainWindow::MainWindow(QWindow* parent)
     m_panelLayoutController = std::make_unique<PanelLayoutController>(*this);
     m_debugUiController = std::make_unique<DebugUiController>(*this);
     m_mediaImportController = std::make_unique<MediaImportController>(*this);
+    clearStuckWaitCursor(this);
     buildMenus();
     if (m_actionRegistry)
     {
@@ -1971,6 +2017,16 @@ void MainWindow::moveSelectedNodeRight()
 void MainWindow::updateFrame(const QImage& image, const int frameIndex, const double timestampSeconds)
 {
     m_debugUiController->updateFrame(image, frameIndex, timestampSeconds);
+    if (m_controller
+        && m_controller->isPlaying()
+        && m_audioPoolQuickWidget
+        && m_audioPoolQuickWidget->isVisible()
+        && (!m_audioPoolPlaybackRefreshTimer.isValid()
+            || m_audioPoolPlaybackRefreshTimer.elapsed() >= kAudioPoolPlaybackRefreshIntervalMs))
+    {
+        updateAudioPoolPlaybackIndicators();
+        m_audioPoolPlaybackRefreshTimer.restart();
+    }
 }
 
 void MainWindow::updateMemoryUsage()
@@ -2011,6 +2067,7 @@ void MainWindow::updateInsertionFollowsPlaybackState(const bool enabled)
 
 void MainWindow::updatePlaybackState(const bool playing)
 {
+    clearStuckWaitCursor(this);
     const auto label = playing ? QStringLiteral("Pause (Space)") : QStringLiteral("Play (Space)");
     m_playAction->setText(label);
     m_debugTextTimer.invalidate();
@@ -2018,10 +2075,12 @@ void MainWindow::updatePlaybackState(const bool playing)
     {
         resetOutputFpsTracking();
         m_outputFpsTimer.start();
+        m_audioPoolPlaybackRefreshTimer.invalidate();
     }
     else
     {
         resetOutputFpsTracking();
+        m_audioPoolPlaybackRefreshTimer.invalidate();
     }
     if (playing)
     {
@@ -2939,7 +2998,7 @@ void MainWindow::buildUi()
     m_shellLayoutController = new ShellLayoutController(this);
     m_videoViewportQuickController = new VideoViewportQuickController(this);
     m_timelineQuickController = new TimelineQuickController(this);
-    ensureClipEditorQuickTypesRegistered();
+    ensureQuickTypesRegistered();
     m_clipEditorQuickController = new ClipEditorQuickController(this);
     m_mixQuickController = new MixQuickController(this);
     m_audioPoolQuickController = new AudioPoolQuickController(*this, this);
@@ -3170,10 +3229,79 @@ void MainWindow::buildUi()
         showStatus(QStringLiteral("Debug window hidden."));
     });
 
-    connect(this, &QQuickWindow::sceneGraphInitialized, this, [this]()
-    {
-        updateMixQuickDiagnostics();
-    });
+    connect(
+        this,
+        &QQuickWindow::sceneGraphInitialized,
+        this,
+        [this]()
+        {
+#ifdef Q_OS_WIN
+            auto* quickDevice = rendererInterface()
+                ? static_cast<ID3D11Device*>(rendererInterface()->getResource(this, QSGRendererInterface::DeviceResource))
+                : nullptr;
+            if (quickDevice)
+            {
+                enableD3D11MultithreadProtection(quickDevice);
+                quickDevice->AddRef();
+            }
+
+            QMetaObject::invokeMethod(
+                this,
+                [this, quickDevice]()
+                {
+                    bool nativePresentationReady = quickDevice != nullptr;
+                    clearStuckWaitCursor(this);
+                    m_controller->setPreferredD3D11Device(quickDevice);
+
+                    if (hasOpenProject() && m_controller->hasVideoLoaded() && m_controller->videoHardwareAccelerated())
+                    {
+                        QString errorMessage;
+                        const auto controllerState = m_controller->snapshotProjectState();
+                        m_projectStateChangeInProgress = true;
+                        const auto restored = m_controller->restoreProjectState(controllerState, &errorMessage);
+                        m_projectStateChangeInProgress = false;
+                        if (!restored)
+                        {
+                            nativePresentationReady = false;
+                            if (!errorMessage.isEmpty())
+                            {
+                                qWarning().noquote()
+                                    << "Failed to refresh startup video for native Quick presentation:"
+                                    << errorMessage;
+                            }
+                        }
+                    }
+
+                    m_controller->setNativeVideoPresentationEnabled(nativePresentationReady);
+                    if (m_videoViewportQuickController)
+                    {
+                        m_videoViewportQuickController->setNativePresentationEnabled(nativePresentationReady);
+                    }
+                    if (quickDevice)
+                    {
+                        quickDevice->Release();
+                    }
+                    clearStuckWaitCursor(this);
+                    updateMixQuickDiagnostics();
+                },
+                Qt::QueuedConnection);
+#else
+            QMetaObject::invokeMethod(
+                this,
+                [this]()
+                {
+                    clearStuckWaitCursor(this);
+                    m_controller->setNativeVideoPresentationEnabled(false);
+                    if (m_videoViewportQuickController)
+                    {
+                        m_videoViewportQuickController->setNativePresentationEnabled(false);
+                    }
+                    updateMixQuickDiagnostics();
+                },
+                Qt::QueuedConnection);
+#endif
+        },
+        Qt::DirectConnection);
     handleTimelineQuickStatusChanged();
     handleClipEditorQuickStatusChanged();
     handleMixQuickStatusChanged();

@@ -25,6 +25,7 @@ public:
     [[nodiscard]] virtual bool cpuFrameExtractionEnabled() const = 0;
     virtual void setOutputScale(double scale) = 0;
     [[nodiscard]] virtual double outputScale() const = 0;
+    virtual void setPreferredD3D11Device(void* device) = 0;
     [[nodiscard]] virtual QString backendName() const = 0;
     [[nodiscard]] virtual bool isHardwareAccelerated() const = 0;
 };

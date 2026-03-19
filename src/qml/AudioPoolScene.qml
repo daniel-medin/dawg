@@ -219,6 +219,7 @@ Rectangle {
                     required property string assetPath
                     required property string displayName
                     required property bool connected
+                    required property bool isPlaying
                     required property string durationText
                     required property string sizeText
                     required property color statusColor
@@ -310,7 +311,9 @@ Rectangle {
                             width: 8
                             height: 8
                             radius: 4
-                            color: rowRoot.statusColor
+                            color: rowRoot.isPlaying ? "#47d86f" : rowRoot.statusColor
+                            border.width: rowRoot.isPlaying ? 1 : 0
+                            border.color: rowRoot.isPlaying ? "#aef2bf" : "transparent"
                         }
 
                         Label {

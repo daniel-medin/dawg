@@ -70,6 +70,7 @@ void VideoViewportQuickController::setPresentedFrame(
     m_sourceFrameSize = sourceSize;
     bumpFrameRevision();
     updateFrameState(videoFrame.isValid() || !frame.isNull());
+    updateNativePresentationState();
     if (effectiveSourceSize() != previousSourceSize)
     {
         emit sourceGeometryChanged();
@@ -82,6 +83,7 @@ void VideoViewportQuickController::setFrame(const QImage& frame)
     m_frame = frame;
     bumpFrameRevision();
     updateFrameState(!m_frame.isNull() || m_videoFrame.isValid());
+    updateNativePresentationState();
     if (effectiveSourceSize() != previousSourceSize)
     {
         emit sourceGeometryChanged();
@@ -90,8 +92,14 @@ void VideoViewportQuickController::setFrame(const QImage& frame)
 
 void VideoViewportQuickController::setVideoFrame(const VideoFrame& videoFrame)
 {
+    const auto previousSourceSize = effectiveSourceSize();
     m_videoFrame = videoFrame;
     updateFrameState(videoFrame.isValid() || !m_frame.isNull());
+    updateNativePresentationState();
+    if (effectiveSourceSize() != previousSourceSize)
+    {
+        emit sourceGeometryChanged();
+    }
 }
 
 void VideoViewportQuickController::setSourceFrameSize(const QSize& sourceSize)
@@ -158,6 +166,17 @@ void VideoViewportQuickController::setDisplayScaleFactor(const double scaleFacto
     emit displayScaleFactorChanged();
 }
 
+void VideoViewportQuickController::setNativePresentationEnabled(const bool enabled)
+{
+    if (m_nativePresentationEnabled == enabled)
+    {
+        return;
+    }
+
+    m_nativePresentationEnabled = enabled;
+    updateNativePresentationState();
+}
+
 bool VideoViewportQuickController::hasFrame() const
 {
     return m_hasFrame;
@@ -193,9 +212,24 @@ int VideoViewportQuickController::sourceHeight() const
     return effectiveSourceSize().height();
 }
 
+bool VideoViewportQuickController::nativePresentationActive() const
+{
+    return m_nativePresentationActive;
+}
+
 const QImage& VideoViewportQuickController::currentFrame() const
 {
     return m_frame;
+}
+
+const VideoFrame& VideoViewportQuickController::currentVideoFrame() const
+{
+    return m_videoFrame;
+}
+
+int VideoViewportQuickController::frameRevision() const
+{
+    return m_frameRevision;
 }
 
 QVariantMap VideoViewportQuickController::frameRect(const qreal viewWidth, const qreal viewHeight) const
@@ -305,7 +339,17 @@ bool VideoViewportQuickController::overlayIsSelected(const QString& trackId) con
 
 QSize VideoViewportQuickController::effectiveSourceSize() const
 {
-    return !m_sourceFrameSize.isEmpty() ? m_sourceFrameSize : m_frame.size();
+    if (!m_sourceFrameSize.isEmpty())
+    {
+        return m_sourceFrameSize;
+    }
+
+    if (m_videoFrame.frameSize.width > 0 && m_videoFrame.frameSize.height > 0)
+    {
+        return QSize{m_videoFrame.frameSize.width, m_videoFrame.frameSize.height};
+    }
+
+    return m_frame.size();
 }
 
 QRectF VideoViewportQuickController::scaledFrameRect(const QSizeF& viewSize) const
@@ -322,6 +366,21 @@ void VideoViewportQuickController::updateFrameState(const bool hasFrame)
 
     m_hasFrame = hasFrame;
     emit hasFrameChanged();
+}
+
+void VideoViewportQuickController::updateNativePresentationState()
+{
+    const auto active =
+        m_nativePresentationEnabled
+        && m_videoFrame.hasNativeTexture()
+        && m_videoFrame.rotationDegrees == 0;
+    if (m_nativePresentationActive == active)
+    {
+        return;
+    }
+
+    m_nativePresentationActive = active;
+    emit nativePresentationActiveChanged();
 }
 
 void VideoViewportQuickController::bumpFrameRevision()

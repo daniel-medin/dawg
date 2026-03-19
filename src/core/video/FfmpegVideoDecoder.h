@@ -22,6 +22,7 @@ public:
     [[nodiscard]] bool cpuFrameExtractionEnabled() const override;
     void setOutputScale(double scale) override;
     [[nodiscard]] double outputScale() const override;
+    void setPreferredD3D11Device(void* device) override;
     [[nodiscard]] QString backendName() const override;
     [[nodiscard]] bool isHardwareAccelerated() const override;
 

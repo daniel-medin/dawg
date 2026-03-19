@@ -147,6 +147,22 @@ const RenderService& VideoPlaybackCoordinator::renderService() const
     return m_renderService;
 }
 
+void VideoPlaybackCoordinator::setPreferredD3D11Device(void* device)
+{
+    m_videoPlayback.setPreferredD3D11Device(device);
+}
+
+void VideoPlaybackCoordinator::setNativePresentationEnabled(const bool enabled)
+{
+    if (m_nativePresentationEnabled == enabled)
+    {
+        return;
+    }
+
+    m_nativePresentationEnabled = enabled;
+    updateCpuFrameExtractionMode();
+}
+
 double VideoPlaybackCoordinator::frameTimestampSeconds(const int frameIndex) const
 {
     return m_videoPlayback.frameTimestampSeconds(frameIndex);
@@ -436,7 +452,12 @@ bool VideoPlaybackCoordinator::needsTrackingFrameProcessing() const
 
 void VideoPlaybackCoordinator::updateCpuFrameExtractionMode()
 {
-    static_cast<void>(m_videoPlayback.setCpuFrameExtractionEnabled(true));
+    const auto needsCpuFrames =
+        !m_nativePresentationEnabled
+        || !m_videoPlayback.isHardwareDecoded()
+        || needsTrackingFrameProcessing()
+        || m_currentFrame.rotationDegrees != 0;
+    static_cast<void>(m_videoPlayback.setCpuFrameExtractionEnabled(needsCpuFrames));
 }
 
 void VideoPlaybackCoordinator::updateCurrentGrayFrameIfNeeded()

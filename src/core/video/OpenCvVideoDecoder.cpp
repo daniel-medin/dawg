@@ -146,6 +146,11 @@ double OpenCvVideoDecoder::outputScale() const
     return m_outputScale;
 }
 
+void OpenCvVideoDecoder::setPreferredD3D11Device(void* device)
+{
+    Q_UNUSED(device);
+}
+
 QString OpenCvVideoDecoder::backendName() const
 {
     return QStringLiteral("OpenCV VideoCapture");

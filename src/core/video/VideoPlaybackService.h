@@ -45,7 +45,8 @@ public:
     [[nodiscard]] bool cpuFrameExtractionEnabled() const;
     bool setPresentationScale(double scale);
     [[nodiscard]] double presentationScale() const;
-
+    void setPreferredD3D11Device(void* device);
+    [[nodiscard]] void* preferredD3D11Device() const;
     bool seekFrame(int frameIndex);
     [[nodiscard]] std::optional<VideoFrame> stepForward();
     [[nodiscard]] double frameTimestampSeconds(int frameIndex) const;
@@ -78,6 +79,7 @@ private:
     double m_fps = 0.0;
     double m_presentationScale = 1.0;
     bool m_cpuFrameExtractionEnabled = true;
+    void* m_preferredD3D11Device = nullptr;
     std::size_t m_prefetchTargetSize = 8;
     bool m_stopPrefetch = false;
     bool m_reachedEndOfStream = false;

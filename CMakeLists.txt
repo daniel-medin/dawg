@@ -113,6 +113,8 @@ add_executable(dawg WIN32
     src/core/video/VideoPlaybackService.h
     src/ui/VideoViewportQuickController.cpp
     src/ui/VideoViewportQuickController.h
+    src/ui/VideoViewportQuickItem.cpp
+    src/ui/VideoViewportQuickItem.h
     src/ui/NativeVideoViewport.cpp
     src/ui/NativeVideoViewport.h
     src/ui/DebugOverlayWindow.cpp

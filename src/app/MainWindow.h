@@ -365,6 +365,7 @@ private:
     bool m_nodeNudgeFastMode = false;
     QElapsedTimer m_outputFpsTimer;
     QElapsedTimer m_debugTextTimer;
+    QElapsedTimer m_audioPoolPlaybackRefreshTimer;
     int m_outputFpsFrameCount = 0;
     double m_outputFps = 0.0;
     bool m_videoDetached = false;

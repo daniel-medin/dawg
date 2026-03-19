@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import Dawg 1.0
 
 Rectangle {
     id: root
@@ -64,12 +65,23 @@ Rectangle {
         y: root.frameRect.y
         width: root.frameRect.width
         height: root.frameRect.height
-        visible: videoViewportController.hasFrame
-        source: videoViewportController.hasFrame ? videoViewportController.frameSource : ""
+        visible: videoViewportController.hasFrame && !videoViewportController.nativePresentationActive
+        source: videoViewportController.hasFrame && !videoViewportController.nativePresentationActive
+            ? videoViewportController.frameSource
+            : ""
         asynchronous: false
         cache: false
         smooth: true
         fillMode: Image.PreserveAspectFit
+    }
+
+    VideoViewportQuickItem {
+        x: root.frameRect.x
+        y: root.frameRect.y
+        width: root.frameRect.width
+        height: root.frameRect.height
+        visible: videoViewportController.nativePresentationActive
+        controller: videoViewportController
     }
 
     Item {

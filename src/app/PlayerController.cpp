@@ -907,6 +907,16 @@ void PlayerController::setInsertionFollowsPlayback(const bool enabled)
             : QStringLiteral("Insertion follows playback disabled."));
 }
 
+void PlayerController::setPreferredD3D11Device(void* device)
+{
+    m_videoPlaybackCoordinator->setPreferredD3D11Device(device);
+}
+
+void PlayerController::setNativeVideoPresentationEnabled(const bool enabled)
+{
+    m_videoPlaybackCoordinator->setNativePresentationEnabled(enabled);
+}
+
 bool PlayerController::hasVideoLoaded() const
 {
     return m_videoPlaybackCoordinator->hasVideoLoaded();

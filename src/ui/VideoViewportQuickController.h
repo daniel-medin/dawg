@@ -21,6 +21,7 @@ class VideoViewportQuickController final : public QObject
     Q_PROPERTY(double displayScaleFactor READ displayScaleFactor NOTIFY displayScaleFactorChanged)
     Q_PROPERTY(int sourceWidth READ sourceWidth NOTIFY sourceGeometryChanged)
     Q_PROPERTY(int sourceHeight READ sourceHeight NOTIFY sourceGeometryChanged)
+    Q_PROPERTY(bool nativePresentationActive READ nativePresentationActive NOTIFY nativePresentationActiveChanged)
 
 public:
     explicit VideoViewportQuickController(QObject* parent = nullptr);
@@ -32,6 +33,7 @@ public:
     void setOverlays(const std::vector<TrackOverlay>& overlays);
     void setShowAllLabels(bool enabled);
     void setDisplayScaleFactor(double scaleFactor);
+    void setNativePresentationEnabled(bool enabled);
 
     [[nodiscard]] bool hasFrame() const;
     [[nodiscard]] QString frameSource() const;
@@ -40,7 +42,10 @@ public:
     [[nodiscard]] double displayScaleFactor() const;
     [[nodiscard]] int sourceWidth() const;
     [[nodiscard]] int sourceHeight() const;
+    [[nodiscard]] bool nativePresentationActive() const;
     [[nodiscard]] const QImage& currentFrame() const;
+    [[nodiscard]] const VideoFrame& currentVideoFrame() const;
+    [[nodiscard]] int frameRevision() const;
 
     Q_INVOKABLE QVariantMap frameRect(qreal viewWidth, qreal viewHeight) const;
     Q_INVOKABLE QVariantMap widgetToImagePoint(
@@ -66,11 +71,13 @@ signals:
     void showAllLabelsChanged();
     void displayScaleFactorChanged();
     void sourceGeometryChanged();
+    void nativePresentationActiveChanged();
 
 private:
     [[nodiscard]] QSize effectiveSourceSize() const;
     [[nodiscard]] QRectF scaledFrameRect(const QSizeF& viewSize) const;
     void updateFrameState(bool hasFrame);
+    void updateNativePresentationState();
     void bumpFrameRevision();
     [[nodiscard]] const TrackOverlay* overlayById(const QString& trackId) const;
 
@@ -84,4 +91,6 @@ private:
     double m_displayScaleFactor = 1.0;
     int m_frameRevision = 0;
     QString m_frameSource;
+    bool m_nativePresentationEnabled = false;
+    bool m_nativePresentationActive = false;
 };

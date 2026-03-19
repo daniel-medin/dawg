@@ -7,6 +7,9 @@ Rectangle {
     id: root
     property real inactiveTitleOpacity: 0.56
     property real titleTextOpacity: windowChrome.active ? 1.0 : inactiveTitleOpacity
+    property color activeTitleColor: "#ffffff"
+    property color inactiveTitleColor: "#d3d9e2"
+    property color titleTextColor: windowChrome.active ? activeTitleColor : inactiveTitleColor
 
     color: theme.titleBarBackground
     border.width: 1
@@ -60,7 +63,7 @@ Rectangle {
         width: Math.max(120, root.width - 560)
         text: windowChrome.projectTitle
         visible: text.length > 0
-        color: theme.titleText
+        color: root.titleTextColor
         opacity: root.titleTextOpacity
         font.pixelSize: 14
         font.weight: Font.DemiBold
@@ -85,7 +88,7 @@ Rectangle {
 
         Label {
             text: windowChrome.appTitle
-            color: theme.titleText
+            color: root.titleTextColor
             opacity: root.titleTextOpacity
             font.pixelSize: 14
             font.weight: Font.DemiBold
@@ -119,7 +122,7 @@ Rectangle {
 
                     contentItem: Label {
                         text: menuButton.text
-                        color: theme.titleText
+                        color: root.titleTextColor
                         opacity: root.titleTextOpacity
                         font.pixelSize: 13
                         horizontalAlignment: Text.AlignHCenter

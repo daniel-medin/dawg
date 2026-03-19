@@ -40,11 +40,13 @@ bool VideoPlaybackService::open(const QString& filePath)
     auto decoder = createVideoDecoder();
     decoder->setCpuFrameExtractionEnabled(m_cpuFrameExtractionEnabled);
     decoder->setOutputScale(m_presentationScale);
+    decoder->setPreferredD3D11Device(m_preferredD3D11Device);
     if (!decoder->open(filePath.toStdString()))
     {
         decoder = std::make_unique<OpenCvVideoDecoder>();
         decoder->setCpuFrameExtractionEnabled(m_cpuFrameExtractionEnabled);
         decoder->setOutputScale(m_presentationScale);
+        decoder->setPreferredD3D11Device(m_preferredD3D11Device);
         if (!decoder->open(filePath.toStdString()))
         {
             return false;
@@ -208,6 +210,18 @@ double VideoPlaybackService::presentationScale() const
 {
     const std::lock_guard stateLock(m_stateMutex);
     return m_presentationScale;
+}
+
+void VideoPlaybackService::setPreferredD3D11Device(void* device)
+{
+    const std::lock_guard stateLock(m_stateMutex);
+    m_preferredD3D11Device = device;
+}
+
+void* VideoPlaybackService::preferredD3D11Device() const
+{
+    const std::lock_guard stateLock(m_stateMutex);
+    return m_preferredD3D11Device;
 }
 
 bool VideoPlaybackService::setCpuFrameExtractionEnabled(const bool enabled)

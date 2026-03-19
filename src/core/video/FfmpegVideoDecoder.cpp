@@ -21,6 +21,7 @@
 #endif
 #include <Windows.h>
 #include <d3d11.h>
+#include <d3d11_4.h>
 #endif
 
 #if DAWG_HAS_FFMPEG
@@ -34,6 +35,7 @@ extern "C"
 #include <libavutil/display.h>
 #include <libavutil/error.h>
 #include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_d3d11va.h>
 #include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
 }
@@ -165,6 +167,65 @@ enum AVPixelFormat selectHardwarePixelFormat(AVCodecContext* codecContext, const
 
     return pixelFormats[0];
 }
+
+AVBufferRef* createD3D11HardwareDeviceContext(void* preferredDevice)
+{
+    if (!preferredDevice)
+    {
+        AVBufferRef* hardwareDeviceContext = nullptr;
+        if (av_hwdevice_ctx_create(
+                &hardwareDeviceContext,
+                AV_HWDEVICE_TYPE_D3D11VA,
+                nullptr,
+                nullptr,
+                0) == 0)
+        {
+            return hardwareDeviceContext;
+        }
+
+        return nullptr;
+    }
+
+    auto* device = static_cast<ID3D11Device*>(preferredDevice);
+    ID3D11DeviceContext* immediateContext = nullptr;
+    device->GetImmediateContext(&immediateContext);
+    if (immediateContext)
+    {
+        ID3D11Multithread* multithread = nullptr;
+        if (SUCCEEDED(immediateContext->QueryInterface(__uuidof(ID3D11Multithread), reinterpret_cast<void**>(&multithread)))
+            && multithread)
+        {
+            multithread->SetMultithreadProtected(TRUE);
+            multithread->Release();
+        }
+        immediateContext->Release();
+    }
+
+    AVBufferRef* hardwareDeviceContext = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+    if (!hardwareDeviceContext)
+    {
+        return nullptr;
+    }
+
+    auto* deviceContext = reinterpret_cast<AVHWDeviceContext*>(hardwareDeviceContext->data);
+    auto* d3d11Context = static_cast<AVD3D11VADeviceContext*>(deviceContext->hwctx);
+    if (!d3d11Context)
+    {
+        av_buffer_unref(&hardwareDeviceContext);
+        return nullptr;
+    }
+
+    device->AddRef();
+    d3d11Context->device = device;
+    if (av_hwdevice_ctx_init(hardwareDeviceContext) < 0)
+    {
+        av_buffer_unref(&hardwareDeviceContext);
+        return nullptr;
+    }
+
+    return hardwareDeviceContext;
+}
+
 #endif
 }
 
@@ -194,6 +255,7 @@ struct FfmpegVideoDecoder::Impl
     int presentationRotationDegrees = 0;
     double outputScale = 1.0;
     bool cpuFrameExtractionEnabled = true;
+    void* preferredD3D11Device = nullptr;
 
     ~Impl()
     {
@@ -312,12 +374,8 @@ bool FfmpegVideoDecoder::open(const std::string& filePath)
         }
 
         m_impl->hardwarePixelFormat = hardwareConfig->pix_fmt;
-        if (av_hwdevice_ctx_create(
-                &m_impl->hardwareDeviceContext,
-                AV_HWDEVICE_TYPE_D3D11VA,
-                nullptr,
-                nullptr,
-                0) == 0)
+        m_impl->hardwareDeviceContext = createD3D11HardwareDeviceContext(m_impl->preferredD3D11Device);
+        if (m_impl->hardwareDeviceContext)
         {
             m_impl->hardwareDecodeEnabled = true;
             m_impl->activeBackendName = QStringLiteral("FFmpeg D3D11VA");
@@ -682,6 +740,16 @@ void FfmpegVideoDecoder::setOutputScale(const double scale)
 double FfmpegVideoDecoder::outputScale() const
 {
     return m_impl ? m_impl->outputScale : 1.0;
+}
+
+void FfmpegVideoDecoder::setPreferredD3D11Device(void* device)
+{
+    if (!m_impl)
+    {
+        return;
+    }
+
+    m_impl->preferredD3D11Device = device;
 }
 
 void FfmpegVideoDecoder::setCpuFrameExtractionEnabled(const bool enabled)

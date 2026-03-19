@@ -3,6 +3,12 @@ import QtQuick 2.15
 Item {
     id: root
     property bool handlesOnly: false
+    readonly property var handleModel: [
+        { key: "timeline", cursor: Qt.SizeVerCursor },
+        { key: "clipEditor", cursor: Qt.SizeVerCursor },
+        { key: "mix", cursor: Qt.SizeVerCursor },
+        { key: "audioPool", cursor: Qt.SizeHorCursor }
+    ]
 
     AppTheme {
         id: theme
@@ -14,6 +20,22 @@ Item {
 
     function rectVisible(mapValue) {
         return mapValue && mapValue.visible === true
+    }
+
+    function handleRectFor(key) {
+        if (key === "timeline") {
+            return shellLayoutController.timelineHandleRect
+        }
+        if (key === "clipEditor") {
+            return shellLayoutController.clipEditorHandleRect
+        }
+        if (key === "mix") {
+            return shellLayoutController.mixHandleRect
+        }
+        if (key === "audioPool") {
+            return shellLayoutController.audioPoolHandleRect
+        }
+        return null
     }
 
     onWidthChanged: shellLayoutController.setViewportSize(width, height)
@@ -87,21 +109,18 @@ Item {
     }
 
     Repeater {
-        model: [
-            { key: "timeline", rect: shellLayoutController.timelineHandleRect, cursor: Qt.SizeVerCursor },
-            { key: "clipEditor", rect: shellLayoutController.clipEditorHandleRect, cursor: Qt.SizeVerCursor },
-            { key: "mix", rect: shellLayoutController.mixHandleRect, cursor: Qt.SizeVerCursor },
-            { key: "audioPool", rect: shellLayoutController.audioPoolHandleRect, cursor: Qt.SizeHorCursor }
-        ]
+        model: root.handleModel
 
         Item {
             required property var modelData
 
-            x: rectValue(modelData.rect, "x")
-            y: rectValue(modelData.rect, "y")
-            width: rectValue(modelData.rect, "width")
-            height: rectValue(modelData.rect, "height")
-            visible: rectVisible(modelData.rect)
+            readonly property var handleRect: root.handleRectFor(modelData.key)
+
+            x: rectValue(handleRect, "x")
+            y: rectValue(handleRect, "y")
+            width: rectValue(handleRect, "width")
+            height: rectValue(handleRect, "height")
+            visible: rectVisible(handleRect)
 
             Rectangle {
                 anchors.fill: parent
@@ -113,17 +132,24 @@ Item {
 
                 anchors.fill: parent
                 hoverEnabled: true
+                preventStealing: true
                 cursorShape: modelData.cursor
                 acceptedButtons: Qt.LeftButton
 
+                function rootPoint(mouse) {
+                    return dragArea.mapToItem(root, mouse.x, mouse.y)
+                }
+
                 onPressed: function(mouse) {
-                    shellLayoutController.beginResize(modelData.key, mouse.x + parent.x, mouse.y + parent.y)
+                    var point = rootPoint(mouse)
+                    shellLayoutController.beginResize(modelData.key, point.x, point.y)
                     mouse.accepted = true
                 }
 
                 onPositionChanged: function(mouse) {
                     if (pressed) {
-                        shellLayoutController.updateResize(mouse.x + parent.x, mouse.y + parent.y)
+                        var point = rootPoint(mouse)
+                        shellLayoutController.updateResize(point.x, point.y)
                     }
                 }
 

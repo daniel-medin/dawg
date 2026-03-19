@@ -85,6 +85,8 @@ public:
     void setFastPlaybackEnabled(bool enabled);
     void setInsertionFollowsPlayback(bool enabled);
     void setMotionTrackingEnabled(bool enabled);
+    void setPreferredD3D11Device(void* device);
+    void setNativeVideoPresentationEnabled(bool enabled);
     void setLoopStartFrame(int frameIndex);
     void setLoopEndFrame(int frameIndex);
     void clearLoopRange();
