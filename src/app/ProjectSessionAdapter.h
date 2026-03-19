@@ -33,6 +33,7 @@ public:
         std::optional<int> loopEndFrame;
         float masterMixGainDb = 0.0F;
         bool masterMixMuted = false;
+        bool mixSoloXorMode = false;
         const std::unordered_map<int, float>& mixLaneGainDbByLane;
         const std::unordered_map<int, bool>& mixLaneMutedByLane;
         const std::unordered_map<int, bool>& mixLaneSoloByLane;
@@ -53,6 +54,7 @@ public:
         std::optional<int> loopEndFrame;
         float masterMixGainDb = 0.0F;
         bool masterMixMuted = false;
+        bool mixSoloXorMode = false;
         std::unordered_map<int, float> mixLaneGainDbByLane;
         std::unordered_map<int, bool> mixLaneMutedByLane;
         std::unordered_map<int, bool> mixLaneSoloByLane;

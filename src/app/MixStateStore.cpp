@@ -19,6 +19,7 @@ void MixStateStore::reset()
     m_gainByLane.clear();
     m_mutedByLane.clear();
     m_soloByLane.clear();
+    m_soloMode = SoloMode::Latch;
 }
 
 float MixStateStore::clampGainDb(const float gainDb)
@@ -108,6 +109,18 @@ bool MixStateStore::setLaneSoloed(const int laneIndex, const bool soloed)
     }
 
     const auto existingIt = m_soloByLane.find(laneIndex);
+    if (m_soloMode == SoloMode::Xor && soloed)
+    {
+        if (m_soloByLane.size() == 1 && existingIt != m_soloByLane.end() && existingIt->second)
+        {
+            return false;
+        }
+
+        m_soloByLane.clear();
+        m_soloByLane[laneIndex] = true;
+        return true;
+    }
+
     if (existingIt != m_soloByLane.end() && existingIt->second == soloed)
     {
         return false;
@@ -125,16 +138,41 @@ bool MixStateStore::setLaneSoloed(const int laneIndex, const bool soloed)
     return true;
 }
 
+bool MixStateStore::setSoloMode(const SoloMode soloMode)
+{
+    if (m_soloMode == soloMode)
+    {
+        return false;
+    }
+
+    m_soloMode = soloMode;
+    if (m_soloMode == SoloMode::Xor && m_soloByLane.size() > 1)
+    {
+        const auto keepLaneIndex = std::min_element(
+            m_soloByLane.cbegin(),
+            m_soloByLane.cend(),
+            [](const auto& left, const auto& right)
+            {
+                return left.first < right.first;
+            })->first;
+        m_soloByLane.clear();
+        m_soloByLane[keepLaneIndex] = true;
+    }
+    return true;
+}
+
 void MixStateStore::restore(
     const float masterGainDb,
     const bool masterMuted,
     const std::unordered_map<int, float>& gainByLane,
     const std::unordered_map<int, bool>& mutedByLane,
-    const std::unordered_map<int, bool>& soloByLane)
+    const std::unordered_map<int, bool>& soloByLane,
+    const SoloMode soloMode)
 {
     reset();
     m_masterGainDb = clampGainDb(masterGainDb);
     m_masterMuted = masterMuted;
+    m_soloMode = soloMode;
 
     for (const auto& [laneIndex, gainDb] : gainByLane)
     {
@@ -181,6 +219,11 @@ bool MixStateStore::isLaneSoloed(const int laneIndex) const
 {
     const auto soloIt = m_soloByLane.find(laneIndex);
     return soloIt != m_soloByLane.end() && soloIt->second;
+}
+
+MixStateStore::SoloMode MixStateStore::soloMode() const
+{
+    return m_soloMode;
 }
 
 const std::unordered_map<int, float>& MixStateStore::gainByLane() const

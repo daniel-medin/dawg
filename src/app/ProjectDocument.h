@@ -38,6 +38,7 @@ struct ControllerState
     std::optional<int> loopEndFrame;
     float masterMixGainDb = 0.0F;
     bool masterMixMuted = false;
+    bool mixSoloXorMode = false;
     std::vector<MixLaneState> mixLanes;
     std::vector<std::pair<QUuid, int>> clipEditorPlayheads;
 };

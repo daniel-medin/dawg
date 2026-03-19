@@ -95,6 +95,7 @@ public:
     void setMixLaneGainDb(int laneIndex, float gainDb);
     void setMixLaneMuted(int laneIndex, bool muted);
     void setMixLaneSoloed(int laneIndex, bool soloed);
+    void setMixSoloXorMode(bool enabled);
     [[nodiscard]] std::optional<float> mixLaneGainForTrack(const QUuid& trackId) const;
     bool setMixLaneGainForTrack(const QUuid& trackId, float gainDb);
     [[nodiscard]] std::optional<float> adjustMixLaneGainForTrack(const QUuid& trackId, float deltaDb);
@@ -142,6 +143,7 @@ public:
     [[nodiscard]] std::optional<int> loopEndFrame() const;
     [[nodiscard]] float masterMixGainDb() const;
     [[nodiscard]] bool masterMixMuted() const;
+    [[nodiscard]] bool isMixSoloXorMode() const;
     [[nodiscard]] float masterMixLevel() const;
     [[nodiscard]] AudioEngine::StereoLevels masterMixStereoLevels() const;
     [[nodiscard]] QSize videoFrameSize() const;
@@ -173,6 +175,7 @@ signals:
     void audioPoolChanged();
     void audioPoolPlaybackStateChanged();
     void editStateChanged();
+    void mixSoloModeChanged(bool xorMode);
     void statusChanged(const QString& message);
 
 private slots:

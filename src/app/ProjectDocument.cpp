@@ -320,6 +320,7 @@ QJsonObject controllerStateToJson(const ControllerState& state)
         {QStringLiteral("embeddedVideoAudioMuted"), state.embeddedVideoAudioMuted},
         {QStringLiteral("masterMixGainDb"), state.masterMixGainDb},
         {QStringLiteral("masterMixMuted"), state.masterMixMuted},
+        {QStringLiteral("mixSoloXorMode"), state.mixSoloXorMode},
         {QStringLiteral("mixLanes"), mixLanesToJson(state.mixLanes)},
         {QStringLiteral("clipEditorPlayheads"), clipPlayheadsToJson(state.clipEditorPlayheads)}
     };
@@ -356,6 +357,7 @@ ControllerState controllerStateFromJson(const QJsonObject& object)
     }
     state.masterMixGainDb = static_cast<float>(object.value(QStringLiteral("masterMixGainDb")).toDouble());
     state.masterMixMuted = object.value(QStringLiteral("masterMixMuted")).toBool(false);
+    state.mixSoloXorMode = object.value(QStringLiteral("mixSoloXorMode")).toBool(false);
     state.mixLanes = mixLanesFromJson(object.value(QStringLiteral("mixLanes")).toArray());
     state.clipEditorPlayheads = clipPlayheadsFromJson(object.value(QStringLiteral("clipEditorPlayheads")).toArray());
     return state;

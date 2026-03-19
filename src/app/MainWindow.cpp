@@ -119,6 +119,13 @@ void clearStuckWaitCursor(QWindow* window)
     }
 }
 
+QString mixSoloModeActionText(const bool xorMode)
+{
+    return xorMode
+        ? QStringLiteral("Solo Mode: X-OR")
+        : QStringLiteral("Solo Mode: Latch");
+}
+
 QUrl quickTitleBarUrl()
 {
     return QUrl(QStringLiteral("qrc:/qml/QuickTitleBar.qml"));
@@ -892,6 +899,19 @@ MainWindow::MainWindow(QWindow* parent)
                 ? QStringLiteral("Timeline click seek enabled.")
                 : QStringLiteral("Timeline click seek disabled. Use play or scrub to move."));
     });
+    connect(m_mixSoloModeAction, &QAction::triggered, this, [this]()
+    {
+        const auto nextXorMode = !m_controller->isMixSoloXorMode();
+        m_controller->setMixSoloXorMode(nextXorMode);
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+        showStatus(
+            nextXorMode
+                ? QStringLiteral("Mixer solo mode set to X-OR.")
+                : QStringLiteral("Mixer solo mode set to latch."));
+    });
     connect(m_audioPoolAction, &QAction::toggled, this, [this](const bool visible)
     {
         updateAudioPoolVisibility(visible);
@@ -919,6 +939,15 @@ MainWindow::MainWindow(QWindow* parent)
         &QAction::toggled,
         m_controller,
         &PlayerController::setInsertionFollowsPlayback);
+    connect(m_controller, &PlayerController::mixSoloModeChanged, this, [this](const bool xorMode)
+    {
+        if (m_mixSoloModeAction)
+        {
+            m_mixSoloModeAction->setText(mixSoloModeActionText(xorMode));
+        }
+        refreshMixView();
+        refreshTimeline();
+    });
     connect(m_goToStartAction, &QAction::triggered, m_controller, &PlayerController::goToStart);
     connect(m_playAction, &QAction::triggered, m_controller, &PlayerController::togglePlayback);
     connect(m_stepForwardAction, &QAction::triggered, m_controller, &PlayerController::stepForward);
@@ -1197,6 +1226,8 @@ MainWindow::MainWindow(QWindow* parent)
     });
     connect(m_mixQuickController, &MixQuickController::laneSoloChanged, this, [this](int, bool)
     {
+        refreshMixView();
+        refreshTimeline();
         if (!m_projectStateChangeInProgress && hasOpenProject())
         {
             setProjectDirty(true);
@@ -2128,6 +2159,10 @@ void MainWindow::updateInsertionFollowsPlaybackState(const bool enabled)
 void MainWindow::updatePlaybackState(const bool playing)
 {
     clearStuckWaitCursor(this);
+    if (m_mixQuickController)
+    {
+        m_mixQuickController->setPlaybackActive(playing);
+    }
     if (m_timelineQuickController)
     {
         m_timelineQuickController->setPlaybackActive(playing);
@@ -2989,6 +3024,10 @@ void MainWindow::buildUi()
     setIcon(QIcon(QStringLiteral(":/branding/dawg.png")));
 
     m_actionRegistry = new ActionRegistry(*this, this);
+    if (m_mixSoloModeAction)
+    {
+        m_mixSoloModeAction->setText(mixSoloModeActionText(m_controller->isMixSoloXorMode()));
+    }
     m_windowChromeController = new WindowChromeController(*this, this);
     m_playPauseShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
     m_startShortcut = new QShortcut(QKeySequence(Qt::Key_Return), this);

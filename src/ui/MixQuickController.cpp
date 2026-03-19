@@ -260,6 +260,16 @@ QObjectList MixQuickController::laneStrips() const
     return m_laneStrips;
 }
 
+bool MixQuickController::playbackActive() const
+{
+    return m_playbackActive;
+}
+
+int MixQuickController::meterResetToken() const
+{
+    return m_meterResetToken;
+}
+
 void MixQuickController::setMasterState(const float gainDb, const bool muted)
 {
     m_masterStrip->setGainDb(gainDb);
@@ -322,6 +332,24 @@ void MixQuickController::setLaneMeterLevels(const int laneIndex, const float lef
         strip->setMeterLeftLevel(leftLevel);
         strip->setMeterRightLevel(rightLevel);
         strip->setMeterLevel(std::max(leftLevel, rightLevel));
+    }
+}
+
+void MixQuickController::setPlaybackActive(const bool playbackActive)
+{
+    if (m_playbackActive == playbackActive)
+    {
+        return;
+    }
+
+    const auto restartingPlayback = playbackActive && !m_playbackActive;
+    m_playbackActive = playbackActive;
+    emit playbackActiveChanged();
+
+    if (restartingPlayback)
+    {
+        ++m_meterResetToken;
+        emit meterResetTokenChanged();
     }
 }
 

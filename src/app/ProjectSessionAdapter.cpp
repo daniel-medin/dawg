@@ -37,6 +37,7 @@ dawg::project::ControllerState ProjectSessionAdapter::snapshot(const SnapshotInp
     state.loopEndFrame = input.loopEndFrame;
     state.masterMixGainDb = input.masterMixGainDb;
     state.masterMixMuted = input.masterMixMuted;
+    state.mixSoloXorMode = input.mixSoloXorMode;
 
     std::vector<int> laneIndices;
     laneIndices.reserve(
@@ -150,6 +151,7 @@ ProjectSessionAdapter::RestorePayload ProjectSessionAdapter::buildRestorePayload
     payload.loopEndFrame = state.loopEndFrame;
     payload.masterMixGainDb = clampMixGainDb(state.masterMixGainDb);
     payload.masterMixMuted = state.masterMixMuted;
+    payload.mixSoloXorMode = state.mixSoloXorMode;
 
     for (const auto& lane : state.mixLanes)
     {

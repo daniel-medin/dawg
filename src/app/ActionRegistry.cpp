@@ -254,6 +254,9 @@ void ActionRegistry::rebuild()
     addAction(timelineMenu, QStringLiteral("timelineThumbnails"), m_window.m_showTimelineThumbnailsAction);
     addAction(timelineMenu, QStringLiteral("timelineClickSeeks"), m_window.m_timelineClickSeeksAction);
 
+    auto* mixerMenu = addMenu(QStringLiteral("Mixer"));
+    addAction(mixerMenu, QStringLiteral("soloMode"), m_window.m_mixSoloModeAction);
+
     auto* viewMenu = addMenu(QStringLiteral("View"));
     addAction(viewMenu, QStringLiteral("detachVideo"), m_window.m_detachVideoAction);
     addSeparator(viewMenu);

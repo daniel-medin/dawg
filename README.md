@@ -37,19 +37,23 @@ This is not intended to feel like a traditional DAW with lots of horizontal audi
 - open a video and play, seek, step, and scrub it
 - create, save, load, and reopen `.dawg` projects
 - keep imported project media inside project-local `audio/` and `video/` folders
+- restore project UI state, panel layout, and detached-video state with the project
 - create and select nodes in the viewer
 - show nodes as spans in the timeline
 - drag node starts, ends, and full spans in the timeline
 - attach audio to nodes and trim a node to the sound length
 - auto-pan nodes from left to right screen position
 - drag audio from the Audio Pool onto the video to create a node
+- import audio directly onto selected nodes
 - use an Audio Pool side panel for imported sounds
+- preview Audio Pool sounds with press-and-hold
 - show embedded video audio in the Audio Pool with mute/unmute
+- use the Quick mixer panel with mono/stereo lane meters, master stereo metering, and solo mode switching
 - use a floating debug window for runtime stats
 
 ## Tech Stack
 
-- `Qt 6 Quick` for the main application shell and interactive panels, with a small amount of `Qt 6 Widgets` still used for utility popups and native helper windows
+- `Qt 6 Quick` for the main application shell, panels, menus, overlays, and normal frontend interactions
 - `JUCE` for the audio backend and mixer/meter path
 - `FFmpeg` for the main video decode path
 - `OpenCV` for motion tracking and some fallback video utilities
@@ -75,9 +79,11 @@ The app layer is being split into smaller controllers and services instead of ke
 - `PlayerController` stays the public runtime facade
 - `VideoPlaybackCoordinator`, `AudioPlaybackCoordinator`, `TimelineLayoutService`, `TrackEditService`, `SelectionController`, `ClipEditorSession`, `MixStateStore`, `ProjectSessionAdapter`, and `NodeController` now hold most feature-specific logic
 
-Remaining widget usage is intentionally narrow: a few native helper/debug surfaces are still QWidget-based while the main shell runs through Qt Quick.
+Remaining widget usage is intentionally narrow: only a few native helper/debug surfaces are still QWidget-based while the normal shell and editing UI run through Qt Quick.
 
 Audio now runs through a single JUCE backend path. If JUCE device initialization fails, DAWG reports that directly instead of falling back to a reduced secondary backend.
+
+The attached viewport now uses a Qt Quick + D3D11 path on Windows, with the Qt Quick scene graph pinned to `Direct3D11`.
 
 Startup no longer depends on a debug-only local `.dev` bootstrap path. Project open/save/restore is now the intended startup flow.
 
@@ -153,7 +159,7 @@ are ignored, so they should not be committed or pushed.
 
 - tighten playback and scrub performance further
 - deepen the FFmpeg + GPU video path
-- tighten the remaining Quick-shell polish work and manual smoke coverage around menus, resizing, and panel interactions
+- keep refining mixer metering, solo workflow, and playback polish
 - extend node audio behavior beyond pan into richer spatial control
 - move toward depth-aware and z-aware sound behavior
 

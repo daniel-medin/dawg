@@ -106,18 +106,23 @@ class MixQuickController final : public QObject
     Q_OBJECT
     Q_PROPERTY(QObject* masterStrip READ masterStrip CONSTANT)
     Q_PROPERTY(QObjectList laneStrips READ laneStrips NOTIFY laneStripsChanged)
+    Q_PROPERTY(bool playbackActive READ playbackActive NOTIFY playbackActiveChanged)
+    Q_PROPERTY(int meterResetToken READ meterResetToken NOTIFY meterResetTokenChanged)
 
 public:
     explicit MixQuickController(QObject* parent = nullptr);
 
     [[nodiscard]] QObject* masterStrip() const;
     [[nodiscard]] QObjectList laneStrips() const;
+    [[nodiscard]] bool playbackActive() const;
+    [[nodiscard]] int meterResetToken() const;
 
     void setMasterState(float gainDb, bool muted);
     void setMasterMeterLevels(float leftLevel, float rightLevel);
     void setLaneStrips(const QVariantList& descriptors);
     void setLaneState(int laneIndex, float gainDb, bool muted, bool soloed);
     void setLaneMeterLevels(int laneIndex, float leftLevel, float rightLevel);
+    void setPlaybackActive(bool playbackActive);
 
     Q_INVOKABLE void setMasterGainDb(double gainDb);
     Q_INVOKABLE void setMasterMuted(bool muted);
@@ -127,6 +132,8 @@ public:
 
 signals:
     void laneStripsChanged();
+    void playbackActiveChanged();
+    void meterResetTokenChanged();
     void masterGainChanged(float gainDb);
     void masterMutedChanged(bool muted);
     void laneGainChanged(int laneIndex, float gainDb);
@@ -139,4 +146,6 @@ private:
     MixStripObject* m_masterStrip = nullptr;
     QObjectList m_laneStrips;
     std::unordered_map<int, MixStripObject*> m_laneStripsByIndex;
+    bool m_playbackActive = false;
+    int m_meterResetToken = 0;
 };

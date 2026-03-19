@@ -151,6 +151,7 @@ void PlayerController::resetProjectState()
     emit trackAvailabilityChanged(false);
     emit audioPoolChanged();
     emit editStateChanged();
+    emit mixSoloModeChanged(isMixSoloXorMode());
     emit motionTrackingChanged(false);
 }
 
@@ -177,6 +178,7 @@ bool PlayerController::openVideo(const QString& filePath)
     emit trackAvailabilityChanged(false);
     emit audioPoolChanged();
     emit editStateChanged();
+    emit mixSoloModeChanged(isMixSoloXorMode());
     emit statusChanged(
         QStringLiteral("Loaded %1 via %2 decode and %3 render.")
             .arg(filePath)
@@ -202,6 +204,7 @@ dawg::project::ControllerState PlayerController::snapshotProjectState() const
         .loopEndFrame = m_loopEndFrame,
         .masterMixGainDb = m_mixStateStore->masterGainDb(),
         .masterMixMuted = m_mixStateStore->masterMuted(),
+        .mixSoloXorMode = m_mixStateStore->soloMode() == MixStateStore::SoloMode::Xor,
         .mixLaneGainDbByLane = m_mixStateStore->gainByLane(),
         .mixLaneMutedByLane = m_mixStateStore->mutedByLane(),
         .mixLaneSoloByLane = m_mixStateStore->soloByLane(),
@@ -244,7 +247,8 @@ bool PlayerController::restoreProjectState(const dawg::project::ControllerState&
         payload.masterMixMuted,
         payload.mixLaneGainDbByLane,
         payload.mixLaneMutedByLane,
-        payload.mixLaneSoloByLane);
+        payload.mixLaneSoloByLane,
+        payload.mixSoloXorMode ? MixStateStore::SoloMode::Xor : MixStateStore::SoloMode::Latch);
     m_clipEditorSession->setPlayheads(payload.clipEditorPlayheads);
 
     m_motionTrackingEnabled = payload.motionTrackingEnabled;
@@ -287,6 +291,7 @@ bool PlayerController::restoreProjectState(const dawg::project::ControllerState&
     emit trackAvailabilityChanged(hasTracks());
     emit audioPoolChanged();
     emit editStateChanged();
+    emit mixSoloModeChanged(isMixSoloXorMode());
     emit motionTrackingChanged(m_motionTrackingEnabled);
     return true;
 }
@@ -565,6 +570,21 @@ void PlayerController::setMixLaneSoloed(const int laneIndex, const bool soloed)
     {
         applyLiveMixStateToCurrentPlayback();
     }
+}
+
+void PlayerController::setMixSoloXorMode(const bool enabled)
+{
+    if (!m_mixStateStore->setSoloMode(enabled ? MixStateStore::SoloMode::Xor : MixStateStore::SoloMode::Latch))
+    {
+        return;
+    }
+
+    if (m_transport.isPlaying())
+    {
+        applyLiveMixStateToCurrentPlayback();
+    }
+
+    emit mixSoloModeChanged(enabled);
 }
 
 std::optional<float> PlayerController::adjustMixLaneGainForTrack(const QUuid& trackId, const float deltaDb)
@@ -1079,6 +1099,11 @@ float PlayerController::masterMixGainDb() const
 bool PlayerController::masterMixMuted() const
 {
     return m_mixStateStore->masterMuted();
+}
+
+bool PlayerController::isMixSoloXorMode() const
+{
+    return m_mixStateStore->soloMode() == MixStateStore::SoloMode::Xor;
 }
 
 float PlayerController::masterMixLevel() const

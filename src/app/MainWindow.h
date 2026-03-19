@@ -302,6 +302,7 @@ private:
     QAction* m_showMixAction = nullptr;
     QAction* m_showTimelineThumbnailsAction = nullptr;
     QAction* m_timelineClickSeeksAction = nullptr;
+    QAction* m_mixSoloModeAction = nullptr;
     QAction* m_audioPoolAction = nullptr;
     QAction* m_deleteNodeAction = nullptr;
     QAction* m_clearAllAction = nullptr;

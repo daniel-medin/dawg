@@ -44,6 +44,8 @@ Rectangle {
                 muted: strip ? strip.muted : false
                 soloEnabled: strip ? strip.soloEnabled : false
                 soloed: strip ? strip.soloed : false
+                playbackActive: mixController.playbackActive
+                meterResetToken: mixController.meterResetToken
                 useStereoMeter: strip ? strip.useStereoMeter : true
                 meterLevel: strip ? strip.meterLevel : 0.0
                 meterLeftLevel: strip ? strip.meterLeftLevel : meterLevel
@@ -87,6 +89,8 @@ Rectangle {
                     muted: strip.muted
                     soloEnabled: strip.soloEnabled
                     soloed: strip.soloed
+                    playbackActive: mixController.playbackActive
+                    meterResetToken: mixController.meterResetToken
                     useStereoMeter: strip.useStereoMeter
                     meterLevel: strip.meterLevel
                     meterLeftLevel: strip.meterLeftLevel

@@ -261,9 +261,6 @@ public:
 
     void reset()
     {
-        m_smoothedMeanSquare = 0.0F;
-        m_smoothedLeftMeanSquare = 0.0F;
-        m_smoothedRightMeanSquare = 0.0F;
         m_level.store(0.0F);
         m_leftLevel.store(0.0F);
         m_rightLevel.store(0.0F);
@@ -272,7 +269,6 @@ public:
     void prepareToPlay(const int samplesPerBlockExpected, const double sampleRate) override
     {
         m_inputSource.prepareToPlay(samplesPerBlockExpected, sampleRate);
-        m_sampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
         reset();
     }
 
@@ -295,45 +291,27 @@ public:
             return;
         }
 
-        auto accumulateMeanSquare = [&](const int channelIndex) -> float
+        auto accumulatePeak = [&](const int channelIndex) -> float
         {
             if (channelIndex < 0 || channelIndex >= buffer->getNumChannels())
             {
                 return 0.0F;
             }
 
-            double sumSquares = 0.0;
+            float peak = 0.0F;
             const auto* channelData = buffer->getReadPointer(channelIndex, bufferToFill.startSample);
             for (int sampleIndex = 0; sampleIndex < bufferToFill.numSamples; ++sampleIndex)
             {
-                const auto sample = static_cast<double>(channelData[sampleIndex]);
-                sumSquares += sample * sample;
+                peak = std::max(peak, std::abs(channelData[sampleIndex]));
             }
-            return static_cast<float>(sumSquares / static_cast<double>(bufferToFill.numSamples));
+            return std::clamp(peak, 0.0F, 1.0F);
         };
 
-        auto smoothMeter = [&](const float meanSquare, float& smoothedMeanSquare) -> float
-        {
-            const auto targetIsRising = meanSquare > smoothedMeanSquare;
-            const auto smoothingSeconds = targetIsRising ? 0.035 : 0.180;
-            const auto coefficient = static_cast<float>(std::exp(
-                -static_cast<double>(bufferToFill.numSamples) / (m_sampleRate * smoothingSeconds)));
-            smoothedMeanSquare = (smoothedMeanSquare * coefficient) + (meanSquare * (1.0F - coefficient));
-            return std::clamp(std::sqrt(smoothedMeanSquare), 0.0F, 1.0F);
-        };
-
-        const auto leftMeanSquare = accumulateMeanSquare(0);
-        const auto rightMeanSquare = accumulateMeanSquare(buffer->getNumChannels() > 1 ? 1 : 0);
-        const auto leftLevel = smoothMeter(leftMeanSquare, m_smoothedLeftMeanSquare);
-        const auto rightLevel = smoothMeter(rightMeanSquare, m_smoothedRightMeanSquare);
+        const auto leftLevel = accumulatePeak(0);
+        const auto rightLevel = accumulatePeak(buffer->getNumChannels() > 1 ? 1 : 0);
         m_leftLevel.store(leftLevel);
         m_rightLevel.store(rightLevel);
-
-        const auto overallMeanSquare = buffer->getNumChannels() > 1
-            ? 0.5F * (leftMeanSquare + rightMeanSquare)
-            : leftMeanSquare;
-        const auto overallLevel = smoothMeter(overallMeanSquare, m_smoothedMeanSquare);
-        m_level.store(std::max(overallLevel, std::max(leftLevel, rightLevel)));
+        m_level.store(std::max(leftLevel, rightLevel));
     }
 
 private:
@@ -341,10 +319,6 @@ private:
     std::atomic<float> m_level{0.0F};
     std::atomic<float> m_leftLevel{0.0F};
     std::atomic<float> m_rightLevel{0.0F};
-    double m_sampleRate = 44100.0;
-    float m_smoothedMeanSquare = 0.0F;
-    float m_smoothedLeftMeanSquare = 0.0F;
-    float m_smoothedRightMeanSquare = 0.0F;
 };
 }
 

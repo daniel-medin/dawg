@@ -7,6 +7,12 @@ class AudioEngine;
 class MixStateStore
 {
 public:
+    enum class SoloMode
+    {
+        Latch,
+        Xor
+    };
+
     void reset();
 
     [[nodiscard]] static float clampGainDb(float gainDb);
@@ -16,13 +22,15 @@ public:
     [[nodiscard]] bool setLaneGainDb(int laneIndex, float gainDb);
     [[nodiscard]] bool setLaneMuted(int laneIndex, bool muted);
     [[nodiscard]] bool setLaneSoloed(int laneIndex, bool soloed);
+    [[nodiscard]] bool setSoloMode(SoloMode soloMode);
 
     void restore(
         float masterGainDb,
         bool masterMuted,
         const std::unordered_map<int, float>& gainByLane,
         const std::unordered_map<int, bool>& mutedByLane,
-        const std::unordered_map<int, bool>& soloByLane);
+        const std::unordered_map<int, bool>& soloByLane,
+        SoloMode soloMode = SoloMode::Latch);
 
     void applyMasterGain(AudioEngine& audioEngine) const;
 
@@ -31,6 +39,7 @@ public:
     [[nodiscard]] float laneGainDb(int laneIndex) const;
     [[nodiscard]] bool isLaneMuted(int laneIndex) const;
     [[nodiscard]] bool isLaneSoloed(int laneIndex) const;
+    [[nodiscard]] SoloMode soloMode() const;
 
     [[nodiscard]] const std::unordered_map<int, float>& gainByLane() const;
     [[nodiscard]] const std::unordered_map<int, bool>& mutedByLane() const;
@@ -42,4 +51,5 @@ private:
     std::unordered_map<int, float> m_gainByLane;
     std::unordered_map<int, bool> m_mutedByLane;
     std::unordered_map<int, bool> m_soloByLane;
+    SoloMode m_soloMode = SoloMode::Latch;
 };
