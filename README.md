@@ -50,7 +50,7 @@ This is not intended to feel like a traditional DAW with lots of horizontal audi
 ## Tech Stack
 
 - `Qt 6 Quick` for the main application shell and interactive panels, with a small amount of `Qt 6 Widgets` still used for utility popups and native helper windows
-- `JUCE` for the audio backend
+- `JUCE` for the audio backend and mixer/meter path
 - `FFmpeg` for the main video decode path
 - `OpenCV` for motion tracking and some fallback video utilities
 - `Direct3D 11` for the Windows Qt Quick scene graph and native render path
@@ -76,6 +76,8 @@ The app layer is being split into smaller controllers and services instead of ke
 - `VideoPlaybackCoordinator`, `AudioPlaybackCoordinator`, `TimelineLayoutService`, `TrackEditService`, `SelectionController`, `ClipEditorSession`, `MixStateStore`, `ProjectSessionAdapter`, and `NodeController` now hold most feature-specific logic
 
 Remaining widget usage is intentionally narrow: a few native helper/debug surfaces are still QWidget-based while the main shell runs through Qt Quick.
+
+Audio now runs through a single JUCE backend path. If JUCE device initialization fails, DAWG reports that directly instead of falling back to a reduced secondary backend.
 
 Startup no longer depends on a debug-only local `.dev` bootstrap path. Project open/save/restore is now the intended startup flow.
 

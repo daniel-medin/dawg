@@ -251,10 +251,22 @@ public:
         return m_level.load();
     }
 
+    [[nodiscard]] AudioEngine::StereoLevels stereoLevels() const
+    {
+        return AudioEngine::StereoLevels{
+            .left = m_leftLevel.load(),
+            .right = m_rightLevel.load()
+        };
+    }
+
     void reset()
     {
         m_smoothedMeanSquare = 0.0F;
+        m_smoothedLeftMeanSquare = 0.0F;
+        m_smoothedRightMeanSquare = 0.0F;
         m_level.store(0.0F);
+        m_leftLevel.store(0.0F);
+        m_rightLevel.store(0.0F);
     }
 
     void prepareToPlay(const int samplesPerBlockExpected, const double sampleRate) override
@@ -278,35 +290,61 @@ public:
         if (!buffer || bufferToFill.numSamples <= 0 || buffer->getNumChannels() <= 0)
         {
             m_level.store(0.0F);
+            m_leftLevel.store(0.0F);
+            m_rightLevel.store(0.0F);
             return;
         }
 
-        double sumSquares = 0.0;
-        for (int channel = 0; channel < buffer->getNumChannels(); ++channel)
+        auto accumulateMeanSquare = [&](const int channelIndex) -> float
         {
-            const auto* channelData = buffer->getReadPointer(channel, bufferToFill.startSample);
+            if (channelIndex < 0 || channelIndex >= buffer->getNumChannels())
+            {
+                return 0.0F;
+            }
+
+            double sumSquares = 0.0;
+            const auto* channelData = buffer->getReadPointer(channelIndex, bufferToFill.startSample);
             for (int sampleIndex = 0; sampleIndex < bufferToFill.numSamples; ++sampleIndex)
             {
                 const auto sample = static_cast<double>(channelData[sampleIndex]);
                 sumSquares += sample * sample;
             }
-        }
+            return static_cast<float>(sumSquares / static_cast<double>(bufferToFill.numSamples));
+        };
 
-        const auto sampleCount = static_cast<double>(buffer->getNumChannels() * bufferToFill.numSamples);
-        const auto meanSquare = sampleCount > 0.0 ? static_cast<float>(sumSquares / sampleCount) : 0.0F;
-        const auto targetIsRising = meanSquare > m_smoothedMeanSquare;
-        const auto smoothingSeconds = targetIsRising ? 0.035 : 0.180;
-        const auto coefficient = static_cast<float>(std::exp(
-            -static_cast<double>(bufferToFill.numSamples) / (m_sampleRate * smoothingSeconds)));
-        m_smoothedMeanSquare = (m_smoothedMeanSquare * coefficient) + (meanSquare * (1.0F - coefficient));
-        m_level.store(std::clamp(std::sqrt(m_smoothedMeanSquare), 0.0F, 1.0F));
+        auto smoothMeter = [&](const float meanSquare, float& smoothedMeanSquare) -> float
+        {
+            const auto targetIsRising = meanSquare > smoothedMeanSquare;
+            const auto smoothingSeconds = targetIsRising ? 0.035 : 0.180;
+            const auto coefficient = static_cast<float>(std::exp(
+                -static_cast<double>(bufferToFill.numSamples) / (m_sampleRate * smoothingSeconds)));
+            smoothedMeanSquare = (smoothedMeanSquare * coefficient) + (meanSquare * (1.0F - coefficient));
+            return std::clamp(std::sqrt(smoothedMeanSquare), 0.0F, 1.0F);
+        };
+
+        const auto leftMeanSquare = accumulateMeanSquare(0);
+        const auto rightMeanSquare = accumulateMeanSquare(buffer->getNumChannels() > 1 ? 1 : 0);
+        const auto leftLevel = smoothMeter(leftMeanSquare, m_smoothedLeftMeanSquare);
+        const auto rightLevel = smoothMeter(rightMeanSquare, m_smoothedRightMeanSquare);
+        m_leftLevel.store(leftLevel);
+        m_rightLevel.store(rightLevel);
+
+        const auto overallMeanSquare = buffer->getNumChannels() > 1
+            ? 0.5F * (leftMeanSquare + rightMeanSquare)
+            : leftMeanSquare;
+        const auto overallLevel = smoothMeter(overallMeanSquare, m_smoothedMeanSquare);
+        m_level.store(std::max(overallLevel, std::max(leftLevel, rightLevel)));
     }
 
 private:
     juce::AudioSource& m_inputSource;
     std::atomic<float> m_level{0.0F};
+    std::atomic<float> m_leftLevel{0.0F};
+    std::atomic<float> m_rightLevel{0.0F};
     double m_sampleRate = 44100.0;
     float m_smoothedMeanSquare = 0.0F;
+    float m_smoothedLeftMeanSquare = 0.0F;
+    float m_smoothedRightMeanSquare = 0.0F;
 };
 }
 
@@ -343,7 +381,8 @@ JuceAudioEngine::JuceAudioEngine(QObject* parent)
     const auto initError = m_impl->deviceManager.initialise(0, 2, nullptr, true);
     if (!initError.isEmpty())
     {
-        emit statusChanged(QStringLiteral("JUCE audio init failed: %1").arg(QString::fromStdString(initError.toStdString())));
+        m_initializationError =
+            QStringLiteral("JUCE audio init failed: %1").arg(QString::fromStdString(initError.toStdString()));
         return;
     }
 
@@ -367,6 +406,11 @@ JuceAudioEngine::~JuceAudioEngine()
 bool JuceAudioEngine::isReady() const
 {
     return m_impl && m_impl->ready;
+}
+
+QString JuceAudioEngine::initializationError() const
+{
+    return m_initializationError;
 }
 
 bool JuceAudioEngine::playTrack(const QUuid& trackId, const QString& filePath, const int offsetMs)
@@ -599,6 +643,22 @@ float JuceAudioEngine::trackLevel(const QUuid& trackId) const
     return activeIt->second->meterSource->level();
 }
 
+AudioEngine::StereoLevels JuceAudioEngine::trackStereoLevels(const QUuid& trackId) const
+{
+    if (!m_impl)
+    {
+        return {};
+    }
+
+    const auto activeIt = m_impl->activeTracks.find(trackId);
+    if (activeIt == m_impl->activeTracks.end() || !activeIt->second->meterSource)
+    {
+        return {};
+    }
+
+    return activeIt->second->meterSource->stereoLevels();
+}
+
 float JuceAudioEngine::masterLevel() const
 {
     if (!m_impl || !m_impl->masterMeterSource)
@@ -607,6 +667,32 @@ float JuceAudioEngine::masterLevel() const
     }
 
     return m_impl->masterMeterSource->level();
+}
+
+AudioEngine::StereoLevels JuceAudioEngine::masterStereoLevels() const
+{
+    if (!m_impl || !m_impl->masterMeterSource)
+    {
+        return {};
+    }
+
+    return m_impl->masterMeterSource->stereoLevels();
+}
+
+std::optional<int> JuceAudioEngine::channelCount(const QString& filePath) const
+{
+    if (!m_impl)
+    {
+        return std::nullopt;
+    }
+
+    auto reader = std::unique_ptr<juce::AudioFormatReader>(m_impl->formatManager.createReaderFor(toJuceFile(filePath)));
+    if (!reader)
+    {
+        return std::nullopt;
+    }
+
+    return std::max(1, static_cast<int>(reader->numChannels));
 }
 
 std::optional<int> JuceAudioEngine::durationMs(const QString& filePath) const

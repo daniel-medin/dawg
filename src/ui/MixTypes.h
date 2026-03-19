@@ -12,9 +12,12 @@ struct MixLaneStrip
     QColor color;
     float gainDb = 0.0F;
     float meterLevel = 0.0F;
+    float meterLeftLevel = 0.0F;
+    float meterRightLevel = 0.0F;
     int clipCount = 0;
     bool muted = false;
     bool soloed = false;
+    bool useStereoMeter = false;
 
     [[nodiscard]] bool operator==(const MixLaneStrip& other) const
     {
@@ -24,6 +27,7 @@ struct MixLaneStrip
             && gainDb == other.gainDb
             && clipCount == other.clipCount
             && muted == other.muted
-            && soloed == other.soloed;
+            && soloed == other.soloed
+            && useStereoMeter == other.useStereoMeter;
     }
 };

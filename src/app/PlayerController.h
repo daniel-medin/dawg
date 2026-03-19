@@ -143,6 +143,7 @@ public:
     [[nodiscard]] float masterMixGainDb() const;
     [[nodiscard]] bool masterMixMuted() const;
     [[nodiscard]] float masterMixLevel() const;
+    [[nodiscard]] AudioEngine::StereoLevels masterMixStereoLevels() const;
     [[nodiscard]] QSize videoFrameSize() const;
     [[nodiscard]] QString trackLabel(const QUuid& trackId) const;
     [[nodiscard]] bool trackHasAttachedAudio(const QUuid& trackId) const;
@@ -186,6 +187,7 @@ private:
     [[nodiscard]] double frameTimestampSeconds(int frameIndex) const;
     [[nodiscard]] std::optional<int> trimmedEndFrameForTrack(const TrackPoint& track) const;
     [[nodiscard]] std::optional<int> audioDurationMs(const QString& filePath) const;
+    [[nodiscard]] std::optional<int> audioChannelCount(const QString& filePath) const;
     void saveUndoState();
     void restoreTrackEditState(const MotionTrackerState& trackerState, const std::vector<QUuid>& selectedTrackIds);
     void clearProjectStateAfterMediaStop(bool resetVideoPlaybackState = true);
@@ -224,4 +226,5 @@ private:
     const QUuid m_embeddedVideoAudioTrackId = QUuid(QStringLiteral("{eb6fc60f-0781-433f-9f03-ff16531165f7}"));
     QTimer m_clipEditorPreviewStopTimer;
     mutable QHash<QString, std::optional<int>> m_audioDurationMsByPath;
+    mutable QHash<QString, std::optional<int>> m_audioChannelCountByPath;
 };

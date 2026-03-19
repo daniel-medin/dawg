@@ -146,6 +146,7 @@ std::vector<MixLaneStrip> TimelineLayoutService::mixLaneStrips(
     const std::vector<TimelineTrackSpan>& spans,
     const std::vector<TrackPoint>& tracks,
     const AudioEngine& audioEngine,
+    const std::function<std::optional<int>(const QString&)>& channelCountForPath,
     const std::unordered_map<int, float>& gainByLane,
     const std::unordered_map<int, bool>& mutedByLane,
     const std::unordered_map<int, bool>& soloByLane)
@@ -170,9 +171,12 @@ std::vector<MixLaneStrip> TimelineLayoutService::mixLaneStrips(
                 .color = span.color,
                 .gainDb = laneGainDb(gainByLane, span.laneIndex),
                 .meterLevel = 0.0F,
+                .meterLeftLevel = 0.0F,
+                .meterRightLevel = 0.0F,
                 .clipCount = 1,
                 .muted = laneMuted(mutedByLane, span.laneIndex),
-                .soloed = laneSoloed(soloByLane, span.laneIndex)
+                .soloed = laneSoloed(soloByLane, span.laneIndex),
+                .useStereoMeter = false
             });
             continue;
         }
@@ -183,6 +187,9 @@ std::vector<MixLaneStrip> TimelineLayoutService::mixLaneStrips(
     for (auto& strip : strips)
     {
         float laneLevel = 0.0F;
+        float laneLeftLevel = 0.0F;
+        float laneRightLevel = 0.0F;
+        bool useStereoMeter = false;
         for (const auto& track : tracks)
         {
             const auto spanIt = std::find_if(
@@ -203,10 +210,21 @@ std::vector<MixLaneStrip> TimelineLayoutService::mixLaneStrips(
             }
 
             strip.color = track.color;
-            laneLevel = std::max(laneLevel, audioEngine.trackLevel(track.id));
+            const auto stereoLevels = audioEngine.trackStereoLevels(track.id);
+            laneLeftLevel = std::max(laneLeftLevel, stereoLevels.left);
+            laneRightLevel = std::max(laneRightLevel, stereoLevels.right);
+            laneLevel = std::max(laneLevel, std::max(stereoLevels.left, stereoLevels.right));
+            if (!useStereoMeter && channelCountForPath)
+            {
+                const auto channelCount = channelCountForPath(track.attachedAudio->assetPath);
+                useStereoMeter = channelCount.has_value() && *channelCount > 1;
+            }
         }
 
         strip.meterLevel = laneLevel;
+        strip.meterLeftLevel = laneLeftLevel;
+        strip.meterRightLevel = laneRightLevel;
+        strip.useStereoMeter = useStereoMeter;
     }
 
     return strips;

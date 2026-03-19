@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <unordered_map>
 #include <vector>
 
@@ -23,6 +24,7 @@ public:
         const std::vector<TimelineTrackSpan>& spans,
         const std::vector<TrackPoint>& tracks,
         const AudioEngine& audioEngine,
+        const std::function<std::optional<int>(const QString&)>& channelCountForPath,
         const std::unordered_map<int, float>& gainByLane,
         const std::unordered_map<int, bool>& mutedByLane,
         const std::unordered_map<int, bool>& soloByLane);

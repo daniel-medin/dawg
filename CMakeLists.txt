@@ -87,8 +87,6 @@ add_executable(dawg WIN32
     src/core/audio/AudioEngine.h
     src/core/audio/JuceAudioEngine.cpp
     src/core/audio/JuceAudioEngine.h
-    src/core/audio/MciAudioEngine.cpp
-    src/core/audio/MciAudioEngine.h
     src/core/audio/VideoAudioExtractor.cpp
     src/core/audio/VideoAudioExtractor.h
     src/core/tracking/MotionTracker.cpp

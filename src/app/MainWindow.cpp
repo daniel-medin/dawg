@@ -2629,10 +2629,11 @@ void MainWindow::refreshMixView()
             syncMixStripStates();
         }
 
-        m_mixQuickController->setMasterMeterLevel(m_controller->masterMixLevel());
+        const auto masterStereoLevels = m_controller->masterMixStereoLevels();
+        m_mixQuickController->setMasterMeterLevels(masterStereoLevels.left, masterStereoLevels.right);
         for (const auto& strip : laneStrips)
         {
-            m_mixQuickController->setLaneMeterLevel(strip.laneIndex, strip.meterLevel);
+            m_mixQuickController->setLaneMeterLevels(strip.laneIndex, strip.meterLeftLevel, strip.meterRightLevel);
         }
     }
 }
@@ -2651,7 +2652,8 @@ bool MainWindow::needsMixRebuild(const std::vector<MixLaneStrip>& laneStrips) co
         if (nextStrip.laneIndex != currentStrip.laneIndex
             || nextStrip.label != currentStrip.label
             || nextStrip.color != currentStrip.color
-            || nextStrip.clipCount != currentStrip.clipCount)
+            || nextStrip.clipCount != currentStrip.clipCount
+            || nextStrip.useStereoMeter != currentStrip.useStereoMeter)
         {
             return true;
         }
@@ -2698,9 +2700,12 @@ void MainWindow::rebuildMixStrips()
         descriptor.insert(QStringLiteral("accentColor"), strip.color);
         descriptor.insert(QStringLiteral("gainDb"), strip.gainDb);
         descriptor.insert(QStringLiteral("meterLevel"), strip.meterLevel);
+        descriptor.insert(QStringLiteral("meterLeftLevel"), strip.meterLeftLevel);
+        descriptor.insert(QStringLiteral("meterRightLevel"), strip.meterRightLevel);
         descriptor.insert(QStringLiteral("muted"), strip.muted);
         descriptor.insert(QStringLiteral("soloEnabled"), true);
         descriptor.insert(QStringLiteral("soloed"), strip.soloed);
+        descriptor.insert(QStringLiteral("useStereoMeter"), strip.useStereoMeter);
         descriptors.push_back(descriptor);
     }
 

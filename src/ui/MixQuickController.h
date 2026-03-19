@@ -18,7 +18,10 @@ class MixStripObject final : public QObject
     Q_PROPERTY(bool muted READ muted NOTIFY mutedChanged)
     Q_PROPERTY(bool soloEnabled READ soloEnabled NOTIFY soloEnabledChanged)
     Q_PROPERTY(bool soloed READ soloed NOTIFY soloedChanged)
+    Q_PROPERTY(bool useStereoMeter READ useStereoMeter NOTIFY useStereoMeterChanged)
     Q_PROPERTY(float meterLevel READ meterLevel NOTIFY meterLevelChanged)
+    Q_PROPERTY(float meterLeftLevel READ meterLeftLevel NOTIFY meterLeftLevelChanged)
+    Q_PROPERTY(float meterRightLevel READ meterRightLevel NOTIFY meterRightLevelChanged)
 
 public:
     explicit MixStripObject(QObject* parent = nullptr);
@@ -53,8 +56,17 @@ public:
     [[nodiscard]] bool soloed() const;
     void setSoloed(bool soloed);
 
+    [[nodiscard]] bool useStereoMeter() const;
+    void setUseStereoMeter(bool useStereoMeter);
+
     [[nodiscard]] float meterLevel() const;
     void setMeterLevel(float meterLevel);
+
+    [[nodiscard]] float meterLeftLevel() const;
+    void setMeterLeftLevel(float meterLeftLevel);
+
+    [[nodiscard]] float meterRightLevel() const;
+    void setMeterRightLevel(float meterRightLevel);
 
 signals:
     void laneIndexChanged();
@@ -67,7 +79,10 @@ signals:
     void mutedChanged();
     void soloEnabledChanged();
     void soloedChanged();
+    void useStereoMeterChanged();
     void meterLevelChanged();
+    void meterLeftLevelChanged();
+    void meterRightLevelChanged();
 
 private:
     int m_laneIndex = -1;
@@ -80,7 +95,10 @@ private:
     bool m_muted = false;
     bool m_soloEnabled = false;
     bool m_soloed = false;
+    bool m_useStereoMeter = false;
     float m_meterLevel = 0.0F;
+    float m_meterLeftLevel = 0.0F;
+    float m_meterRightLevel = 0.0F;
 };
 
 class MixQuickController final : public QObject
@@ -96,10 +114,10 @@ public:
     [[nodiscard]] QObjectList laneStrips() const;
 
     void setMasterState(float gainDb, bool muted);
-    void setMasterMeterLevel(float meterLevel);
+    void setMasterMeterLevels(float leftLevel, float rightLevel);
     void setLaneStrips(const QVariantList& descriptors);
     void setLaneState(int laneIndex, float gainDb, bool muted, bool soloed);
-    void setLaneMeterLevel(int laneIndex, float meterLevel);
+    void setLaneMeterLevels(int laneIndex, float leftLevel, float rightLevel);
 
     Q_INVOKABLE void setMasterGainDb(double gainDb);
     Q_INVOKABLE void setMasterMuted(bool muted);

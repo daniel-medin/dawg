@@ -12,7 +12,10 @@ Rectangle {
     property bool muted: false
     property bool soloEnabled: false
     property bool soloed: false
+    property bool useStereoMeter: masterStrip
     property real meterLevel: 0.0
+    property real meterLeftLevel: meterLevel
+    property real meterRightLevel: meterLevel
 
     signal gainDragged(real gainDb)
     signal muteToggled(bool muted)
@@ -283,22 +286,22 @@ Rectangle {
 
                 Item {
                     id: meterRack
-                    width: root.masterStrip ? 20 : 12
+                    width: root.useStereoMeter ? 20 : 12
                     height: parent.height
 
                     Row {
                         anchors.fill: parent
-                        spacing: root.masterStrip ? 2 : 0
+                        spacing: root.useStereoMeter ? 2 : 0
 
                         Repeater {
-                            model: root.masterStrip ? 2 : 1
+                            model: root.useStereoMeter ? 2 : 1
 
                             Rectangle {
-                                width: root.masterStrip ? 9 : meterRack.width
+                                width: root.useStereoMeter ? 9 : meterRack.width
                                 height: meterRack.height
                                 radius: 4
                                 color: "#0b1016"
-                                border.width: root.masterStrip ? 0 : 1
+                                border.width: root.useStereoMeter ? 0 : 1
                                 border.color: "#1d2733"
                                 clip: true
 
@@ -306,7 +309,10 @@ Rectangle {
                                     anchors.left: parent.left
                                     anchors.right: parent.right
                                     anchors.bottom: parent.bottom
-                                    height: root.meterNormalized(root.meterLevel) * parent.height
+                                    height: root.meterNormalized(
+                                        root.useStereoMeter
+                                            ? (index === 0 ? root.meterLeftLevel : root.meterRightLevel)
+                                            : root.meterLevel) * parent.height
                                     radius: 3
                                     gradient: Gradient {
                                         GradientStop { position: 0.0; color: "#ff5b4d" }

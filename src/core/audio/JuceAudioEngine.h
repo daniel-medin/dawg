@@ -16,7 +16,8 @@ public:
     explicit JuceAudioEngine(QObject* parent = nullptr);
     ~JuceAudioEngine() override;
 
-    [[nodiscard]] bool isReady() const;
+    [[nodiscard]] bool isReady() const override;
+    [[nodiscard]] QString initializationError() const override;
 
     bool playTrack(const QUuid& trackId, const QString& filePath, int offsetMs = 0) override;
     bool playTrack(const QUuid& trackId, const QString& filePath, const TrackPlaybackOptions& options) override;
@@ -27,11 +28,15 @@ public:
     void stopAll() override;
     [[nodiscard]] bool isTrackPlaying(const QUuid& trackId) const override;
     [[nodiscard]] float trackLevel(const QUuid& trackId) const override;
+    [[nodiscard]] StereoLevels trackStereoLevels(const QUuid& trackId) const override;
     [[nodiscard]] float masterLevel() const override;
+    [[nodiscard]] StereoLevels masterStereoLevels() const override;
+    [[nodiscard]] std::optional<int> channelCount(const QString& filePath) const override;
     [[nodiscard]] std::optional<int> durationMs(const QString& filePath) const override;
 
 private:
     struct Impl;
 
     std::unique_ptr<Impl> m_impl;
+    QString m_initializationError;
 };

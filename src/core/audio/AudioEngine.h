@@ -12,6 +12,12 @@ class AudioEngine : public QObject
     Q_OBJECT
 
 public:
+    struct StereoLevels
+    {
+        float left = 0.0F;
+        float right = 0.0F;
+    };
+
     struct TrackPlaybackOptions
     {
         int offsetMs = 0;
@@ -25,6 +31,8 @@ public:
 
     [[nodiscard]] static std::unique_ptr<AudioEngine> create(QObject* parent = nullptr);
 
+    [[nodiscard]] virtual bool isReady() const = 0;
+    [[nodiscard]] virtual QString initializationError() const = 0;
     virtual bool playTrack(const QUuid& trackId, const QString& filePath, int offsetMs = 0) = 0;
     virtual bool playTrack(const QUuid& trackId, const QString& filePath, const TrackPlaybackOptions& options)
     {
@@ -37,7 +45,10 @@ public:
     virtual void stopAll() = 0;
     [[nodiscard]] virtual bool isTrackPlaying(const QUuid& trackId) const = 0;
     [[nodiscard]] virtual float trackLevel(const QUuid& trackId) const = 0;
+    [[nodiscard]] virtual StereoLevels trackStereoLevels(const QUuid& trackId) const = 0;
     [[nodiscard]] virtual float masterLevel() const = 0;
+    [[nodiscard]] virtual StereoLevels masterStereoLevels() const = 0;
+    [[nodiscard]] virtual std::optional<int> channelCount(const QString& filePath) const = 0;
     [[nodiscard]] virtual std::optional<int> durationMs(const QString& filePath) const = 0;
 
 signals:

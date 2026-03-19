@@ -83,6 +83,14 @@ PlayerController::PlayerController(QObject* parent)
         this,
         &PlayerController::insertionFollowsPlaybackChanged);
     connect(m_audioEngine.get(), &AudioEngine::statusChanged, this, &PlayerController::statusChanged);
+    if (!m_audioEngine->isReady())
+    {
+        const auto initializationError = m_audioEngine->initializationError();
+        emit statusChanged(
+            initializationError.isEmpty()
+                ? QStringLiteral("Audio backend is unavailable.")
+                : initializationError);
+    }
     m_selectionFadeTimer.setInterval(30);
     connect(
         &m_selectionFadeTimer,
@@ -112,6 +120,7 @@ void PlayerController::clearProjectStateAfterMediaStop(const bool resetVideoPlay
     m_loopEndFrame.reset();
     m_mixStateStore->reset();
     m_audioDurationMsByPath.clear();
+    m_audioChannelCountByPath.clear();
     m_clipEditorSession->reset();
     m_audioPlaybackCoordinator->reset();
     m_mixStateStore->applyMasterGain(*m_audioEngine);
@@ -1077,6 +1086,11 @@ float PlayerController::masterMixLevel() const
     return m_audioEngine->masterLevel();
 }
 
+AudioEngine::StereoLevels PlayerController::masterMixStereoLevels() const
+{
+    return m_audioEngine->masterStereoLevels();
+}
+
 QSize PlayerController::videoFrameSize() const
 {
     return QSize{
@@ -1248,6 +1262,10 @@ std::vector<MixLaneStrip> PlayerController::mixLaneStrips() const
         spans,
         m_tracker.tracks(),
         *m_audioEngine,
+        [this](const QString& filePath)
+        {
+            return audioChannelCount(filePath);
+        },
         m_mixStateStore->gainByLane(),
         m_mixStateStore->mutedByLane(),
         m_mixStateStore->soloByLane());
@@ -1275,12 +1293,14 @@ std::vector<MixLaneStrip> PlayerController::mixLaneStrips() const
         return strips;
     }
 
-    const auto previewLevel = m_audioEngine->trackLevel(m_audioPlaybackCoordinator->clipPreviewTrackId());
+    const auto previewStereoLevels = m_audioEngine->trackStereoLevels(m_audioPlaybackCoordinator->clipPreviewTrackId());
     for (auto& strip : strips)
     {
         if (strip.laneIndex == spanIt->laneIndex)
         {
-            strip.meterLevel = std::max(strip.meterLevel, previewLevel);
+            strip.meterLeftLevel = std::max(strip.meterLeftLevel, previewStereoLevels.left);
+            strip.meterRightLevel = std::max(strip.meterRightLevel, previewStereoLevels.right);
+            strip.meterLevel = std::max(strip.meterLevel, std::max(previewStereoLevels.left, previewStereoLevels.right));
             break;
         }
     }
@@ -1376,6 +1396,24 @@ std::optional<int> PlayerController::audioDurationMs(const QString& filePath) co
     const auto durationMs = m_audioEngine->durationMs(filePath);
     m_audioDurationMsByPath.insert(filePath, durationMs);
     return durationMs;
+}
+
+std::optional<int> PlayerController::audioChannelCount(const QString& filePath) const
+{
+    if (filePath.isEmpty())
+    {
+        return std::nullopt;
+    }
+
+    if (const auto cachedIt = m_audioChannelCountByPath.constFind(filePath);
+        cachedIt != m_audioChannelCountByPath.cend())
+    {
+        return cachedIt.value();
+    }
+
+    const auto channelCount = m_audioEngine->channelCount(filePath);
+    m_audioChannelCountByPath.insert(filePath, channelCount);
+    return channelCount;
 }
 
 std::optional<int> PlayerController::trimmedEndFrameForTrack(const TrackPoint& track) const

@@ -169,6 +169,22 @@ void MixStripObject::setSoloed(const bool soloed)
     emit soloedChanged();
 }
 
+bool MixStripObject::useStereoMeter() const
+{
+    return m_useStereoMeter;
+}
+
+void MixStripObject::setUseStereoMeter(const bool useStereoMeter)
+{
+    if (m_useStereoMeter == useStereoMeter)
+    {
+        return;
+    }
+
+    m_useStereoMeter = useStereoMeter;
+    emit useStereoMeterChanged();
+}
+
 float MixStripObject::meterLevel() const
 {
     return m_meterLevel;
@@ -186,6 +202,40 @@ void MixStripObject::setMeterLevel(const float meterLevel)
     emit meterLevelChanged();
 }
 
+float MixStripObject::meterLeftLevel() const
+{
+    return m_meterLeftLevel;
+}
+
+void MixStripObject::setMeterLeftLevel(const float meterLeftLevel)
+{
+    const auto clampedLevel = std::clamp(meterLeftLevel, 0.0F, 1.0F);
+    if (std::abs(m_meterLeftLevel - clampedLevel) <= 0.0001F)
+    {
+        return;
+    }
+
+    m_meterLeftLevel = clampedLevel;
+    emit meterLeftLevelChanged();
+}
+
+float MixStripObject::meterRightLevel() const
+{
+    return m_meterRightLevel;
+}
+
+void MixStripObject::setMeterRightLevel(const float meterRightLevel)
+{
+    const auto clampedLevel = std::clamp(meterRightLevel, 0.0F, 1.0F);
+    if (std::abs(m_meterRightLevel - clampedLevel) <= 0.0001F)
+    {
+        return;
+    }
+
+    m_meterRightLevel = clampedLevel;
+    emit meterRightLevelChanged();
+}
+
 MixQuickController::MixQuickController(QObject* parent)
     : QObject(parent)
     , m_masterStrip(new MixStripObject(this))
@@ -197,6 +247,7 @@ MixQuickController::MixQuickController(QObject* parent)
     m_masterStrip->setFooterText(QStringLiteral("MASTER"));
     m_masterStrip->setAccentColor(QColor(QStringLiteral("#f0f4f8")));
     m_masterStrip->setSoloEnabled(false);
+    m_masterStrip->setUseStereoMeter(true);
 }
 
 QObject* MixQuickController::masterStrip() const
@@ -215,9 +266,11 @@ void MixQuickController::setMasterState(const float gainDb, const bool muted)
     m_masterStrip->setMuted(muted);
 }
 
-void MixQuickController::setMasterMeterLevel(const float meterLevel)
+void MixQuickController::setMasterMeterLevels(const float leftLevel, const float rightLevel)
 {
-    m_masterStrip->setMeterLevel(meterLevel);
+    m_masterStrip->setMeterLeftLevel(leftLevel);
+    m_masterStrip->setMeterRightLevel(rightLevel);
+    m_masterStrip->setMeterLevel(std::max(leftLevel, rightLevel));
 }
 
 void MixQuickController::setLaneStrips(const QVariantList& descriptors)
@@ -240,7 +293,11 @@ void MixQuickController::setLaneStrips(const QVariantList& descriptors)
         strip->setMuted(descriptor.value(QStringLiteral("muted")).toBool());
         strip->setSoloEnabled(descriptor.value(QStringLiteral("soloEnabled")).toBool());
         strip->setSoloed(descriptor.value(QStringLiteral("soloed")).toBool());
-        strip->setMeterLevel(descriptor.value(QStringLiteral("meterLevel")).toFloat());
+        strip->setUseStereoMeter(descriptor.value(QStringLiteral("useStereoMeter")).toBool());
+        const auto meterLevel = descriptor.value(QStringLiteral("meterLevel")).toFloat();
+        strip->setMeterLevel(meterLevel);
+        strip->setMeterLeftLevel(descriptor.value(QStringLiteral("meterLeftLevel")).toFloat());
+        strip->setMeterRightLevel(descriptor.value(QStringLiteral("meterRightLevel")).toFloat());
         m_laneStrips.push_back(strip);
         m_laneStripsByIndex[strip->laneIndex()] = strip;
     }
@@ -258,11 +315,13 @@ void MixQuickController::setLaneState(const int laneIndex, const float gainDb, c
     }
 }
 
-void MixQuickController::setLaneMeterLevel(const int laneIndex, const float meterLevel)
+void MixQuickController::setLaneMeterLevels(const int laneIndex, const float leftLevel, const float rightLevel)
 {
     if (auto* strip = laneStrip(laneIndex))
     {
-        strip->setMeterLevel(meterLevel);
+        strip->setMeterLeftLevel(leftLevel);
+        strip->setMeterRightLevel(rightLevel);
+        strip->setMeterLevel(std::max(leftLevel, rightLevel));
     }
 }
 

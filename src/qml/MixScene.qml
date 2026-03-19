@@ -44,7 +44,10 @@ Rectangle {
                 muted: strip ? strip.muted : false
                 soloEnabled: strip ? strip.soloEnabled : false
                 soloed: strip ? strip.soloed : false
+                useStereoMeter: strip ? strip.useStereoMeter : true
                 meterLevel: strip ? strip.meterLevel : 0.0
+                meterLeftLevel: strip ? strip.meterLeftLevel : meterLevel
+                meterRightLevel: strip ? strip.meterRightLevel : meterLevel
                 height: stripsRow.height
                 onGainDragged: function(gainDb) {
                     mixController.setMasterGainDb(gainDb)
@@ -84,7 +87,10 @@ Rectangle {
                     muted: strip.muted
                     soloEnabled: strip.soloEnabled
                     soloed: strip.soloed
+                    useStereoMeter: strip.useStereoMeter
                     meterLevel: strip.meterLevel
+                    meterLeftLevel: strip.meterLeftLevel
+                    meterRightLevel: strip.meterRightLevel
                     height: stripsRow.height
                     onGainDragged: function(gainDb) {
                         mixController.setLaneGainDb(strip.laneIndex, gainDb)
