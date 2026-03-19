@@ -52,7 +52,7 @@ Rectangle {
 
     color: root.masterStrip ? "#141b24" : "#0f141b"
     border.width: 1
-    border.color: root.masterStrip ? "#43566f" : "#1b2430"
+    border.color: root.masterStrip ? "#253140" : "#1b2430"
     radius: 10
     implicitWidth: 94
     implicitHeight: 220
@@ -73,7 +73,8 @@ Rectangle {
 
             Rectangle {
                 id: soloButton
-                width: 22
+                visible: !root.masterStrip
+                width: visible ? 22 : 0
                 height: 18
                 radius: 4
                 color: !root.soloEnabled ? "#171c22" : (root.soloed ? "#db7e26" : "#1b2129")
@@ -280,27 +281,41 @@ Rectangle {
                     }
                 }
 
-                Rectangle {
-                    id: meterTrack
-                    width: 12
+                Item {
+                    id: meterRack
+                    width: root.masterStrip ? 20 : 12
                     height: parent.height
-                    radius: 4
-                    color: "#0b1016"
-                    border.width: 1
-                    border.color: "#1d2733"
-                    clip: true
 
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        height: root.meterNormalized(root.meterLevel) * parent.height
-                        radius: 3
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#ff5b4d" }
-                            GradientStop { position: 0.08; color: "#ffb33b" }
-                            GradientStop { position: 0.22; color: "#2fe06d" }
-                            GradientStop { position: 1.0; color: "#2fe06d" }
+                    Row {
+                        anchors.fill: parent
+                        spacing: root.masterStrip ? 2 : 0
+
+                        Repeater {
+                            model: root.masterStrip ? 2 : 1
+
+                            Rectangle {
+                                width: root.masterStrip ? 9 : meterRack.width
+                                height: meterRack.height
+                                radius: 4
+                                color: "#0b1016"
+                                border.width: root.masterStrip ? 0 : 1
+                                border.color: "#1d2733"
+                                clip: true
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: root.meterNormalized(root.meterLevel) * parent.height
+                                    radius: 3
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "#ff5b4d" }
+                                        GradientStop { position: 0.08; color: "#ffb33b" }
+                                        GradientStop { position: 0.22; color: "#2fe06d" }
+                                        GradientStop { position: 1.0; color: "#2fe06d" }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
