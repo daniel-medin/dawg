@@ -5,11 +5,14 @@ import QtQuick.Window 2.15
 
 Rectangle {
     id: root
+    property bool windowActive: root.Window.window ? root.Window.window.active : windowChrome.active
     property real inactiveTitleOpacity: 0.56
-    property real titleTextOpacity: windowChrome.active ? 1.0 : inactiveTitleOpacity
+    property real titleTextOpacity: root.windowActive ? 1.0 : inactiveTitleOpacity
     property color activeTitleColor: "#ffffff"
     property color inactiveTitleColor: "#d3d9e2"
-    property color titleTextColor: windowChrome.active ? activeTitleColor : inactiveTitleColor
+    property color titleTextColor: root.windowActive ? activeTitleColor : inactiveTitleColor
+    property color menuPopupTextColor: root.windowActive ? "#ffffff" : "#d3d9e2"
+    property color menuPopupShortcutColor: root.windowActive ? "#98a5b5" : "#748192"
 
     color: theme.titleBarBackground
     border.width: 1
@@ -54,6 +57,16 @@ Rectangle {
     function globalPoint(localX, localY) {
         var mapped = root.mapToGlobal(Qt.point(localX, localY))
         return mapped ? mapped : Qt.point(0, 0)
+    }
+
+    function pointInsideItem(item, targetParent, x, y) {
+        if (!item || !targetParent)
+            return false
+        var topLeft = item.mapToItem(targetParent, 0, 0)
+        return x >= topLeft.x
+            && x <= topLeft.x + item.width
+            && y >= topLeft.y
+            && y <= topLeft.y + item.height
     }
 
     Label {
@@ -106,6 +119,7 @@ Rectangle {
                 id: menuRoot
                 required property var modelData
                 property alias menuRef: menuPopup
+                property bool ignoreReleaseClick: false
 
                 width: menuButton.implicitWidth
                 height: root.height
@@ -142,7 +156,15 @@ Rectangle {
                         menuPopup.open()
                     }
 
+                    onPressed: {
+                        menuRoot.ignoreReleaseClick = menuPopup.opened
+                    }
+
                     onClicked: {
+                        if (menuRoot.ignoreReleaseClick) {
+                            menuRoot.ignoreReleaseClick = false
+                            return
+                        }
                         var wasOpen = menuPopup.opened
                         root.closeAllMenus()
                         if (!wasOpen) {
@@ -167,10 +189,11 @@ Rectangle {
                     parent: root.Window.window ? root.Window.window.contentItem : root
                     x: popupX
                     y: popupY
+                    z: 1001
                     modal: false
                     focus: true
                     padding: 6
-                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                    closePolicy: Popup.CloseOnEscape
                     implicitWidth: Math.max(240, menuColumn.implicitWidth + leftPadding + rightPadding)
                     implicitHeight: menuColumn.implicitHeight + topPadding + bottomPadding
 
@@ -224,7 +247,7 @@ Rectangle {
                                         text: modelData.checkable
                                             ? (modelData.checked ? "\u2713" : "")
                                             : ""
-                                        color: modelData.enabled ? theme.menuItemText : theme.menuItemDisabled
+                                        color: modelData.enabled ? root.menuPopupTextColor : theme.menuItemDisabled
                                         font.pixelSize: 13
                                         horizontalAlignment: Text.AlignHCenter
                                         verticalAlignment: Text.AlignVCenter
@@ -233,7 +256,7 @@ Rectangle {
 
                                     Text {
                                         text: modelData.text
-                                        color: modelData.enabled ? theme.menuItemText : theme.menuItemDisabled
+                                        color: modelData.enabled ? root.menuPopupTextColor : theme.menuItemDisabled
                                         font.pixelSize: 13
                                         verticalAlignment: Text.AlignVCenter
                                         Layout.fillWidth: true
@@ -242,7 +265,7 @@ Rectangle {
                                     Text {
                                         text: modelData.shortcut
                                         visible: modelData.shortcut.length > 0
-                                        color: theme.menuItemDisabled
+                                        color: root.menuPopupShortcutColor
                                         font.pixelSize: 12
                                         verticalAlignment: Text.AlignVCenter
                                     }
@@ -261,6 +284,25 @@ Rectangle {
                                 }
                             }
                         }
+                    }
+                }
+
+                MouseArea {
+                    visible: menuPopup.opened
+                    parent: root.Window.window ? root.Window.window.contentItem : root
+                    anchors.fill: parent
+                    z: 1000
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    hoverEnabled: false
+
+                    onPressed: function(mouse) {
+                        if (root.pointInsideItem(menuButton, parent, mouse.x, mouse.y)) {
+                            mouse.accepted = true
+                            return
+                        }
+
+                        root.closeAllMenus()
+                        mouse.accepted = false
                     }
                 }
             }

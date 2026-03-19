@@ -7,6 +7,8 @@ Rectangle {
     id: root
 
     color: "#07090c"
+    property bool windowActive: root.Window.window ? root.Window.window.active : windowChrome.active
+    property color menuPopupTextColor: root.windowActive ? "#ffffff" : "#d3d9e2"
 
     AppTheme {
         id: theme
@@ -15,17 +17,20 @@ Rectangle {
     property string activeMenuKind: ""
     property int activeRowIndex: -1
     property var activeMenuItems: []
+    property var activeMenuAnchor: null
 
     function closeMenu() {
         activeMenuKind = ""
         activeRowIndex = -1
         activeMenuItems = []
+        activeMenuAnchor = null
     }
 
     function openMenu(kind, rowIndex, items, anchorItem) {
         activeMenuKind = kind
         activeRowIndex = rowIndex
         activeMenuItems = items
+        activeMenuAnchor = anchorItem
         var targetParent = menuPopup.parent ? menuPopup.parent : root
         var local = anchorItem.mapToItem(targetParent, 0, anchorItem.height + 4)
         var popupWidth = Math.max(220, menuPopup.implicitWidth)
@@ -41,6 +46,16 @@ Rectangle {
         menuPopup.popupX = Math.max(8, Math.min(maxX, desiredX))
         menuPopup.popupY = Math.max(8, Math.min(maxY, local.y))
         menuPopup.open()
+    }
+
+    function pointInsideItem(item, targetParent, x, y) {
+        if (!item || !targetParent)
+            return false
+        var topLeft = item.mapToItem(targetParent, 0, 0)
+        return x >= topLeft.x
+            && x <= topLeft.x + item.width
+            && y >= topLeft.y
+            && y <= topLeft.y + item.height
     }
 
     function triggerMenuAction(actionKey) {
@@ -95,10 +110,20 @@ Rectangle {
 
             ToolButton {
                 id: headerMenuButton
+                property bool ignoreReleaseClick: false
 
                 text: "\u2630"
                 hoverEnabled: true
+                onPressed: {
+                    ignoreReleaseClick = menuPopup.opened
+                        && root.activeMenuKind === "header"
+                        && root.activeRowIndex === -1
+                }
                 onClicked: {
+                    if (ignoreReleaseClick) {
+                        ignoreReleaseClick = false
+                        return
+                    }
                     root.openMenu("header", -1, [
                         { key: "importAudio", text: "Import Audio... (Ctrl+Shift+I)" },
                         { key: "showLength", text: "Show Length", checkable: true, checked: audioPoolController.showLength },
@@ -158,12 +183,22 @@ Rectangle {
 
                 ToolButton {
                     id: videoMenuButton
+                    property bool ignoreReleaseClick: false
 
                     text: "\u2630"
                     hoverEnabled: true
                     ToolTip.visible: hovered
                     ToolTip.text: audioPoolController.videoAudioTooltip
+                    onPressed: {
+                        ignoreReleaseClick = menuPopup.opened
+                            && root.activeMenuKind === "video"
+                            && root.activeRowIndex === -1
+                    }
                     onClicked: {
+                        if (ignoreReleaseClick) {
+                            ignoreReleaseClick = false
+                            return
+                        }
                         root.openMenu("video", -1, [
                             { key: "toggleMute", text: audioPoolController.videoAudioMuted ? "Unmute" : "Mute" },
                             { key: "toggleFastPlayback", text: "Fast Playback", checkable: true, checked: audioPoolController.fastPlaybackEnabled }
@@ -357,10 +392,20 @@ Rectangle {
 
                         ToolButton {
                             id: rowMenuButton
+                            property bool ignoreReleaseClick: false
 
                             text: "\u2630"
                             hoverEnabled: true
+                            onPressed: {
+                                ignoreReleaseClick = menuPopup.opened
+                                    && root.activeMenuKind === "row"
+                                    && root.activeRowIndex === rowRoot.index
+                            }
                             onClicked: {
+                                if (ignoreReleaseClick) {
+                                    ignoreReleaseClick = false
+                                    return
+                                }
                                 clickTimer.stop()
                                 root.openMenu("row", rowRoot.index, [
                                     { key: "addToFrame", text: "Add to Frame" },
@@ -409,10 +454,11 @@ Rectangle {
         parent: root.Window.window ? root.Window.window.contentItem : root
         x: popupX
         y: popupY
+        z: 1001
         modal: false
         focus: true
         padding: 6
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        closePolicy: Popup.CloseOnEscape
         implicitWidth: Math.max(220, menuColumn.implicitWidth + leftPadding + rightPadding)
         implicitHeight: menuColumn.implicitHeight + topPadding + bottomPadding
         onClosed: root.closeMenu()
@@ -454,7 +500,7 @@ Rectangle {
 
                         Label {
                             text: modelData.checkable ? (modelData.checked ? "\u2713" : "") : ""
-                            color: theme.menuItemText
+                            color: modelData.enabled === false ? theme.menuItemDisabled : root.menuPopupTextColor
                             font.pixelSize: 12
                             Layout.preferredWidth: 14
                         }
@@ -462,7 +508,7 @@ Rectangle {
                         Label {
                             Layout.fillWidth: true
                             text: modelData.text || ""
-                            color: modelData.enabled === false ? theme.menuItemDisabled : theme.menuItemText
+                            color: modelData.enabled === false ? theme.menuItemDisabled : root.menuPopupTextColor
                             font.pixelSize: 12
                             elide: Text.ElideRight
                         }
@@ -478,6 +524,26 @@ Rectangle {
                     }
                 }
             }
+        }
+    }
+
+    MouseArea {
+        visible: menuPopup.opened
+        parent: root.Window.window ? root.Window.window.contentItem : root
+        anchors.fill: parent
+        z: 1000
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        hoverEnabled: false
+
+        onPressed: function(mouse) {
+            if (root.pointInsideItem(root.activeMenuAnchor, parent, mouse.x, mouse.y)) {
+                mouse.accepted = true
+                return
+            }
+
+            root.closeMenu()
+            menuPopup.close()
+            mouse.accepted = false
         }
     }
 }
