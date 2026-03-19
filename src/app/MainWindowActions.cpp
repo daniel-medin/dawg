@@ -63,7 +63,7 @@ void MainWindowActions::buildMenus()
     m_window.m_showMixAction = new QAction(QStringLiteral("Toggle Mix Window (Ctrl++)"), &m_window);
     m_window.m_showTimelineThumbnailsAction = new QAction(QStringLiteral("Hide Thumbnails"), &m_window);
     m_window.m_timelineClickSeeksAction = new QAction(QStringLiteral("Click Seeks Playhead"), &m_window);
-    m_window.m_mixSoloModeAction = new QAction(QStringLiteral("Solo Mode: Latch"), &m_window);
+    m_window.m_mixSoloModeAction = new QAction(QStringLiteral("Solo Mode: X-OR"), &m_window);
     m_window.m_audioPoolAction = new QAction(QStringLiteral("Audio Pool (P)"), &m_window);
     m_window.m_deleteNodeAction = new QAction(QStringLiteral("Delete (Backspace)"), &m_window);
     m_window.m_clearAllAction = new QAction(QStringLiteral("Clear All (Ctrl+Shift+A, Backspace)"), &m_window);
@@ -86,6 +86,8 @@ void MainWindowActions::buildMenus()
     m_window.m_showTimelineThumbnailsAction->setChecked(true);
     m_window.m_timelineClickSeeksAction->setCheckable(true);
     m_window.m_timelineClickSeeksAction->setChecked(true);
+    m_window.m_mixSoloModeAction->setCheckable(true);
+    m_window.m_mixSoloModeAction->setChecked(false);
     m_window.m_audioPoolAction->setCheckable(true);
     m_window.m_audioPoolAction->setChecked(false);
     m_window.m_importSoundAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));

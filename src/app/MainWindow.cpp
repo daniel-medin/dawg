@@ -119,13 +119,6 @@ void clearStuckWaitCursor(QWindow* window)
     }
 }
 
-QString mixSoloModeActionText(const bool xorMode)
-{
-    return xorMode
-        ? QStringLiteral("Solo Mode: X-OR")
-        : QStringLiteral("Solo Mode: Latch");
-}
-
 QUrl quickTitleBarUrl()
 {
     return QUrl(QStringLiteral("qrc:/qml/QuickTitleBar.qml"));
@@ -899,16 +892,15 @@ MainWindow::MainWindow(QWindow* parent)
                 ? QStringLiteral("Timeline click seek enabled.")
                 : QStringLiteral("Timeline click seek disabled. Use play or scrub to move."));
     });
-    connect(m_mixSoloModeAction, &QAction::triggered, this, [this]()
+    connect(m_mixSoloModeAction, &QAction::toggled, this, [this](const bool xorMode)
     {
-        const auto nextXorMode = !m_controller->isMixSoloXorMode();
-        m_controller->setMixSoloXorMode(nextXorMode);
+        m_controller->setMixSoloXorMode(xorMode);
         if (!m_projectStateChangeInProgress && hasOpenProject())
         {
             setProjectDirty(true);
         }
         showStatus(
-            nextXorMode
+            xorMode
                 ? QStringLiteral("Mixer solo mode set to X-OR.")
                 : QStringLiteral("Mixer solo mode set to latch."));
     });
@@ -943,7 +935,8 @@ MainWindow::MainWindow(QWindow* parent)
     {
         if (m_mixSoloModeAction)
         {
-            m_mixSoloModeAction->setText(mixSoloModeActionText(xorMode));
+            const QSignalBlocker blocker(m_mixSoloModeAction);
+            m_mixSoloModeAction->setChecked(xorMode);
         }
         refreshMixView();
         refreshTimeline();
@@ -3026,7 +3019,8 @@ void MainWindow::buildUi()
     m_actionRegistry = new ActionRegistry(*this, this);
     if (m_mixSoloModeAction)
     {
-        m_mixSoloModeAction->setText(mixSoloModeActionText(m_controller->isMixSoloXorMode()));
+        const QSignalBlocker blocker(m_mixSoloModeAction);
+        m_mixSoloModeAction->setChecked(m_controller->isMixSoloXorMode());
     }
     m_windowChromeController = new WindowChromeController(*this, this);
     m_playPauseShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
