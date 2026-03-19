@@ -2068,6 +2068,10 @@ void MainWindow::updateInsertionFollowsPlaybackState(const bool enabled)
 void MainWindow::updatePlaybackState(const bool playing)
 {
     clearStuckWaitCursor(this);
+    if (m_timelineQuickController)
+    {
+        m_timelineQuickController->setPlaybackActive(playing);
+    }
     const auto label = playing ? QStringLiteral("Pause (Space)") : QStringLiteral("Play (Space)");
     m_playAction->setText(label);
     m_debugTextTimer.invalidate();

@@ -221,6 +221,31 @@ void TimelineQuickController::setThumbnailsVisible(const bool visible)
     refreshVisuals();
 }
 
+void TimelineQuickController::setPlaybackActive(const bool active)
+{
+    if (m_playbackActive == active)
+    {
+        return;
+    }
+
+    const auto previousCursorShape = m_cursorShape;
+    m_playbackActive = active;
+    if (m_playbackActive)
+    {
+        m_hoveredLoopFrame.reset();
+        m_hoveredTimelineX.reset();
+        QToolTip::hideText();
+        m_cursorShape = static_cast<int>(Qt::ArrowCursor);
+    }
+
+    refreshVisuals();
+    emit playbackActiveChanged();
+    if (m_cursorShape != previousCursorShape)
+    {
+        emit cursorShapeChanged();
+    }
+}
+
 std::optional<int> TimelineQuickController::loopEditFrame() const
 {
     return m_loopEditFrame;
@@ -309,6 +334,11 @@ double TimelineQuickController::hoverX() const
 int TimelineQuickController::cursorShape() const
 {
     return m_cursorShape;
+}
+
+bool TimelineQuickController::playbackActive() const
+{
+    return m_playbackActive;
 }
 
 void TimelineQuickController::setViewportSize(const double width, const double height)
@@ -604,6 +634,11 @@ void TimelineQuickController::handleWheel(
 
 void TimelineQuickController::handleHoverMove(const double x, const double y, const int globalX, const int globalY)
 {
+    if (m_playbackActive)
+    {
+        return;
+    }
+
     const auto position = QPointF{x, y};
     updateHoverState(position);
     updateCursorAndTooltip(position, QPoint{globalX, globalY});
@@ -611,6 +646,11 @@ void TimelineQuickController::handleHoverMove(const double x, const double y, co
 
 void TimelineQuickController::handleHoverLeave()
 {
+    if (m_playbackActive)
+    {
+        return;
+    }
+
     const auto previousCursorShape = m_cursorShape;
     if (m_hoveredLoopFrame.has_value() || m_hoveredTimelineX.has_value())
     {
@@ -903,9 +943,15 @@ void TimelineQuickController::refreshVisuals()
 
         for (int frame = firstGridFrame; frame <= static_cast<int>(std::ceil(visibleEndFrame)); frame += stepFrames)
         {
+            const auto isMajor = (frame % secondFrames) == 0;
+            if (m_playbackActive && !isMajor)
+            {
+                continue;
+            }
+
             QVariantMap line;
             line.insert(QStringLiteral("x"), xForFrame(frame));
-            line.insert(QStringLiteral("major"), (frame % secondFrames) == 0);
+            line.insert(QStringLiteral("major"), isMajor);
             m_gridLines.push_back(line);
         }
     }
@@ -1024,7 +1070,7 @@ QRectF TimelineQuickController::computeTrackAreaRect() const
 QVector<int> TimelineQuickController::computeThumbnailFrames() const
 {
     QVector<int> frameIndices;
-    if (!m_showThumbnails || m_totalFrames <= 0 || m_videoPath.isEmpty())
+    if (!m_showThumbnails || m_playbackActive || m_totalFrames <= 0 || m_videoPath.isEmpty())
     {
         return frameIndices;
     }

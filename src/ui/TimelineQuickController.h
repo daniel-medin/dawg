@@ -32,6 +32,7 @@ class TimelineQuickController : public QObject
     Q_PROPERTY(bool hasHoverLine READ hasHoverLine NOTIFY overlayChanged)
     Q_PROPERTY(double hoverX READ hoverX NOTIFY overlayChanged)
     Q_PROPERTY(int cursorShape READ cursorShape NOTIFY cursorShapeChanged)
+    Q_PROPERTY(bool playbackActive READ playbackActive NOTIFY playbackActiveChanged)
 
 public:
     explicit TimelineQuickController(QObject* parent = nullptr);
@@ -44,6 +45,7 @@ public:
     void setTrackSpans(const std::vector<TimelineTrackSpan>& trackSpans);
     void setSeekOnClickEnabled(bool enabled);
     void setThumbnailsVisible(bool visible);
+    void setPlaybackActive(bool active);
     [[nodiscard]] std::optional<int> loopEditFrame() const;
     [[nodiscard]] std::optional<int> loopShortcutFrame() const;
     [[nodiscard]] bool hasSelectedLoopRange() const;
@@ -62,6 +64,7 @@ public:
     [[nodiscard]] bool hasHoverLine() const;
     [[nodiscard]] double hoverX() const;
     [[nodiscard]] int cursorShape() const;
+    [[nodiscard]] bool playbackActive() const;
 
     Q_INVOKABLE void setViewportSize(double width, double height);
     Q_INVOKABLE void handleMousePress(int button, double x, double y, int modifiers, int globalX, int globalY);
@@ -89,6 +92,7 @@ signals:
     void markerChanged();
     void overlayChanged();
     void cursorShapeChanged();
+    void playbackActiveChanged();
 
 private:
     struct LoopRangeGeometry
@@ -196,4 +200,5 @@ private:
     QVector<int> m_thumbnailFrames;
     QHash<int, QString> m_thumbnailSources;
     bool m_showThumbnails = true;
+    bool m_playbackActive = false;
 };

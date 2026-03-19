@@ -42,6 +42,7 @@ Item {
         y: rectValue(timelineController.filmstripRect, "y")
         width: rectValue(timelineController.filmstripRect, "width")
         height: rectValue(timelineController.filmstripRect, "height")
+        visible: height > 0
         clip: true
 
         Rectangle {
@@ -53,7 +54,7 @@ Item {
         }
 
         Repeater {
-            model: timelineController.thumbnailTiles
+            model: timelineController.playbackActive ? [] : timelineController.thumbnailTiles
 
             Item {
                 property var tileData: modelData
@@ -218,7 +219,7 @@ Item {
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        hoverEnabled: true
+        hoverEnabled: !timelineController.playbackActive
         preventStealing: true
         cursorShape: timelineController.cursorShape
 
