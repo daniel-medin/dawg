@@ -168,6 +168,7 @@ private:
     void updateDetachedVideoUiState();
     void resetOutputFpsTracking();
     [[nodiscard]] std::optional<int> timelineLoopTargetFrame() const;
+    void createLoopRangeFromShortcutFrames(int startFrame, int endFrame);
     [[nodiscard]] bool hasOpenProject() const;
     [[nodiscard]] bool ensureProjectForMediaAction(const QString& actionLabel);
     [[nodiscard]] bool promptToSaveIfDirty(const QString& actionLabel);
@@ -353,6 +354,8 @@ private:
     QString m_qtQuickLoadText;
     QString m_qtQuickGraphicsApiText;
     std::optional<ClipEditorState> m_clipEditorState;
+    std::optional<int> m_pendingLoopShortcutStartFrame;
+    std::optional<int> m_pendingLoopShortcutEndFrame;
     float m_masterMixGainDb = 0.0F;
     bool m_masterMixMuted = false;
     std::vector<TimelineTrackSpan> m_timelineTrackSpans;

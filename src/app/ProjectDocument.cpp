@@ -15,6 +15,7 @@ using dawg::project::ControllerState;
 using dawg::project::Document;
 using dawg::project::MixLaneState;
 using dawg::project::UiState;
+using TimelineLoopRange = ::TimelineLoopRange;
 
 QJsonObject colorToJson(const QColor& color)
 {
@@ -306,6 +307,51 @@ std::vector<std::pair<QUuid, int>> clipPlayheadsFromJson(const QJsonArray& array
     return playheads;
 }
 
+QJsonArray loopRangesToJson(const std::vector<TimelineLoopRange>& ranges)
+{
+    QJsonArray array;
+    for (const auto& range : ranges)
+    {
+        array.append(QJsonObject{
+            {QStringLiteral("startFrame"), range.startFrame},
+            {QStringLiteral("endFrame"), range.endFrame}
+        });
+    }
+    return array;
+}
+
+std::vector<TimelineLoopRange> loopRangesFromJson(const QJsonArray& array)
+{
+    std::vector<TimelineLoopRange> ranges;
+    ranges.reserve(static_cast<std::size_t>(array.size()));
+    for (const auto& value : array)
+    {
+        const auto object = value.toObject();
+        auto startFrame = object.value(QStringLiteral("startFrame")).toInt();
+        auto endFrame = object.value(QStringLiteral("endFrame")).toInt();
+        if (endFrame < startFrame)
+        {
+            std::swap(startFrame, endFrame);
+        }
+        ranges.push_back(TimelineLoopRange{
+            .startFrame = startFrame,
+            .endFrame = endFrame
+        });
+    }
+    std::sort(
+        ranges.begin(),
+        ranges.end(),
+        [](const TimelineLoopRange& left, const TimelineLoopRange& right)
+        {
+            if (left.startFrame != right.startFrame)
+            {
+                return left.startFrame < right.startFrame;
+            }
+            return left.endFrame < right.endFrame;
+        });
+    return ranges;
+}
+
 QJsonObject controllerStateToJson(const ControllerState& state)
 {
     QJsonObject object{
@@ -318,20 +364,13 @@ QJsonObject controllerStateToJson(const ControllerState& state)
         {QStringLiteral("insertionFollowsPlayback"), state.insertionFollowsPlayback},
         {QStringLiteral("fastPlaybackEnabled"), state.fastPlaybackEnabled},
         {QStringLiteral("embeddedVideoAudioMuted"), state.embeddedVideoAudioMuted},
+        {QStringLiteral("loopRanges"), loopRangesToJson(state.loopRanges)},
         {QStringLiteral("masterMixGainDb"), state.masterMixGainDb},
         {QStringLiteral("masterMixMuted"), state.masterMixMuted},
         {QStringLiteral("mixSoloXorMode"), state.mixSoloXorMode},
         {QStringLiteral("mixLanes"), mixLanesToJson(state.mixLanes)},
         {QStringLiteral("clipEditorPlayheads"), clipPlayheadsToJson(state.clipEditorPlayheads)}
     };
-    if (state.loopStartFrame.has_value())
-    {
-        object.insert(QStringLiteral("loopStartFrame"), *state.loopStartFrame);
-    }
-    if (state.loopEndFrame.has_value())
-    {
-        object.insert(QStringLiteral("loopEndFrame"), *state.loopEndFrame);
-    }
     return object;
 }
 
@@ -347,13 +386,22 @@ ControllerState controllerStateFromJson(const QJsonObject& object)
     state.insertionFollowsPlayback = object.value(QStringLiteral("insertionFollowsPlayback")).toBool(false);
     state.fastPlaybackEnabled = object.value(QStringLiteral("fastPlaybackEnabled")).toBool(false);
     state.embeddedVideoAudioMuted = object.value(QStringLiteral("embeddedVideoAudioMuted")).toBool(true);
-    if (object.contains(QStringLiteral("loopStartFrame")) && !object.value(QStringLiteral("loopStartFrame")).isNull())
+    if (object.contains(QStringLiteral("loopRanges")) && object.value(QStringLiteral("loopRanges")).isArray())
     {
-        state.loopStartFrame = object.value(QStringLiteral("loopStartFrame")).toInt();
+        state.loopRanges = loopRangesFromJson(object.value(QStringLiteral("loopRanges")).toArray());
     }
-    if (object.contains(QStringLiteral("loopEndFrame")) && !object.value(QStringLiteral("loopEndFrame")).isNull())
+    else if (object.contains(QStringLiteral("loopStartFrame")) || object.contains(QStringLiteral("loopEndFrame")))
     {
-        state.loopEndFrame = object.value(QStringLiteral("loopEndFrame")).toInt();
+        const auto startFrame = object.contains(QStringLiteral("loopStartFrame")) && !object.value(QStringLiteral("loopStartFrame")).isNull()
+            ? object.value(QStringLiteral("loopStartFrame")).toInt()
+            : object.value(QStringLiteral("loopEndFrame")).toInt();
+        const auto endFrame = object.contains(QStringLiteral("loopEndFrame")) && !object.value(QStringLiteral("loopEndFrame")).isNull()
+            ? object.value(QStringLiteral("loopEndFrame")).toInt()
+            : startFrame;
+        state.loopRanges.push_back(TimelineLoopRange{
+            .startFrame = std::min(startFrame, endFrame),
+            .endFrame = std::max(startFrame, endFrame)
+        });
     }
     state.masterMixGainDb = static_cast<float>(object.value(QStringLiteral("masterMixGainDb")).toDouble());
     state.masterMixMuted = object.value(QStringLiteral("masterMixMuted")).toBool(false);
@@ -480,7 +528,7 @@ std::optional<Document> loadDocument(const QString& projectFilePath, QString* er
 
     const auto root = document.object();
     const auto schemaVersion = root.value(QStringLiteral("schemaVersion")).toInt(-1);
-    if (schemaVersion != kSchemaVersion)
+    if (schemaVersion != 1 && schemaVersion != kSchemaVersion)
     {
         if (errorMessage)
         {

@@ -89,9 +89,11 @@ public:
     void setMotionTrackingEnabled(bool enabled);
     void setPreferredD3D11Device(void* device);
     void setNativeVideoPresentationEnabled(bool enabled);
-    void setLoopStartFrame(int frameIndex);
-    void setLoopEndFrame(int frameIndex);
-    void clearLoopRange();
+    bool addLoopRange(int startFrame, int endFrame);
+    void setLoopStartFrame(int loopIndex, int frameIndex);
+    void setLoopEndFrame(int loopIndex, int frameIndex);
+    void removeLoopRange(int loopIndex);
+    void clearLoopRanges();
     void setMasterMixGainDb(float gainDb);
     void setMasterMixMuted(bool muted);
     void setMixLaneGainDb(int laneIndex, float gainDb);
@@ -142,8 +144,7 @@ public:
     [[nodiscard]] bool isEmbeddedVideoAudioMuted() const;
     [[nodiscard]] bool isFastPlaybackEnabled() const;
     [[nodiscard]] bool isFastPlaybackActive() const;
-    [[nodiscard]] std::optional<int> loopStartFrame() const;
-    [[nodiscard]] std::optional<int> loopEndFrame() const;
+    [[nodiscard]] std::vector<TimelineLoopRange> loopRanges() const;
     [[nodiscard]] float masterMixGainDb() const;
     [[nodiscard]] bool masterMixMuted() const;
     [[nodiscard]] bool isMixSoloXorMode() const;
@@ -203,6 +204,7 @@ private:
     [[nodiscard]] bool isTrackSelected(const QUuid& trackId) const;
     [[nodiscard]] std::optional<int> mixLaneIndexForTrack(const QUuid& trackId) const;
     [[nodiscard]] std::optional<std::pair<int, int>> activeLoopRange() const;
+    [[nodiscard]] bool loopRangeOverlaps(const TimelineLoopRange& candidate, int ignoreIndex = -1) const;
     void applyLiveMixStateToCurrentPlayback();
     void handleClipEditorPreviewTimeout();
     void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
@@ -221,8 +223,7 @@ private:
     bool m_embeddedVideoAudioMuted = true;
     std::vector<TrackOverlay> m_currentOverlays;
     bool m_motionTrackingEnabled = false;
-    std::optional<int> m_loopStartFrame;
-    std::optional<int> m_loopEndFrame;
+    std::vector<TimelineLoopRange> m_loopRanges;
     QTimer m_selectionFadeTimer;
     std::optional<MotionTrackerState> m_undoTrackerState;
     std::vector<QUuid> m_undoSelectedTrackIds;

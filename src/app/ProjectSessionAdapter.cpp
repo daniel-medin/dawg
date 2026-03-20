@@ -33,8 +33,7 @@ dawg::project::ControllerState ProjectSessionAdapter::snapshot(const SnapshotInp
     state.insertionFollowsPlayback = input.insertionFollowsPlayback;
     state.fastPlaybackEnabled = input.fastPlaybackEnabled;
     state.embeddedVideoAudioMuted = input.embeddedVideoAudioMuted;
-    state.loopStartFrame = input.loopStartFrame;
-    state.loopEndFrame = input.loopEndFrame;
+    state.loopRanges = input.loopRanges;
     state.masterMixGainDb = input.masterMixGainDb;
     state.masterMixMuted = input.masterMixMuted;
     state.mixSoloXorMode = input.mixSoloXorMode;
@@ -147,8 +146,7 @@ ProjectSessionAdapter::RestorePayload ProjectSessionAdapter::buildRestorePayload
     payload.insertionFollowsPlayback = state.insertionFollowsPlayback;
     payload.fastPlaybackEnabled = state.fastPlaybackEnabled;
     payload.embeddedVideoAudioMuted = state.embeddedVideoAudioMuted;
-    payload.loopStartFrame = state.loopStartFrame;
-    payload.loopEndFrame = state.loopEndFrame;
+    payload.loopRanges = state.loopRanges;
     payload.masterMixGainDb = clampMixGainDb(state.masterMixGainDb);
     payload.masterMixMuted = state.masterMixMuted;
     payload.mixSoloXorMode = state.mixSoloXorMode;

@@ -9,10 +9,11 @@
 #include <QUuid>
 
 #include "core/tracking/TrackTypes.h"
+#include "ui/TimelineTypes.h"
 
 namespace dawg::project
 {
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 constexpr auto kProjectFileSuffix = ".dawg";
 
 struct MixLaneState
@@ -34,8 +35,7 @@ struct ControllerState
     bool insertionFollowsPlayback = false;
     bool fastPlaybackEnabled = false;
     bool embeddedVideoAudioMuted = true;
-    std::optional<int> loopStartFrame;
-    std::optional<int> loopEndFrame;
+    std::vector<TimelineLoopRange> loopRanges;
     float masterMixGainDb = 0.0F;
     bool masterMixMuted = false;
     bool mixSoloXorMode = false;

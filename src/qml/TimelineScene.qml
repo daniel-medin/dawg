@@ -123,36 +123,44 @@ Item {
         }
     }
 
-    Rectangle {
-        visible: boolValue(timelineController.loopRangeGeometry, "selectionVisible")
-        x: rectValue(timelineController.loopRangeGeometry.selectionRect, "x")
-        y: rectValue(timelineController.loopRangeGeometry.selectionRect, "y")
-        width: rectValue(timelineController.loopRangeGeometry.selectionRect, "width")
-        height: rectValue(timelineController.loopRangeGeometry.selectionRect, "height")
-        radius: 3
-        color: timelineController.loopRangeGeometry.selected ? "#5a88ca5c" : "#426eaa48"
-        border.width: timelineController.loopRangeGeometry.selected ? 2 : 1
-        border.color: timelineController.loopRangeGeometry.selected ? "#b4d4ffec" : "#75a5e4dc"
-    }
+    Repeater {
+        model: timelineController.loopRangeGeometries
 
-    Rectangle {
-        visible: boolValue(timelineController.loopRangeGeometry, "startHandleVisible")
-        x: rectValue(timelineController.loopRangeGeometry.startHandleRect, "x")
-        y: rectValue(timelineController.loopRangeGeometry.startHandleRect, "y")
-        width: rectValue(timelineController.loopRangeGeometry.startHandleRect, "width")
-        height: rectValue(timelineController.loopRangeGeometry.startHandleRect, "height")
-        radius: 2
-        color: "#e9eff6"
-    }
+        Item {
+            property var loopData: modelData
 
-    Rectangle {
-        visible: boolValue(timelineController.loopRangeGeometry, "endHandleVisible")
-        x: rectValue(timelineController.loopRangeGeometry.endHandleRect, "x")
-        y: rectValue(timelineController.loopRangeGeometry.endHandleRect, "y")
-        width: rectValue(timelineController.loopRangeGeometry.endHandleRect, "width")
-        height: rectValue(timelineController.loopRangeGeometry.endHandleRect, "height")
-        radius: 2
-        color: "#e9eff6"
+            Rectangle {
+                visible: boolValue(loopData, "selectionVisible")
+                x: rectValue(loopData.selectionRect, "x")
+                y: rectValue(loopData.selectionRect, "y")
+                width: rectValue(loopData.selectionRect, "width")
+                height: rectValue(loopData.selectionRect, "height")
+                radius: 3
+                color: loopData.selected ? "#5a88ca5c" : "#426eaa48"
+                border.width: loopData.selected ? 2 : 1
+                border.color: loopData.selected ? "#b4d4ffec" : "#75a5e4dc"
+            }
+
+            Rectangle {
+                visible: boolValue(loopData, "startHandleVisible")
+                x: rectValue(loopData.startHandleRect, "x")
+                y: rectValue(loopData.startHandleRect, "y")
+                width: rectValue(loopData.startHandleRect, "width")
+                height: rectValue(loopData.startHandleRect, "height")
+                radius: 2
+                color: "#e9eff6"
+            }
+
+            Rectangle {
+                visible: boolValue(loopData, "endHandleVisible")
+                x: rectValue(loopData.endHandleRect, "x")
+                y: rectValue(loopData.endHandleRect, "y")
+                width: rectValue(loopData.endHandleRect, "width")
+                height: rectValue(loopData.endHandleRect, "height")
+                radius: 2
+                color: "#e9eff6"
+            }
+        }
     }
 
     Rectangle {
@@ -163,6 +171,19 @@ Item {
         height: rectValue(timelineController.loopBarRect, "height") - 2
         color: "#dce4ecb0"
         opacity: 0.9
+    }
+
+    Rectangle {
+        visible: timelineController.hasPendingLoopDraftHandle
+        x: timelineController.pendingLoopDraftHandleX - 3.5
+        y: rectValue(timelineController.loopBarRect, "y") - 1
+        width: 7
+        height: rectValue(timelineController.loopBarRect, "height") + 2
+        radius: 2
+        color: "#8ec7ff"
+        border.width: 1
+        border.color: "#d6ecff"
+        opacity: 0.95
     }
 
     Repeater {

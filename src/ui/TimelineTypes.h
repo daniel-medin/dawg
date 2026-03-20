@@ -27,3 +27,15 @@ struct TimelineTrackSpan
             && isSelected == other.isSelected;
     }
 };
+
+struct TimelineLoopRange
+{
+    int startFrame = 0;
+    int endFrame = 0;
+
+    [[nodiscard]] bool operator==(const TimelineLoopRange& other) const
+    {
+        return startFrame == other.startFrame
+            && endFrame == other.endFrame;
+    }
+};

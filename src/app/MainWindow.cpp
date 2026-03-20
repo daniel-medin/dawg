@@ -1004,6 +1004,11 @@ MainWindow::MainWindow(QWindow* parent)
     connect(m_timelineQuickController, &TimelineQuickController::frameRequested, m_controller, &PlayerController::seekToFrame);
     connect(
         m_timelineQuickController,
+        &TimelineQuickController::addLoopRangeRequested,
+        m_controller,
+        &PlayerController::addLoopRange);
+    connect(
+        m_timelineQuickController,
         &TimelineQuickController::loopStartFrameRequested,
         m_controller,
         &PlayerController::setLoopStartFrame);
@@ -1012,6 +1017,11 @@ MainWindow::MainWindow(QWindow* parent)
         &TimelineQuickController::loopEndFrameRequested,
         m_controller,
         &PlayerController::setLoopEndFrame);
+    connect(
+        m_timelineQuickController,
+        &TimelineQuickController::deleteLoopRangeRequested,
+        m_controller,
+        &PlayerController::removeLoopRange);
     connect(
         m_timelineQuickController,
         &TimelineQuickController::trackSelected,
@@ -1058,6 +1068,13 @@ MainWindow::MainWindow(QWindow* parent)
     connect(m_timelineQuickController, &TimelineQuickController::loopContextMenuRequested, this, [this](const QPoint& globalPosition)
     {
         showLoopContextMenu(globalPosition);
+    });
+    connect(m_timelineQuickController, &TimelineQuickController::visualsChanged, this, [this]()
+    {
+        if (m_clearLoopRangeAction)
+        {
+            m_clearLoopRangeAction->setEnabled(timelineHasSelectedLoopRange());
+        }
     });
     if (m_showTimelineThumbnailsAction)
     {
@@ -1481,7 +1498,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 
             if (key == Qt::Key_Backspace
                 && timelineHasSelectedLoopRange()
-                && (m_controller->loopStartFrame().has_value() || m_controller->loopEndFrame().has_value()))
+                && !m_controller->loopRanges().empty())
             {
                 clearLoopRange();
                 return true;
@@ -1943,23 +1960,75 @@ void MainWindow::importAudioToPool()
 
 void MainWindow::handleLoopStartShortcut()
 {
+    if (!m_timelineQuickController)
+    {
+        return;
+    }
+
+    if (const auto targetFrame = timelineLoopTargetFrame(); targetFrame.has_value()
+        && m_timelineQuickController->selectedLoopIndex() >= 0)
+    {
+        m_controller->setLoopStartFrame(m_timelineQuickController->selectedLoopIndex(), *targetFrame);
+        m_pendingLoopShortcutStartFrame.reset();
+        m_pendingLoopShortcutEndFrame.reset();
+        m_timelineQuickController->setPendingLoopDraftFrame(std::nullopt);
+        return;
+    }
+
     if (const auto targetFrame = timelineLoopTargetFrame(); targetFrame.has_value())
     {
-        m_controller->setLoopStartFrame(*targetFrame);
+        m_pendingLoopShortcutStartFrame = *targetFrame;
+        m_timelineQuickController->setPendingLoopDraftFrame(*targetFrame);
+        if (m_pendingLoopShortcutEndFrame.has_value())
+        {
+            createLoopRangeFromShortcutFrames(*m_pendingLoopShortcutStartFrame, *m_pendingLoopShortcutEndFrame);
+        }
     }
 }
 
 void MainWindow::handleLoopEndShortcut()
 {
+    if (!m_timelineQuickController)
+    {
+        return;
+    }
+
+    if (const auto targetFrame = timelineLoopTargetFrame(); targetFrame.has_value()
+        && m_timelineQuickController->selectedLoopIndex() >= 0)
+    {
+        m_controller->setLoopEndFrame(m_timelineQuickController->selectedLoopIndex(), *targetFrame);
+        m_pendingLoopShortcutStartFrame.reset();
+        m_pendingLoopShortcutEndFrame.reset();
+        m_timelineQuickController->setPendingLoopDraftFrame(std::nullopt);
+        return;
+    }
+
     if (const auto targetFrame = timelineLoopTargetFrame(); targetFrame.has_value())
     {
-        m_controller->setLoopEndFrame(*targetFrame);
+        m_pendingLoopShortcutEndFrame = *targetFrame;
+        if (m_pendingLoopShortcutStartFrame.has_value())
+        {
+            createLoopRangeFromShortcutFrames(*m_pendingLoopShortcutStartFrame, *m_pendingLoopShortcutEndFrame);
+        }
+        else
+        {
+            m_timelineQuickController->setPendingLoopDraftFrame(std::nullopt);
+        }
     }
 }
 
 void MainWindow::clearLoopRange()
 {
-    m_controller->clearLoopRange();
+    if (!m_timelineQuickController)
+    {
+        return;
+    }
+
+    const auto selectedLoopIndex = m_timelineQuickController->selectedLoopIndex();
+    if (selectedLoopIndex >= 0)
+    {
+        m_controller->removeLoopRange(selectedLoopIndex);
+    }
 }
 
 void MainWindow::handleNodeStartShortcut()
@@ -1979,7 +2048,7 @@ void MainWindow::handleNodeStartShortcut()
         }
     }
 
-    if (timelineLoopShortcutFrame().has_value())
+    if (timelineHasFocus() || timelineLoopShortcutFrame().has_value())
     {
         handleLoopStartShortcut();
         return;
@@ -2011,7 +2080,7 @@ void MainWindow::handleNodeEndShortcut()
         }
     }
 
-    if (timelineLoopShortcutFrame().has_value())
+    if (timelineHasFocus() || timelineLoopShortcutFrame().has_value())
     {
         handleLoopEndShortcut();
         return;
@@ -2550,7 +2619,7 @@ void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalP
 
 void MainWindow::showLoopContextMenu(const QPoint& globalPosition)
 {
-    if (!m_controller->loopStartFrame().has_value() && !m_controller->loopEndFrame().has_value())
+    if (!m_timelineQuickController || m_timelineQuickController->selectedLoopIndex() < 0)
     {
         return;
     }
@@ -2592,13 +2661,12 @@ void MainWindow::refreshTimeline()
     {
         m_timelineQuickController->setVideoPath(m_controller->loadedPath());
         m_timelineQuickController->setTrackSpans(trackSpans);
-        m_timelineQuickController->setLoopRange(m_controller->loopStartFrame(), m_controller->loopEndFrame());
+        m_timelineQuickController->setLoopRanges(m_controller->loopRanges());
     }
     updateTimelineMinimumHeight();
     if (m_clearLoopRangeAction)
     {
-        m_clearLoopRangeAction->setEnabled(
-            m_controller->loopStartFrame().has_value() || m_controller->loopEndFrame().has_value());
+        m_clearLoopRangeAction->setEnabled(timelineHasSelectedLoopRange());
     }
     refreshMixView();
 }
@@ -3028,6 +3096,34 @@ std::optional<int> MainWindow::timelineLoopTargetFrame() const
     }
 
     return m_controller->currentFrameIndex();
+}
+
+void MainWindow::createLoopRangeFromShortcutFrames(const int startFrame, const int endFrame)
+{
+    if (!m_timelineQuickController)
+    {
+        return;
+    }
+
+    const auto normalizedStart = std::min(startFrame, endFrame);
+    const auto normalizedEnd = std::max(startFrame, endFrame);
+    if (normalizedEnd <= normalizedStart)
+    {
+        m_pendingLoopShortcutStartFrame.reset();
+        m_pendingLoopShortcutEndFrame.reset();
+        m_timelineQuickController->setPendingLoopDraftFrame(std::nullopt);
+        return;
+    }
+
+    m_timelineQuickController->preparePendingLoopSelection(normalizedStart, normalizedEnd);
+    m_timelineQuickController->setPendingLoopDraftFrame(std::nullopt);
+    if (!m_controller->addLoopRange(normalizedStart, normalizedEnd))
+    {
+        showStatus(QStringLiteral("Loop range could not be created there."));
+    }
+
+    m_pendingLoopShortcutStartFrame.reset();
+    m_pendingLoopShortcutEndFrame.reset();
 }
 
 void MainWindow::buildMenus()

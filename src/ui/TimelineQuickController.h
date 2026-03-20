@@ -25,10 +25,12 @@ class TimelineQuickController : public QObject
     Q_PROPERTY(QVariantList gridLines READ gridLines NOTIFY visualsChanged)
     Q_PROPERTY(QVariantList thumbnailTiles READ thumbnailTiles NOTIFY visualsChanged)
     Q_PROPERTY(QVariantList trackGeometries READ trackGeometries NOTIFY visualsChanged)
-    Q_PROPERTY(QVariantMap loopRangeGeometry READ loopRangeGeometry NOTIFY visualsChanged)
+    Q_PROPERTY(QVariantList loopRangeGeometries READ loopRangeGeometries NOTIFY visualsChanged)
     Q_PROPERTY(double markerX READ markerX NOTIFY markerChanged)
     Q_PROPERTY(bool hasLoopIndicator READ hasLoopIndicator NOTIFY overlayChanged)
     Q_PROPERTY(double loopIndicatorX READ loopIndicatorX NOTIFY overlayChanged)
+    Q_PROPERTY(bool hasPendingLoopDraftHandle READ hasPendingLoopDraftHandle NOTIFY overlayChanged)
+    Q_PROPERTY(double pendingLoopDraftHandleX READ pendingLoopDraftHandleX NOTIFY overlayChanged)
     Q_PROPERTY(bool hasHoverLine READ hasHoverLine NOTIFY overlayChanged)
     Q_PROPERTY(double hoverX READ hoverX NOTIFY overlayChanged)
     Q_PROPERTY(int cursorShape READ cursorShape NOTIFY cursorShapeChanged)
@@ -41,14 +43,17 @@ public:
     void setVideoPath(const QString& videoPath);
     void setTimeline(int totalFrames, double fps);
     void setCurrentFrame(int frameIndex);
-    void setLoopRange(std::optional<int> startFrame, std::optional<int> endFrame);
+    void setLoopRanges(const std::vector<TimelineLoopRange>& loopRanges);
     void setTrackSpans(const std::vector<TimelineTrackSpan>& trackSpans);
     void setSeekOnClickEnabled(bool enabled);
     void setThumbnailsVisible(bool visible);
     void setPlaybackActive(bool active);
+    void preparePendingLoopSelection(int startFrame, int endFrame);
+    void setPendingLoopDraftFrame(std::optional<int> frameIndex);
     [[nodiscard]] std::optional<int> loopEditFrame() const;
     [[nodiscard]] std::optional<int> loopShortcutFrame() const;
     [[nodiscard]] bool hasSelectedLoopRange() const;
+    [[nodiscard]] int selectedLoopIndex() const;
 
     [[nodiscard]] QVariantMap timelineRect() const;
     [[nodiscard]] QVariantMap filmstripRect() const;
@@ -57,10 +62,12 @@ public:
     [[nodiscard]] QVariantList gridLines() const;
     [[nodiscard]] QVariantList thumbnailTiles() const;
     [[nodiscard]] QVariantList trackGeometries() const;
-    [[nodiscard]] QVariantMap loopRangeGeometry() const;
+    [[nodiscard]] QVariantList loopRangeGeometries() const;
     [[nodiscard]] double markerX() const;
     [[nodiscard]] bool hasLoopIndicator() const;
     [[nodiscard]] double loopIndicatorX() const;
+    [[nodiscard]] bool hasPendingLoopDraftHandle() const;
+    [[nodiscard]] double pendingLoopDraftHandleX() const;
     [[nodiscard]] bool hasHoverLine() const;
     [[nodiscard]] double hoverX() const;
     [[nodiscard]] int cursorShape() const;
@@ -77,8 +84,10 @@ public:
 
 signals:
     void frameRequested(int frameIndex);
-    void loopStartFrameRequested(int frameIndex);
-    void loopEndFrameRequested(int frameIndex);
+    void addLoopRangeRequested(int startFrame, int endFrame);
+    void loopStartFrameRequested(int loopIndex, int frameIndex);
+    void loopEndFrameRequested(int loopIndex, int frameIndex);
+    void deleteLoopRangeRequested(int loopIndex);
     void trackSelected(const QUuid& trackId);
     void trackActivated(const QUuid& trackId);
     void trackStartFrameRequested(const QUuid& trackId, int frameIndex);
@@ -101,6 +110,7 @@ private:
         QRectF selectionRect;
         QRectF startHandleRect;
         QRectF endHandleRect;
+        int index = -1;
     };
 
     struct TimelineTrackGeometry
@@ -126,13 +136,16 @@ private:
     };
 
     [[nodiscard]] std::vector<TimelineTrackGeometry> computeTrackGeometries() const;
-    [[nodiscard]] std::optional<LoopRangeGeometry> computeLoopRangeGeometry() const;
+    [[nodiscard]] std::vector<LoopRangeGeometry> computeLoopRangeGeometries() const;
+    [[nodiscard]] std::optional<LoopRangeGeometry> loopRangeAt(const QPointF& position) const;
     [[nodiscard]] std::optional<TimelineTrackGeometry> trackAt(const QPointF& position) const;
     void updateTrimAt(const QPointF& position);
     void updateLoopHandleDragAt(const QPointF& position);
     void updateSpanDragAt(const QPointF& position);
     void updateHoverState(const QPointF& position);
     void updateCursorAndTooltip(const QPointF& position, const QPoint& globalPosition);
+    void createDefaultLoopRangeAtFrame(int frameIndex);
+    void deleteLoopRange(int loopIndex);
     void refreshVisuals();
     [[nodiscard]] QRectF computeTimelineRect() const;
     [[nodiscard]] QRectF computeFilmstripRect() const;
@@ -159,8 +172,10 @@ private:
     double m_viewportHeight = 0.0;
     std::optional<TimelineTrackGeometry> m_trimmedTrack;
     std::optional<TimelineTrackGeometry> m_draggedTrack;
-    std::optional<int> m_loopStartFrame;
-    std::optional<int> m_loopEndFrame;
+    std::vector<TimelineLoopRange> m_loopRanges;
+    std::optional<TimelineLoopRange> m_pendingSelectedLoopRange;
+    std::optional<int> m_pendingLoopDraftFrame;
+    int m_selectedLoopIndex = -1;
     std::optional<int> m_loopEditFrame;
     bool m_loopSelected = false;
     std::optional<int> m_hoveredLoopFrame;
@@ -189,10 +204,12 @@ private:
     QVariantList m_gridLines;
     QVariantList m_thumbnailTiles;
     QVariantList m_trackGeometryMaps;
-    QVariantMap m_loopRangeGeometryMap;
+    QVariantList m_loopRangeGeometryMaps;
     double m_markerX = 0.0;
     bool m_hasLoopIndicator = false;
     double m_loopIndicatorX = 0.0;
+    bool m_hasPendingLoopDraftHandle = false;
+    double m_pendingLoopDraftHandleX = 0.0;
     bool m_hasHoverLine = false;
     double m_hoverX = 0.0;
     int m_cursorShape = static_cast<int>(Qt::ArrowCursor);

@@ -13,6 +13,7 @@ namespace
 constexpr double kMinVisibleFrameSpan = 12.0;
 constexpr double kZoomStepFactor = 1.2;
 constexpr double kFilmstripHeight = 42.0;
+constexpr int kDefaultLoopDurationSeconds = 5;
 
 double clampedVisibleFrameSpan(const int totalFrames, const double requestedSpan)
 {
@@ -68,8 +69,10 @@ void TimelineQuickController::clear()
 {
     m_trimmedTrack.reset();
     m_draggedTrack.reset();
-    m_loopStartFrame.reset();
-    m_loopEndFrame.reset();
+    m_loopRanges.clear();
+    m_pendingSelectedLoopRange.reset();
+    m_pendingLoopDraftFrame.reset();
+    m_selectedLoopIndex = -1;
     m_loopEditFrame.reset();
     m_loopSelected = false;
     m_hoveredLoopFrame.reset();
@@ -124,8 +127,10 @@ void TimelineQuickController::setTimeline(const int totalFrames, const double fp
     m_viewStartFrame = 0.0;
     if (m_totalFrames <= 0)
     {
-        m_loopStartFrame.reset();
-        m_loopEndFrame.reset();
+        m_loopRanges.clear();
+        m_pendingSelectedLoopRange.reset();
+        m_pendingLoopDraftFrame.reset();
+        m_selectedLoopIndex = -1;
         m_loopEditFrame.reset();
         m_loopSelected = false;
         m_hoveredLoopFrame.reset();
@@ -134,13 +139,10 @@ void TimelineQuickController::setTimeline(const int totalFrames, const double fp
     else
     {
         const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
-        if (m_loopStartFrame.has_value())
+        for (auto& loopRange : m_loopRanges)
         {
-            m_loopStartFrame = std::clamp(*m_loopStartFrame, 0, maxFrameIndex);
-        }
-        if (m_loopEndFrame.has_value())
-        {
-            m_loopEndFrame = std::clamp(*m_loopEndFrame, 0, maxFrameIndex);
+            loopRange.startFrame = std::clamp(loopRange.startFrame, 0, maxFrameIndex);
+            loopRange.endFrame = std::clamp(loopRange.endFrame, loopRange.startFrame, maxFrameIndex);
         }
         if (m_loopEditFrame.has_value())
         {
@@ -178,18 +180,60 @@ void TimelineQuickController::setCurrentFrame(const int frameIndex)
     emit markerChanged();
 }
 
-void TimelineQuickController::setLoopRange(const std::optional<int> startFrame, const std::optional<int> endFrame)
+void TimelineQuickController::setLoopRanges(const std::vector<TimelineLoopRange>& loopRanges)
 {
-    if (m_loopStartFrame == startFrame && m_loopEndFrame == endFrame)
+    if (m_loopRanges == loopRanges)
     {
         return;
     }
 
-    m_loopStartFrame = startFrame;
-    m_loopEndFrame = endFrame;
-    if (!m_loopStartFrame.has_value() && !m_loopEndFrame.has_value())
+    TimelineLoopRange selectedLoop;
+    const auto previousSelectedLoopIndex = m_selectedLoopIndex;
+    const auto hadSelectedLoop = previousSelectedLoopIndex >= 0
+        && previousSelectedLoopIndex < static_cast<int>(m_loopRanges.size());
+    if (hadSelectedLoop)
     {
-        m_loopSelected = false;
+        selectedLoop = m_loopRanges[previousSelectedLoopIndex];
+    }
+
+    m_loopRanges = loopRanges;
+    m_selectedLoopIndex = -1;
+    if (hadSelectedLoop)
+    {
+        for (int index = 0; index < static_cast<int>(m_loopRanges.size()); ++index)
+        {
+            if (m_loopRanges[index] == selectedLoop)
+            {
+                m_selectedLoopIndex = index;
+                break;
+            }
+        }
+        if (m_selectedLoopIndex < 0
+            && m_loopHandleDragMode != LoopHandleDragMode::None
+            && previousSelectedLoopIndex >= 0
+            && previousSelectedLoopIndex < static_cast<int>(m_loopRanges.size()))
+        {
+            // Preserve the dragged loop identity across live geometry updates.
+            m_selectedLoopIndex = previousSelectedLoopIndex;
+        }
+    }
+    else if (m_pendingSelectedLoopRange.has_value())
+    {
+        for (int index = 0; index < static_cast<int>(m_loopRanges.size()); ++index)
+        {
+            if (m_loopRanges[index] == *m_pendingSelectedLoopRange)
+            {
+                m_selectedLoopIndex = index;
+                break;
+            }
+        }
+        m_pendingSelectedLoopRange.reset();
+    }
+
+    m_loopSelected = m_selectedLoopIndex >= 0;
+    if (!m_loopSelected)
+    {
+        m_loopEditFrame.reset();
     }
     refreshVisuals();
 }
@@ -246,6 +290,32 @@ void TimelineQuickController::setPlaybackActive(const bool active)
     }
 }
 
+void TimelineQuickController::preparePendingLoopSelection(const int startFrame, const int endFrame)
+{
+    const auto normalizedStart = std::min(startFrame, endFrame);
+    const auto normalizedEnd = std::max(startFrame, endFrame);
+    m_pendingSelectedLoopRange = TimelineLoopRange{
+        .startFrame = normalizedStart,
+        .endFrame = normalizedEnd
+    };
+    m_loopEditFrame = normalizedEnd;
+    m_hoveredLoopFrame = normalizedEnd;
+    m_hoveredTimelineX = xForFrame(normalizedEnd);
+    m_loopSelected = true;
+    refreshVisuals();
+}
+
+void TimelineQuickController::setPendingLoopDraftFrame(const std::optional<int> frameIndex)
+{
+    if (m_pendingLoopDraftFrame == frameIndex)
+    {
+        return;
+    }
+
+    m_pendingLoopDraftFrame = frameIndex;
+    refreshVisuals();
+}
+
 std::optional<int> TimelineQuickController::loopEditFrame() const
 {
     return m_loopEditFrame;
@@ -263,7 +333,14 @@ std::optional<int> TimelineQuickController::loopShortcutFrame() const
 
 bool TimelineQuickController::hasSelectedLoopRange() const
 {
-    return m_loopSelected && (m_loopStartFrame.has_value() || m_loopEndFrame.has_value());
+    return m_loopSelected
+        && m_selectedLoopIndex >= 0
+        && m_selectedLoopIndex < static_cast<int>(m_loopRanges.size());
+}
+
+int TimelineQuickController::selectedLoopIndex() const
+{
+    return hasSelectedLoopRange() ? m_selectedLoopIndex : -1;
 }
 
 QVariantMap TimelineQuickController::timelineRect() const
@@ -301,9 +378,9 @@ QVariantList TimelineQuickController::trackGeometries() const
     return m_trackGeometryMaps;
 }
 
-QVariantMap TimelineQuickController::loopRangeGeometry() const
+QVariantList TimelineQuickController::loopRangeGeometries() const
 {
-    return m_loopRangeGeometryMap;
+    return m_loopRangeGeometryMaps;
 }
 
 double TimelineQuickController::markerX() const
@@ -319,6 +396,16 @@ bool TimelineQuickController::hasLoopIndicator() const
 double TimelineQuickController::loopIndicatorX() const
 {
     return m_loopIndicatorX;
+}
+
+bool TimelineQuickController::hasPendingLoopDraftHandle() const
+{
+    return m_hasPendingLoopDraftHandle;
+}
+
+double TimelineQuickController::pendingLoopDraftHandleX() const
+{
+    return m_pendingLoopDraftHandleX;
 }
 
 bool TimelineQuickController::hasHoverLine() const
@@ -371,16 +458,14 @@ void TimelineQuickController::handleMousePress(
 
     if (button == static_cast<int>(Qt::RightButton))
     {
-        if (const auto loopGeometry = computeLoopRangeGeometry(); loopGeometry.has_value()
-            && (loopGeometry->selectionRect.contains(position)
-                || loopGeometry->startHandleRect.contains(position)
-                || loopGeometry->endHandleRect.contains(position)))
+        if (const auto loopGeometry = loopRangeAt(position); loopGeometry.has_value())
         {
             m_trimmedTrack.reset();
             m_draggedTrack.reset();
             m_dragging = false;
             m_loopEditFrame = frameForPosition(x);
             m_loopSelected = true;
+            m_selectedLoopIndex = loopGeometry->index;
             m_hoveredLoopFrame = m_loopEditFrame;
             m_hoveredTimelineX = x;
             refreshVisuals();
@@ -410,6 +495,7 @@ void TimelineQuickController::handleMousePress(
 
     if (computeLoopBarRect().contains(position))
     {
+        m_pendingLoopDraftFrame.reset();
         m_trimmedTrack.reset();
         m_draggedTrack.reset();
         m_dragging = false;
@@ -419,14 +505,16 @@ void TimelineQuickController::handleMousePress(
         m_loopHandleDragMode = LoopHandleDragMode::None;
         m_loopDragAnchorFrame = *m_loopEditFrame;
         m_loopSelected = false;
-        if (const auto loopGeometry = computeLoopRangeGeometry(); loopGeometry.has_value())
+        m_selectedLoopIndex = -1;
+        if (const auto loopGeometry = loopRangeAt(position); loopGeometry.has_value())
         {
-            if (m_loopStartFrame.has_value() && loopGeometry->startHandleRect.contains(position))
+            m_selectedLoopIndex = loopGeometry->index;
+            if (loopGeometry->startHandleRect.contains(position))
             {
                 m_loopSelected = true;
                 m_loopHandleDragMode = LoopHandleDragMode::Start;
             }
-            else if (m_loopEndFrame.has_value() && loopGeometry->endHandleRect.contains(position))
+            else if (loopGeometry->endHandleRect.contains(position))
             {
                 m_loopSelected = true;
                 m_loopHandleDragMode = LoopHandleDragMode::End;
@@ -435,10 +523,6 @@ void TimelineQuickController::handleMousePress(
             {
                 m_loopSelected = true;
             }
-        }
-        if (m_loopHandleDragMode == LoopHandleDragMode::None)
-        {
-            m_loopHandleDragMode = LoopHandleDragMode::Range;
         }
 
         if (m_seekOnClickEnabled)
@@ -457,6 +541,7 @@ void TimelineQuickController::handleMousePress(
     {
         m_loopEditFrame.reset();
     }
+    m_pendingLoopDraftFrame.reset();
     m_loopSelected = false;
     m_hoveredLoopFrame.reset();
     if (computeTrackAreaRect().contains(position))
@@ -526,7 +611,23 @@ void TimelineQuickController::handleMouseDoubleClick(const int button, const dou
         return;
     }
 
-    if (const auto track = trackAt(QPointF{x, y}); track.has_value())
+    const auto position = QPointF{x, y};
+    if (computeLoopBarRect().contains(position))
+    {
+        if (const auto loopGeometry = loopRangeAt(position); loopGeometry.has_value())
+        {
+            deleteLoopRange(loopGeometry->index);
+            refreshVisuals();
+            return;
+        }
+
+        createDefaultLoopRangeAtFrame(frameForPosition(x));
+        requestFrameAt(position);
+        refreshVisuals();
+        return;
+    }
+
+    if (const auto track = trackAt(position); track.has_value())
     {
         m_loopSelected = false;
         emit trackSelected(track->id);
@@ -710,35 +811,45 @@ std::vector<TimelineQuickController::TimelineTrackGeometry> TimelineQuickControl
     return geometries;
 }
 
-std::optional<TimelineQuickController::LoopRangeGeometry> TimelineQuickController::computeLoopRangeGeometry() const
+std::vector<TimelineQuickController::LoopRangeGeometry> TimelineQuickController::computeLoopRangeGeometries() const
 {
     const auto barRect = computeLoopBarRect();
-    if (!m_loopStartFrame.has_value() && !m_loopEndFrame.has_value())
-    {
-        return LoopRangeGeometry{
-            .barRect = barRect,
-            .selectionRect = {},
-            .startHandleRect = {},
-            .endHandleRect = {}
-        };
-    }
-
-    const auto startFrame = m_loopStartFrame.value_or(m_loopEndFrame.value_or(0));
-    const auto endFrame = m_loopEndFrame.value_or(m_loopStartFrame.value_or(0));
-    const auto startX = xForFrame(startFrame);
-    const auto endX = xForFrame(endFrame);
-    const auto left = std::min(startX, endX);
-    const auto right = std::max(startX, endX);
     const auto handleWidth = 7.0;
     const auto handleTop = barRect.top() - 1.0;
     const auto handleHeight = barRect.height() + 2.0;
+    std::vector<LoopRangeGeometry> geometries;
+    geometries.reserve(m_loopRanges.size());
+    for (int index = 0; index < static_cast<int>(m_loopRanges.size()); ++index)
+    {
+        const auto& loopRange = m_loopRanges[index];
+        const auto startX = xForFrame(loopRange.startFrame);
+        const auto endX = xForFrame(loopRange.endFrame);
+        const auto left = std::min(startX, endX);
+        const auto right = std::max(startX, endX);
+        geometries.push_back(LoopRangeGeometry{
+            .barRect = barRect,
+            .selectionRect = QRectF{left, barRect.top(), std::max(0.0, right - left), barRect.height()},
+            .startHandleRect = QRectF{startX - handleWidth * 0.5, handleTop, handleWidth, handleHeight},
+            .endHandleRect = QRectF{endX - handleWidth * 0.5, handleTop, handleWidth, handleHeight},
+            .index = index
+        });
+    }
+    return geometries;
+}
 
-    return LoopRangeGeometry{
-        .barRect = barRect,
-        .selectionRect = QRectF{left, barRect.top(), std::max(0.0, right - left), barRect.height()},
-        .startHandleRect = QRectF{startX - handleWidth * 0.5, handleTop, handleWidth, handleHeight},
-        .endHandleRect = QRectF{endX - handleWidth * 0.5, handleTop, handleWidth, handleHeight}
-    };
+std::optional<TimelineQuickController::LoopRangeGeometry> TimelineQuickController::loopRangeAt(const QPointF& position) const
+{
+    for (const auto& loopGeometry : computeLoopRangeGeometries())
+    {
+        if (loopGeometry.selectionRect.contains(position)
+            || loopGeometry.startHandleRect.contains(position)
+            || loopGeometry.endHandleRect.contains(position))
+        {
+            return loopGeometry;
+        }
+    }
+
+    return std::nullopt;
 }
 
 std::optional<TimelineQuickController::TimelineTrackGeometry> TimelineQuickController::trackAt(const QPointF& position) const
@@ -777,7 +888,9 @@ void TimelineQuickController::updateTrimAt(const QPointF& position)
 
 void TimelineQuickController::updateLoopHandleDragAt(const QPointF& position)
 {
-    if (m_loopHandleDragMode == LoopHandleDragMode::None)
+    if (m_loopHandleDragMode == LoopHandleDragMode::None
+        || m_selectedLoopIndex < 0
+        || m_selectedLoopIndex >= static_cast<int>(m_loopRanges.size()))
     {
         return;
     }
@@ -786,22 +899,11 @@ void TimelineQuickController::updateLoopHandleDragAt(const QPointF& position)
     m_loopEditFrame = frameIndex;
     if (m_loopHandleDragMode == LoopHandleDragMode::Start)
     {
-        emit loopStartFrameRequested(frameIndex);
+        emit loopStartFrameRequested(m_selectedLoopIndex, frameIndex);
     }
     else if (m_loopHandleDragMode == LoopHandleDragMode::End)
     {
-        emit loopEndFrameRequested(frameIndex);
-    }
-    else if (m_loopHandleDragMode == LoopHandleDragMode::Range)
-    {
-        if (frameIndex == m_loopDragAnchorFrame)
-        {
-            refreshVisuals();
-            return;
-        }
-
-        emit loopStartFrameRequested(std::min(m_loopDragAnchorFrame, frameIndex));
-        emit loopEndFrameRequested(std::max(m_loopDragAnchorFrame, frameIndex));
+        emit loopEndFrameRequested(m_selectedLoopIndex, frameIndex);
     }
 
     requestFrame(frameIndex);
@@ -854,7 +956,7 @@ void TimelineQuickController::updateHoverState(const QPointF& position)
 void TimelineQuickController::updateCursorAndTooltip(const QPointF& position, const QPoint& globalPosition)
 {
     auto nextCursor = static_cast<int>(Qt::ArrowCursor);
-    if (const auto loopGeometry = computeLoopRangeGeometry(); loopGeometry.has_value()
+    if (const auto loopGeometry = loopRangeAt(position); loopGeometry.has_value()
         && (loopGeometry->startHandleRect.contains(position) || loopGeometry->endHandleRect.contains(position)))
     {
         QToolTip::hideText();
@@ -888,11 +990,88 @@ void TimelineQuickController::updateCursorAndTooltip(const QPointF& position, co
     }
 }
 
+void TimelineQuickController::createDefaultLoopRangeAtFrame(const int frameIndex)
+{
+    if (m_totalFrames <= 0)
+    {
+        return;
+    }
+
+    const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
+    const auto durationFrames = std::max(1, roundedFpsFrames(m_fps) * kDefaultLoopDurationSeconds);
+    auto startFrame = std::clamp(frameIndex, 0, maxFrameIndex);
+    auto endFrame = std::min(maxFrameIndex, startFrame + durationFrames);
+
+    for (const auto& loopRange : m_loopRanges)
+    {
+        if (startFrame >= loopRange.startFrame && startFrame <= loopRange.endFrame)
+        {
+            startFrame = loopRange.endFrame + 1;
+        }
+    }
+
+    if (startFrame > maxFrameIndex)
+    {
+        return;
+    }
+
+    endFrame = std::min(maxFrameIndex, startFrame + durationFrames);
+    for (const auto& loopRange : m_loopRanges)
+    {
+        if (startFrame <= loopRange.endFrame && endFrame >= loopRange.startFrame)
+        {
+            endFrame = loopRange.startFrame - 1;
+            break;
+        }
+    }
+
+    if (endFrame <= startFrame)
+    {
+        return;
+    }
+
+    m_pendingSelectedLoopRange = TimelineLoopRange{
+        .startFrame = startFrame,
+        .endFrame = endFrame
+    };
+    m_loopEditFrame = startFrame;
+    m_hoveredLoopFrame = startFrame;
+    m_hoveredTimelineX = xForFrame(startFrame);
+    m_loopSelected = true;
+    m_loopHandleDragMode = LoopHandleDragMode::None;
+    m_loopDragAnchorFrame = startFrame;
+    emit addLoopRangeRequested(startFrame, endFrame);
+}
+
+void TimelineQuickController::deleteLoopRange(const int loopIndex)
+{
+    if (loopIndex < 0 || loopIndex >= static_cast<int>(m_loopRanges.size()))
+    {
+        return;
+    }
+
+    if (m_pendingSelectedLoopRange.has_value() && m_pendingSelectedLoopRange == m_loopRanges[loopIndex])
+    {
+        m_pendingSelectedLoopRange.reset();
+    }
+
+    if (m_selectedLoopIndex == loopIndex)
+    {
+        m_selectedLoopIndex = -1;
+        m_loopSelected = false;
+        m_loopEditFrame.reset();
+    }
+
+    emit deleteLoopRangeRequested(loopIndex);
+}
+
 void TimelineQuickController::refreshVisuals()
 {
     const auto previousMarkerX = m_markerX;
     const auto previousHasLoopIndicator = m_hasLoopIndicator;
     const auto previousLoopIndicatorX = m_loopIndicatorX;
+    const auto previousHasPendingLoopDraftHandle = m_hasPendingLoopDraftHandle;
+    const auto previousPendingLoopDraftHandleX = m_pendingLoopDraftHandleX;
     const auto previousHasHoverLine = m_hasHoverLine;
     const auto previousHoverX = m_hoverX;
 
@@ -975,27 +1154,27 @@ void TimelineQuickController::refreshVisuals()
         m_trackGeometryMaps.push_back(track);
     }
 
-    if (const auto loopGeometry = computeLoopRangeGeometry(); loopGeometry.has_value())
+    m_loopRangeGeometryMaps.clear();
+    for (const auto& loopGeometry : computeLoopRangeGeometries())
     {
-        m_loopRangeGeometryMap = QVariantMap{
-            {QStringLiteral("selectionRect"), rectMap(loopGeometry->selectionRect)},
-            {QStringLiteral("startHandleRect"), rectMap(loopGeometry->startHandleRect)},
-            {QStringLiteral("endHandleRect"), rectMap(loopGeometry->endHandleRect)},
-            {QStringLiteral("selectionVisible"), loopGeometry->selectionRect.width() > 0.0},
-            {QStringLiteral("startHandleVisible"), m_loopStartFrame.has_value()},
-            {QStringLiteral("endHandleVisible"), m_loopEndFrame.has_value()},
-            {QStringLiteral("selected"), m_loopSelected}
-        };
-    }
-    else
-    {
-        m_loopRangeGeometryMap.clear();
+        m_loopRangeGeometryMaps.push_back(QVariantMap{
+            {QStringLiteral("selectionRect"), rectMap(loopGeometry.selectionRect)},
+            {QStringLiteral("startHandleRect"), rectMap(loopGeometry.startHandleRect)},
+            {QStringLiteral("endHandleRect"), rectMap(loopGeometry.endHandleRect)},
+            {QStringLiteral("selectionVisible"), loopGeometry.selectionRect.width() > 0.0},
+            {QStringLiteral("startHandleVisible"), true},
+            {QStringLiteral("endHandleVisible"), true},
+            {QStringLiteral("selected"), m_loopSelected && loopGeometry.index == m_selectedLoopIndex},
+            {QStringLiteral("index"), loopGeometry.index}
+        });
     }
 
     m_markerX = xForFrame(m_currentFrame);
     const auto loopIndicatorFrame = loopShortcutFrame();
     m_hasLoopIndicator = loopIndicatorFrame.has_value();
     m_loopIndicatorX = m_hasLoopIndicator ? xForFrame(*loopIndicatorFrame) : 0.0;
+    m_hasPendingLoopDraftHandle = m_pendingLoopDraftFrame.has_value();
+    m_pendingLoopDraftHandleX = m_hasPendingLoopDraftHandle ? xForFrame(*m_pendingLoopDraftFrame) : 0.0;
     m_hasHoverLine = m_hoveredTimelineX.has_value();
     m_hoverX = m_hasHoverLine ? std::clamp(*m_hoveredTimelineX, loopRect.left(), loopRect.right()) : 0.0;
 
@@ -1006,6 +1185,8 @@ void TimelineQuickController::refreshVisuals()
     }
     if (m_hasLoopIndicator != previousHasLoopIndicator
         || std::abs(m_loopIndicatorX - previousLoopIndicatorX) > 0.001
+        || m_hasPendingLoopDraftHandle != previousHasPendingLoopDraftHandle
+        || std::abs(m_pendingLoopDraftHandleX - previousPendingLoopDraftHandleX) > 0.001
         || m_hasHoverLine != previousHasHoverLine
         || std::abs(m_hoverX - previousHoverX) > 0.001)
     {

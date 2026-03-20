@@ -29,8 +29,7 @@ public:
         bool insertionFollowsPlayback = false;
         bool fastPlaybackEnabled = false;
         bool embeddedVideoAudioMuted = true;
-        std::optional<int> loopStartFrame;
-        std::optional<int> loopEndFrame;
+        std::vector<TimelineLoopRange> loopRanges;
         float masterMixGainDb = 0.0F;
         bool masterMixMuted = false;
         bool mixSoloXorMode = false;
@@ -50,8 +49,7 @@ public:
         bool insertionFollowsPlayback = false;
         bool fastPlaybackEnabled = false;
         bool embeddedVideoAudioMuted = true;
-        std::optional<int> loopStartFrame;
-        std::optional<int> loopEndFrame;
+        std::vector<TimelineLoopRange> loopRanges;
         float masterMixGainDb = 0.0F;
         bool masterMixMuted = false;
         bool mixSoloXorMode = false;

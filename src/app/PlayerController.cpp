@@ -116,8 +116,7 @@ void PlayerController::clearProjectStateAfterMediaStop(const bool resetVideoPlay
     m_undoSelectedTrackIds.clear();
     m_redoTrackerState.reset();
     m_redoSelectedTrackIds.clear();
-    m_loopStartFrame.reset();
-    m_loopEndFrame.reset();
+    m_loopRanges.clear();
     m_mixStateStore->reset();
     m_audioDurationMsByPath.clear();
     m_audioChannelCountByPath.clear();
@@ -200,8 +199,7 @@ dawg::project::ControllerState PlayerController::snapshotProjectState() const
         .insertionFollowsPlayback = m_transport.insertionFollowsPlayback(),
         .fastPlaybackEnabled = m_videoPlaybackCoordinator->renderService().fastPlaybackEnabled(),
         .embeddedVideoAudioMuted = m_embeddedVideoAudioMuted,
-        .loopStartFrame = m_loopStartFrame,
-        .loopEndFrame = m_loopEndFrame,
+        .loopRanges = m_loopRanges,
         .masterMixGainDb = m_mixStateStore->masterGainDb(),
         .masterMixMuted = m_mixStateStore->masterMuted(),
         .mixSoloXorMode = m_mixStateStore->soloMode() == MixStateStore::SoloMode::Xor,
@@ -240,8 +238,7 @@ bool PlayerController::restoreProjectState(const dawg::project::ControllerState&
         });
     m_audioPool.setAssetPaths(payload.audioPoolAssetPaths);
     m_tracker.restoreState(payload.trackerState);
-    m_loopStartFrame = payload.loopStartFrame;
-    m_loopEndFrame = payload.loopEndFrame;
+    m_loopRanges = payload.loopRanges;
     m_mixStateStore->restore(
         payload.masterMixGainDb,
         payload.masterMixMuted,
@@ -449,67 +446,105 @@ bool PlayerController::setSelectedTrackClipRangeMs(const int clipStartMs, const 
     return true;
 }
 
-void PlayerController::setLoopStartFrame(const int frameIndex)
+bool PlayerController::addLoopRange(const int startFrame, const int endFrame)
 {
     if (!hasVideoLoaded())
+    {
+        return false;
+    }
+
+    const auto maxFrameIndex = std::max(0, m_videoPlaybackCoordinator->totalFrames() - 1);
+    auto normalizedRange = TimelineLoopRange{
+        .startFrame = std::clamp(std::min(startFrame, endFrame), 0, maxFrameIndex),
+        .endFrame = std::clamp(std::max(startFrame, endFrame), 0, maxFrameIndex)
+    };
+    if (normalizedRange.endFrame < normalizedRange.startFrame
+        || loopRangeOverlaps(normalizedRange))
+    {
+        return false;
+    }
+
+    m_loopRanges.push_back(normalizedRange);
+    std::sort(
+        m_loopRanges.begin(),
+        m_loopRanges.end(),
+        [](const TimelineLoopRange& left, const TimelineLoopRange& right)
+        {
+            return left.startFrame < right.startFrame;
+        });
+    emit loopRangeChanged();
+    return true;
+}
+
+void PlayerController::setLoopStartFrame(const int loopIndex, const int frameIndex)
+{
+    if (!hasVideoLoaded() || loopIndex < 0 || loopIndex >= static_cast<int>(m_loopRanges.size()))
     {
         return;
     }
 
     const auto maxFrameIndex = std::max(0, m_videoPlaybackCoordinator->totalFrames() - 1);
-    const auto clampedFrameIndex = std::clamp(frameIndex, 0, maxFrameIndex);
-    auto nextLoopStartFrame = std::optional<int>{clampedFrameIndex};
-    auto nextLoopEndFrame = m_loopEndFrame;
-    if (nextLoopEndFrame.has_value() && clampedFrameIndex > *nextLoopEndFrame)
-    {
-        nextLoopEndFrame = clampedFrameIndex;
-    }
-
-    if (m_loopStartFrame == nextLoopStartFrame && m_loopEndFrame == nextLoopEndFrame)
+    const auto previousEnd = loopIndex > 0 ? m_loopRanges[loopIndex - 1].endFrame : -1;
+    auto updatedRange = m_loopRanges[loopIndex];
+    const auto maxStartFrame = std::max(0, std::min(updatedRange.endFrame, maxFrameIndex));
+    updatedRange.startFrame = std::clamp(
+        frameIndex,
+        previousEnd,
+        maxStartFrame);
+    if (updatedRange == m_loopRanges[loopIndex])
     {
         return;
     }
 
-    m_loopStartFrame = nextLoopStartFrame;
-    m_loopEndFrame = nextLoopEndFrame;
+    m_loopRanges[loopIndex] = updatedRange;
     emit loopRangeChanged();
 }
 
-void PlayerController::setLoopEndFrame(const int frameIndex)
+void PlayerController::setLoopEndFrame(const int loopIndex, const int frameIndex)
 {
-    if (!hasVideoLoaded())
+    if (!hasVideoLoaded() || loopIndex < 0 || loopIndex >= static_cast<int>(m_loopRanges.size()))
     {
         return;
     }
 
     const auto maxFrameIndex = std::max(0, m_videoPlaybackCoordinator->totalFrames() - 1);
-    const auto clampedFrameIndex = std::clamp(frameIndex, 0, maxFrameIndex);
-    auto nextLoopStartFrame = m_loopStartFrame;
-    auto nextLoopEndFrame = std::optional<int>{clampedFrameIndex};
-    if (nextLoopStartFrame.has_value() && clampedFrameIndex < *nextLoopStartFrame)
-    {
-        nextLoopStartFrame = clampedFrameIndex;
-    }
-
-    if (m_loopStartFrame == nextLoopStartFrame && m_loopEndFrame == nextLoopEndFrame)
+    const auto nextStart = loopIndex + 1 < static_cast<int>(m_loopRanges.size())
+        ? m_loopRanges[loopIndex + 1].startFrame
+        : maxFrameIndex + 1;
+    auto updatedRange = m_loopRanges[loopIndex];
+    const auto minEndFrame = std::min(maxFrameIndex, std::max(updatedRange.startFrame, 0));
+    updatedRange.endFrame = std::clamp(
+        frameIndex,
+        minEndFrame,
+        std::min(nextStart, maxFrameIndex));
+    if (updatedRange == m_loopRanges[loopIndex])
     {
         return;
     }
 
-    m_loopStartFrame = nextLoopStartFrame;
-    m_loopEndFrame = nextLoopEndFrame;
+    m_loopRanges[loopIndex] = updatedRange;
     emit loopRangeChanged();
 }
 
-void PlayerController::clearLoopRange()
+void PlayerController::removeLoopRange(const int loopIndex)
 {
-    if (!m_loopStartFrame.has_value() && !m_loopEndFrame.has_value())
+    if (loopIndex < 0 || loopIndex >= static_cast<int>(m_loopRanges.size()))
     {
         return;
     }
 
-    m_loopStartFrame.reset();
-    m_loopEndFrame.reset();
+    m_loopRanges.erase(m_loopRanges.begin() + loopIndex);
+    emit loopRangeChanged();
+}
+
+void PlayerController::clearLoopRanges()
+{
+    if (m_loopRanges.empty())
+    {
+        return;
+    }
+
+    m_loopRanges.clear();
     emit loopRangeChanged();
 }
 
@@ -1092,14 +1127,9 @@ bool PlayerController::isFastPlaybackActive() const
     return m_videoPlaybackCoordinator->renderService().fastPlaybackEnabled() && m_transport.isPlaying();
 }
 
-std::optional<int> PlayerController::loopStartFrame() const
+std::vector<TimelineLoopRange> PlayerController::loopRanges() const
 {
-    return m_loopStartFrame;
-}
-
-std::optional<int> PlayerController::loopEndFrame() const
-{
-    return m_loopEndFrame;
+    return m_loopRanges;
 }
 
 float PlayerController::masterMixGainDb() const
@@ -1601,19 +1631,35 @@ void PlayerController::emitCurrentFrame()
 
 std::optional<std::pair<int, int>> PlayerController::activeLoopRange() const
 {
-    if (!m_loopStartFrame.has_value() || !m_loopEndFrame.has_value())
+    const auto currentFrameIndex = m_videoPlaybackCoordinator->currentFrame().index;
+    for (const auto& loopRange : m_loopRanges)
     {
-        return std::nullopt;
+        if (currentFrameIndex >= loopRange.startFrame && currentFrameIndex <= loopRange.endFrame)
+        {
+            return std::pair<int, int>{loopRange.startFrame, loopRange.endFrame};
+        }
+    }
+    return std::nullopt;
+}
+
+bool PlayerController::loopRangeOverlaps(const TimelineLoopRange& candidate, const int ignoreIndex) const
+{
+    for (int index = 0; index < static_cast<int>(m_loopRanges.size()); ++index)
+    {
+        if (index == ignoreIndex)
+        {
+            continue;
+        }
+
+        const auto& existingRange = m_loopRanges[index];
+        if (candidate.startFrame < existingRange.endFrame
+            && candidate.endFrame > existingRange.startFrame)
+        {
+            return true;
+        }
     }
 
-    const auto startFrame = std::min(*m_loopStartFrame, *m_loopEndFrame);
-    const auto endFrame = std::max(*m_loopStartFrame, *m_loopEndFrame);
-    if (endFrame <= startFrame)
-    {
-        return std::nullopt;
-    }
-
-    return std::pair<int, int>{startFrame, endFrame};
+    return false;
 }
 
 void PlayerController::applyLiveMixStateToCurrentPlayback()
