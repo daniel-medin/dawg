@@ -115,6 +115,7 @@ Item {
             required property var modelData
 
             readonly property var handleRect: root.handleRectFor(modelData.key)
+            property bool hoverGlowVisible: false
 
             x: rectValue(handleRect, "x")
             y: rectValue(handleRect, "y")
@@ -124,7 +125,19 @@ Item {
 
             Rectangle {
                 anchors.fill: parent
-                color: dragArea.pressed ? "#34404f" : (dragArea.containsMouse ? "#27313d" : "#161c24")
+                color: "#161c24"
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                color: dragArea.pressed ? theme.resizeHandlePressed : theme.resizeHandleHover
+                opacity: dragArea.pressed ? 1.0 : (hoverGlowVisible ? 1.0 : 0.0)
+
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: 150
+                    }
+                }
             }
 
             MouseArea {
@@ -141,6 +154,8 @@ Item {
                 }
 
                 onPressed: function(mouse) {
+                    hoverTimer.stop()
+                    hoverGlowVisible = false
                     var point = rootPoint(mouse)
                     shellLayoutController.beginResize(modelData.key, point.x, point.y)
                     mouse.accepted = true
@@ -153,8 +168,28 @@ Item {
                     }
                 }
 
+                onContainsMouseChanged: {
+                    if (containsMouse) {
+                        hoverTimer.restart()
+                    } else {
+                        hoverTimer.stop()
+                        hoverGlowVisible = false
+                    }
+                }
+
                 onReleased: shellLayoutController.endResize()
                 onCanceled: shellLayoutController.endResize()
+            }
+
+            Timer {
+                id: hoverTimer
+                interval: 1000
+                repeat: false
+                onTriggered: {
+                    if (dragArea.containsMouse && !dragArea.pressed) {
+                        hoverGlowVisible = true
+                    }
+                }
             }
         }
     }

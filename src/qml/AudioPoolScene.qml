@@ -27,6 +27,15 @@ Rectangle {
     }
 
     function openMenu(kind, rowIndex, items, anchorItem) {
+        if (menuPopup.opened
+                && activeMenuKind === kind
+                && activeRowIndex === rowIndex
+                && activeMenuAnchor === anchorItem) {
+            menuPopup.close()
+            closeMenu()
+            return
+        }
+
         activeMenuKind = kind
         activeRowIndex = rowIndex
         activeMenuItems = items
@@ -110,20 +119,10 @@ Rectangle {
 
             ToolButton {
                 id: headerMenuButton
-                property bool ignoreReleaseClick: false
 
                 text: "\u2630"
                 hoverEnabled: true
-                onPressed: {
-                    ignoreReleaseClick = menuPopup.opened
-                        && root.activeMenuKind === "header"
-                        && root.activeRowIndex === -1
-                }
                 onClicked: {
-                    if (ignoreReleaseClick) {
-                        ignoreReleaseClick = false
-                        return
-                    }
                     root.openMenu("header", -1, [
                         { key: "importAudio", text: "Import Audio... (Ctrl+Shift+I)" },
                         { key: "showLength", text: "Show Length", checkable: true, checked: audioPoolController.showLength },
@@ -183,22 +182,12 @@ Rectangle {
 
                 ToolButton {
                     id: videoMenuButton
-                    property bool ignoreReleaseClick: false
 
                     text: "\u2630"
                     hoverEnabled: true
                     ToolTip.visible: hovered
                     ToolTip.text: audioPoolController.videoAudioTooltip
-                    onPressed: {
-                        ignoreReleaseClick = menuPopup.opened
-                            && root.activeMenuKind === "video"
-                            && root.activeRowIndex === -1
-                    }
                     onClicked: {
-                        if (ignoreReleaseClick) {
-                            ignoreReleaseClick = false
-                            return
-                        }
                         root.openMenu("video", -1, [
                             { key: "toggleMute", text: audioPoolController.videoAudioMuted ? "Unmute" : "Mute" },
                             { key: "toggleFastPlayback", text: "Fast Playback", checkable: true, checked: audioPoolController.fastPlaybackEnabled }
@@ -392,20 +381,10 @@ Rectangle {
 
                         ToolButton {
                             id: rowMenuButton
-                            property bool ignoreReleaseClick: false
 
                             text: "\u2630"
                             hoverEnabled: true
-                            onPressed: {
-                                ignoreReleaseClick = menuPopup.opened
-                                    && root.activeMenuKind === "row"
-                                    && root.activeRowIndex === rowRoot.index
-                            }
                             onClicked: {
-                                if (ignoreReleaseClick) {
-                                    ignoreReleaseClick = false
-                                    return
-                                }
                                 clickTimer.stop()
                                 root.openMenu("row", rowRoot.index, [
                                     { key: "addToFrame", text: "Add to Frame" },

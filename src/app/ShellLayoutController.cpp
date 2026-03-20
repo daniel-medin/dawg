@@ -6,7 +6,7 @@
 
 namespace
 {
-constexpr int kHandleThickness = 10;
+constexpr int kHandleThickness = 3;
 constexpr int kMinimumMainWidth = 400;
 constexpr int kMinimumAudioPoolWidth = 240;
 constexpr int kMinimumCanvasHeight = 200;

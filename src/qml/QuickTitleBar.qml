@@ -119,7 +119,6 @@ Rectangle {
                 id: menuRoot
                 required property var modelData
                 property alias menuRef: menuPopup
-                property bool ignoreReleaseClick: false
 
                 width: menuButton.implicitWidth
                 height: root.height
@@ -156,15 +155,7 @@ Rectangle {
                         menuPopup.open()
                     }
 
-                    onPressed: {
-                        menuRoot.ignoreReleaseClick = menuPopup.opened
-                    }
-
                     onClicked: {
-                        if (menuRoot.ignoreReleaseClick) {
-                            menuRoot.ignoreReleaseClick = false
-                            return
-                        }
                         var wasOpen = menuPopup.opened
                         root.closeAllMenus()
                         if (!wasOpen) {
@@ -290,17 +281,16 @@ Rectangle {
                 MouseArea {
                     visible: menuPopup.opened
                     parent: root.Window.window ? root.Window.window.contentItem : root
-                    anchors.fill: parent
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    y: root.y + root.height
+                    height: Math.max(0, parent.height - y)
                     z: 1000
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     hoverEnabled: false
 
                     onPressed: function(mouse) {
-                        if (root.pointInsideItem(menuButton, parent, mouse.x, mouse.y)) {
-                            mouse.accepted = true
-                            return
-                        }
-
                         root.closeAllMenus()
                         mouse.accepted = false
                     }
@@ -320,7 +310,14 @@ Rectangle {
 
         Item {
             Layout.fillHeight: true
-            Layout.preferredWidth: 8
+            Layout.preferredWidth: 2
+
+            Rectangle {
+                anchors.fill: parent
+                color: resizeArea.pressed
+                    ? theme.resizeHandlePressed
+                    : (resizeArea.containsMouse ? theme.resizeHandleHover : "transparent")
+            }
 
             MouseArea {
                 id: resizeArea

@@ -118,6 +118,8 @@ $buildRoot = Join-Path $repoRoot 'build\windows-msvc-current'
 $repoLocalVcpkgRoot = Join-Path $repoRoot '.tools\vcpkg'
 $vcpkgRoot = if ($env:DAWG_VCPKG_ROOT) {
     $env:DAWG_VCPKG_ROOT
+} elseif (Test-Path (Join-Path $repoLocalVcpkgRoot 'vcpkg.exe')) {
+    $repoLocalVcpkgRoot
 } elseif ($env:VCPKG_ROOT) {
     $env:VCPKG_ROOT
 } else {
@@ -146,6 +148,7 @@ Write-Step "Configuring project"
 Invoke-Native -FailureMessage "CMake configure failed." -Command {
     cmake -S $repoRoot `
         -B $buildRoot `
+        --fresh `
         -G "Visual Studio 17 2022" `
         -A x64 `
         -DCMAKE_TOOLCHAIN_FILE="$vcpkgRoot\scripts\buildsystems\vcpkg.cmake" `

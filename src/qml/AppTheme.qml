@@ -8,6 +8,8 @@ QtObject {
     readonly property color subtitleText: "#98a3b2"
     readonly property color hoverFill: "#232a35"
     readonly property color pressedFill: "#1b2129"
+    readonly property color resizeHandleHover: "#007acc"
+    readonly property color resizeHandlePressed: "#2899f5"
     readonly property color closeHoverFill: "#c42b1c"
     readonly property color closePressedFill: "#a42618"
     readonly property color menuBackground: "#1a1f28"
@@ -17,4 +19,3 @@ QtObject {
     readonly property color menuItemDisabled: "#5a6577"
     readonly property color menuShortcutText: "#7a8899"
 }
-
