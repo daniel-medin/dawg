@@ -161,6 +161,19 @@ void VideoPlaybackCoordinator::setNativePresentationEnabled(const bool enabled)
 
     m_nativePresentationEnabled = enabled;
     updateCpuFrameExtractionMode();
+
+    if (!m_videoPlayback.hasVideoLoaded() || !m_currentFrame.isValid())
+    {
+        return;
+    }
+
+    // Reload the current frame so CPU-backed image data is immediately available
+    // after switching away from native presentation while paused.
+    if (m_videoPlayback.seekFrame(m_currentFrame.index))
+    {
+        m_currentFrame = m_videoPlayback.currentFrame();
+        updateCurrentGrayFrameIfNeeded();
+    }
 }
 
 double VideoPlaybackCoordinator::frameTimestampSeconds(const int frameIndex) const

@@ -58,6 +58,10 @@ void MainWindowActions::buildMenus()
     m_window.m_showAllNodeNamesAction = new QAction(QStringLiteral("Node Name Always On"), &m_window);
     m_window.m_importSoundAction = new QAction(QStringLiteral("Import Audio..."), &m_window);
     m_window.m_detachVideoAction = new QAction(QStringLiteral("Detach Video"), &m_window);
+    m_window.m_detachTimelineAction = new QAction(QStringLiteral("Detach Timeline"), &m_window);
+    m_window.m_detachClipEditorAction = new QAction(QStringLiteral("Detach Clip Editor"), &m_window);
+    m_window.m_detachMixAction = new QAction(QStringLiteral("Detach Mixer"), &m_window);
+    m_window.m_detachAudioPoolAction = new QAction(QStringLiteral("Detach Audio Pool"), &m_window);
     m_window.m_showClipEditorAction = new QAction(QStringLiteral("Toggle Clip Editor (Ctrl+-)"), &m_window);
     m_window.m_showTimelineAction = new QAction(QStringLiteral("Show Timeline (T)"), &m_window);
     m_window.m_showMixAction = new QAction(QStringLiteral("Toggle Mix Window (Ctrl++)"), &m_window);

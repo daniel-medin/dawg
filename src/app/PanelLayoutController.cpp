@@ -49,6 +49,7 @@ bool restoreWindowGeometry(QWindow* window, const QByteArray& state)
     window->setGeometry(geometry);
     return true;
 }
+
 }
 
 PanelLayoutController::PanelLayoutController(MainWindow& window)
@@ -58,24 +59,36 @@ PanelLayoutController::PanelLayoutController(MainWindow& window)
 
 dawg::project::UiState PanelLayoutController::snapshotProjectUiState() const
 {
-    const auto timelineVisible = m_window.m_shellLayoutController
-        ? m_window.m_shellLayoutController->timelineVisible()
-        : (m_window.m_timelineQuickWidget && m_window.m_timelineQuickWidget->isVisible());
-    const auto clipEditorVisible = m_window.m_shellLayoutController
-        ? m_window.m_shellLayoutController->clipEditorVisible()
-        : (m_window.m_clipEditorQuickWidget && m_window.m_clipEditorQuickWidget->isVisible());
-    const auto mixVisible = m_window.m_shellLayoutController
-        ? m_window.m_shellLayoutController->mixVisible()
-        : (m_window.m_mixQuickWidget && m_window.m_mixQuickWidget->isVisible());
-    const auto audioPoolVisible = m_window.m_shellLayoutController
-        ? m_window.m_shellLayoutController->audioPoolVisible()
-        : (m_window.m_audioPoolQuickWidget && m_window.m_audioPoolQuickWidget->isVisible());
+    const auto timelineVisible = (m_window.m_showTimelineAction && m_window.m_showTimelineAction->isChecked())
+        || m_window.m_timelineDetached;
+    const auto clipEditorVisible = (m_window.m_showClipEditorAction && m_window.m_showClipEditorAction->isChecked())
+        || m_window.m_clipEditorDetached;
+    const auto mixVisible = (m_window.m_showMixAction && m_window.m_showMixAction->isChecked())
+        || m_window.m_mixDetached;
+    const auto audioPoolVisible = (m_window.m_audioPoolAction && m_window.m_audioPoolAction->isChecked())
+        || m_window.m_audioPoolDetached;
 
     dawg::project::UiState state;
     state.videoDetached = m_window.m_videoDetached;
     state.detachedVideoWindowGeometry = m_window.m_videoDetached && m_window.m_detachedVideoWindow
                                             ? saveWindowGeometry(m_window.m_detachedVideoWindow)
                                             : m_window.m_detachedVideoWindowGeometry;
+    state.timelineDetached = m_window.m_timelineDetached;
+    state.detachedTimelineWindowGeometry = m_window.m_timelineDetached && m_window.m_detachedTimelineWindow
+                                               ? saveWindowGeometry(m_window.m_detachedTimelineWindow)
+                                               : m_window.m_detachedTimelineWindowGeometry;
+    state.clipEditorDetached = m_window.m_clipEditorDetached;
+    state.detachedClipEditorWindowGeometry = m_window.m_clipEditorDetached && m_window.m_detachedClipEditorWindow
+                                                 ? saveWindowGeometry(m_window.m_detachedClipEditorWindow)
+                                                 : m_window.m_detachedClipEditorWindowGeometry;
+    state.mixDetached = m_window.m_mixDetached;
+    state.detachedMixWindowGeometry = m_window.m_mixDetached && m_window.m_detachedMixWindow
+                                          ? saveWindowGeometry(m_window.m_detachedMixWindow)
+                                          : m_window.m_detachedMixWindowGeometry;
+    state.audioPoolDetached = m_window.m_audioPoolDetached;
+    state.detachedAudioPoolWindowGeometry = m_window.m_audioPoolDetached && m_window.m_detachedAudioPoolWindow
+                                                ? saveWindowGeometry(m_window.m_detachedAudioPoolWindow)
+                                                : m_window.m_detachedAudioPoolWindowGeometry;
     state.timelineVisible = timelineVisible;
     state.clipEditorVisible = clipEditorVisible;
     state.mixVisible = mixVisible;
@@ -103,6 +116,10 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
         << "audioPoolVisible=" << state.audioPoolVisible;
     m_window.m_projectStateChangeInProgress = true;
     m_window.m_detachedVideoWindowGeometry = state.detachedVideoWindowGeometry;
+    m_window.m_detachedTimelineWindowGeometry = state.detachedTimelineWindowGeometry;
+    m_window.m_detachedClipEditorWindowGeometry = state.detachedClipEditorWindowGeometry;
+    m_window.m_detachedMixWindowGeometry = state.detachedMixWindowGeometry;
+    m_window.m_detachedAudioPoolWindowGeometry = state.detachedAudioPoolWindowGeometry;
     m_window.m_audioPoolPreferredWidth = std::max(240, state.audioPoolPreferredWidth);
     m_window.m_audioPoolShowLength = state.audioPoolShowLength;
     m_window.m_audioPoolShowSize = state.audioPoolShowSize;
@@ -193,8 +210,53 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
             attachVideo();
         }
     }
+    if (state.timelineDetached != m_window.m_timelineDetached)
+    {
+        if (state.timelineDetached && state.timelineVisible)
+        {
+            detachTimeline();
+        }
+        else
+        {
+            attachTimeline();
+        }
+    }
+    if (state.clipEditorDetached != m_window.m_clipEditorDetached)
+    {
+        if (state.clipEditorDetached && state.clipEditorVisible)
+        {
+            detachClipEditor();
+        }
+        else
+        {
+            attachClipEditor();
+        }
+    }
+    if (state.mixDetached != m_window.m_mixDetached)
+    {
+        if (state.mixDetached && state.mixVisible)
+        {
+            detachMix();
+        }
+        else
+        {
+            attachMix();
+        }
+    }
+    if (state.audioPoolDetached != m_window.m_audioPoolDetached)
+    {
+        if (state.audioPoolDetached && state.audioPoolVisible)
+        {
+            detachAudioPool();
+        }
+        else
+        {
+            attachAudioPool();
+        }
+    }
 
     m_window.syncShellLayoutViewport();
+    updateDetachedPanelUiState();
 
     qInfo().noquote()
         << "Applied UI state:"
@@ -214,17 +276,17 @@ void PanelLayoutController::updateAudioPoolVisibility(const bool visible)
 {
     if (m_window.m_audioPoolQuickWidget)
     {
-        if (!visible)
+        if (!visible && !m_window.m_audioPoolDetached)
         {
             m_window.m_audioPoolPreferredWidth =
                 std::max(240, static_cast<int>(std::lround(m_window.m_audioPoolQuickWidget->width())));
         }
-        m_window.m_audioPoolQuickWidget->setVisible(visible);
+        m_window.m_audioPoolQuickWidget->setVisible(visible && !m_window.m_audioPoolDetached);
     }
 
     if (m_window.m_shellLayoutController)
     {
-        m_window.m_shellLayoutController->setAudioPoolVisible(visible);
+        m_window.m_shellLayoutController->setAudioPoolVisible(visible && !m_window.m_audioPoolDetached);
         m_window.m_shellLayoutController->setPreferredSizes(
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
@@ -238,24 +300,28 @@ void PanelLayoutController::updateAudioPoolVisibility(const bool visible)
         const QSignalBlocker blocker{m_window.m_audioPoolAction};
         m_window.m_audioPoolAction->setChecked(visible);
     }
+    if (!visible && m_window.m_audioPoolDetached)
+    {
+        attachAudioPool();
+    }
 }
 
 void PanelLayoutController::updateTimelineVisibility(const bool visible)
 {
     if (m_window.m_timelineQuickWidget)
     {
-        if (!visible)
+        if (!visible && !m_window.m_timelineDetached)
         {
             m_window.m_timelinePreferredHeight = std::max(
                 m_window.timelineMinimumHeight(),
                 static_cast<int>(std::lround(m_window.m_timelineQuickWidget->height())));
         }
-        m_window.m_timelineQuickWidget->setVisible(visible);
+        m_window.m_timelineQuickWidget->setVisible(visible && !m_window.m_timelineDetached);
     }
 
     if (m_window.m_shellLayoutController)
     {
-        m_window.m_shellLayoutController->setTimelineVisible(visible);
+        m_window.m_shellLayoutController->setTimelineVisible(visible && !m_window.m_timelineDetached);
         m_window.m_shellLayoutController->setPreferredSizes(
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
@@ -269,18 +335,22 @@ void PanelLayoutController::updateTimelineVisibility(const bool visible)
         const QSignalBlocker blocker{m_window.m_showTimelineAction};
         m_window.m_showTimelineAction->setChecked(visible);
     }
+    if (!visible && m_window.m_timelineDetached)
+    {
+        attachTimeline();
+    }
 }
 
 void PanelLayoutController::updateClipEditorVisibility(const bool visible)
 {
     if (m_window.m_clipEditorQuickWidget)
     {
-        if (!visible)
+        if (!visible && !m_window.m_clipEditorDetached)
         {
             m_window.m_clipEditorPreferredHeight =
                 std::max(148, static_cast<int>(std::lround(m_window.m_clipEditorQuickWidget->height())));
         }
-        m_window.m_clipEditorQuickWidget->setVisible(visible);
+        m_window.m_clipEditorQuickWidget->setVisible(visible && !m_window.m_clipEditorDetached);
     }
 
     if (visible)
@@ -294,7 +364,7 @@ void PanelLayoutController::updateClipEditorVisibility(const bool visible)
 
     if (m_window.m_shellLayoutController)
     {
-        m_window.m_shellLayoutController->setClipEditorVisible(visible);
+        m_window.m_shellLayoutController->setClipEditorVisible(visible && !m_window.m_clipEditorDetached);
         m_window.m_shellLayoutController->setPreferredSizes(
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
@@ -308,18 +378,22 @@ void PanelLayoutController::updateClipEditorVisibility(const bool visible)
         const QSignalBlocker blocker{m_window.m_showClipEditorAction};
         m_window.m_showClipEditorAction->setChecked(visible);
     }
+    if (!visible && m_window.m_clipEditorDetached)
+    {
+        attachClipEditor();
+    }
 }
 
 void PanelLayoutController::updateMixVisibility(const bool visible)
 {
     if (m_window.m_mixQuickWidget)
     {
-        if (!visible)
+        if (!visible && !m_window.m_mixDetached)
         {
             m_window.m_mixPreferredHeight =
                 std::max(132, static_cast<int>(std::lround(m_window.m_mixQuickWidget->height())));
         }
-        m_window.m_mixQuickWidget->setVisible(visible);
+        m_window.m_mixQuickWidget->setVisible(visible && !m_window.m_mixDetached);
     }
 
     if (visible)
@@ -337,7 +411,7 @@ void PanelLayoutController::updateMixVisibility(const bool visible)
 
     if (m_window.m_shellLayoutController)
     {
-        m_window.m_shellLayoutController->setMixVisible(visible);
+        m_window.m_shellLayoutController->setMixVisible(visible && !m_window.m_mixDetached);
         m_window.m_shellLayoutController->setPreferredSizes(
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
@@ -350,6 +424,10 @@ void PanelLayoutController::updateMixVisibility(const bool visible)
     {
         const QSignalBlocker blocker{m_window.m_showMixAction};
         m_window.m_showMixAction->setChecked(visible);
+    }
+    if (!visible && m_window.m_mixDetached)
+    {
+        attachMix();
     }
 }
 
@@ -396,12 +474,7 @@ void PanelLayoutController::detachVideo()
     }
     else
     {
-        const auto canvasSize = m_window.m_videoViewportQuickWidget
-            ? QSize(
-                static_cast<int>(std::lround(m_window.m_videoViewportQuickWidget->width())),
-                static_cast<int>(std::lround(m_window.m_videoViewportQuickWidget->height())))
-            : QSize{960, 540};
-        m_window.m_detachedVideoWindow->resize(canvasSize.expandedTo(QSize{640, 360}));
+        m_window.m_detachedVideoWindow->resize(QSize{1280, 720});
     }
     m_window.m_videoDetached = true;
     if (m_window.m_shellLayoutController)
@@ -436,12 +509,12 @@ void PanelLayoutController::attachVideo()
     m_window.m_videoDetached = false;
     if (m_window.m_controller)
     {
-        m_window.m_controller->setNativeVideoPresentationEnabled(m_window.m_nativeVideoPresentationAllowed);
+        m_window.m_controller->setNativeVideoPresentationEnabled(shouldUseNativeVideoPresentation());
     }
     if (m_window.m_videoViewportQuickController)
     {
         m_window.m_videoViewportQuickController->setNativePresentationEnabled(
-            m_window.m_nativeVideoPresentationAllowed);
+            shouldUseNativeVideoPresentation());
     }
     if (m_window.m_detachedVideoViewportQuickController)
     {
@@ -467,13 +540,333 @@ void PanelLayoutController::attachVideo()
     }
 }
 
+void PanelLayoutController::detachTimeline()
+{
+    if (m_window.m_timelineDetached || !m_window.m_detachedTimelineWindow || !m_window.m_showTimelineAction)
+    {
+        return;
+    }
+
+    if (!m_window.m_showTimelineAction->isChecked())
+    {
+        const QSignalBlocker blocker{m_window.m_showTimelineAction};
+        m_window.m_showTimelineAction->setChecked(true);
+    }
+
+    if (!m_window.m_detachedTimelineWindowGeometry.isEmpty())
+    {
+        restoreWindowGeometry(m_window.m_detachedTimelineWindow, m_window.m_detachedTimelineWindowGeometry);
+    }
+    else
+    {
+        const auto panelSize = m_window.m_timelineQuickWidget
+            ? QSize(
+                static_cast<int>(std::lround(m_window.m_timelineQuickWidget->width())),
+                static_cast<int>(std::lround(m_window.m_timelineQuickWidget->height())))
+            : QSize{1100, 260};
+        m_window.m_detachedTimelineWindow->resize(panelSize.expandedTo(QSize{720, 220}));
+    }
+
+    m_window.m_timelineDetached = true;
+    updateTimelineVisibility(true);
+    updateDetachedPanelUiState();
+    m_window.m_detachedTimelineWindow->show();
+    m_window.m_detachedTimelineWindow->raise();
+    m_window.m_detachedTimelineWindow->requestActivate();
+    if (!m_window.m_projectStateChangeInProgress && m_window.hasOpenProject())
+    {
+        m_window.setProjectDirty(true);
+    }
+    if (!m_window.m_projectStateChangeInProgress)
+    {
+        m_window.showStatus(QStringLiteral("Timeline detached."));
+    }
+}
+
+void PanelLayoutController::attachTimeline()
+{
+    if (!m_window.m_timelineDetached || !m_window.m_detachedTimelineWindow)
+    {
+        return;
+    }
+
+    m_window.m_detachedTimelineWindowGeometry = saveWindowGeometry(m_window.m_detachedTimelineWindow);
+    m_window.m_detachedTimelineWindow->hide();
+    m_window.m_timelineDetached = false;
+    updateTimelineVisibility(m_window.m_showTimelineAction && m_window.m_showTimelineAction->isChecked());
+    updateDetachedPanelUiState();
+    if (m_window.m_timelineQuickWidget && m_window.m_timelineQuickWidget->isVisible())
+    {
+        m_window.m_timelineQuickWidget->forceActiveFocus();
+    }
+    if (!m_window.m_projectStateChangeInProgress && m_window.hasOpenProject())
+    {
+        m_window.setProjectDirty(true);
+    }
+    if (!m_window.m_projectStateChangeInProgress)
+    {
+        m_window.showStatus(QStringLiteral("Timeline attached."));
+    }
+}
+
+void PanelLayoutController::detachClipEditor()
+{
+    if (m_window.m_clipEditorDetached || !m_window.m_detachedClipEditorWindow || !m_window.m_showClipEditorAction)
+    {
+        return;
+    }
+
+    if (!m_window.m_showClipEditorAction->isChecked())
+    {
+        const QSignalBlocker blocker{m_window.m_showClipEditorAction};
+        m_window.m_showClipEditorAction->setChecked(true);
+    }
+
+    if (!m_window.m_detachedClipEditorWindowGeometry.isEmpty())
+    {
+        restoreWindowGeometry(m_window.m_detachedClipEditorWindow, m_window.m_detachedClipEditorWindowGeometry);
+    }
+    else
+    {
+        const auto panelSize = m_window.m_clipEditorQuickWidget
+            ? QSize(
+                static_cast<int>(std::lround(m_window.m_clipEditorQuickWidget->width())),
+                static_cast<int>(std::lround(m_window.m_clipEditorQuickWidget->height())))
+            : QSize{960, 340};
+        m_window.m_detachedClipEditorWindow->resize(panelSize.expandedTo(QSize{720, 260}));
+    }
+
+    m_window.m_clipEditorDetached = true;
+    updateClipEditorVisibility(true);
+    updateDetachedPanelUiState();
+    m_window.m_detachedClipEditorWindow->show();
+    m_window.m_detachedClipEditorWindow->raise();
+    m_window.m_detachedClipEditorWindow->requestActivate();
+    if (!m_window.m_projectStateChangeInProgress && m_window.hasOpenProject())
+    {
+        m_window.setProjectDirty(true);
+    }
+    if (!m_window.m_projectStateChangeInProgress)
+    {
+        m_window.showStatus(QStringLiteral("Clip editor detached."));
+    }
+}
+
+void PanelLayoutController::attachClipEditor()
+{
+    if (!m_window.m_clipEditorDetached || !m_window.m_detachedClipEditorWindow)
+    {
+        return;
+    }
+
+    m_window.m_detachedClipEditorWindowGeometry = saveWindowGeometry(m_window.m_detachedClipEditorWindow);
+    m_window.m_detachedClipEditorWindow->hide();
+    m_window.m_clipEditorDetached = false;
+    updateClipEditorVisibility(m_window.m_showClipEditorAction && m_window.m_showClipEditorAction->isChecked());
+    updateDetachedPanelUiState();
+    if (m_window.m_clipEditorQuickWidget && m_window.m_clipEditorQuickWidget->isVisible())
+    {
+        m_window.m_clipEditorQuickWidget->forceActiveFocus();
+    }
+    if (!m_window.m_projectStateChangeInProgress && m_window.hasOpenProject())
+    {
+        m_window.setProjectDirty(true);
+    }
+    if (!m_window.m_projectStateChangeInProgress)
+    {
+        m_window.showStatus(QStringLiteral("Clip editor attached."));
+    }
+}
+
+void PanelLayoutController::detachMix()
+{
+    if (m_window.m_mixDetached || !m_window.m_detachedMixWindow || !m_window.m_showMixAction)
+    {
+        return;
+    }
+
+    if (!m_window.m_showMixAction->isChecked())
+    {
+        const QSignalBlocker blocker{m_window.m_showMixAction};
+        m_window.m_showMixAction->setChecked(true);
+    }
+
+    if (!m_window.m_detachedMixWindowGeometry.isEmpty())
+    {
+        restoreWindowGeometry(m_window.m_detachedMixWindow, m_window.m_detachedMixWindowGeometry);
+    }
+    else
+    {
+        const auto panelSize = m_window.m_mixQuickWidget
+            ? QSize(
+                static_cast<int>(std::lround(m_window.m_mixQuickWidget->width())),
+                static_cast<int>(std::lround(m_window.m_mixQuickWidget->height())))
+            : QSize{1100, 420};
+        m_window.m_detachedMixWindow->resize(panelSize.expandedTo(QSize{780, 280}));
+    }
+
+    m_window.m_mixDetached = true;
+    updateMixVisibility(true);
+    updateDetachedPanelUiState();
+    m_window.m_detachedMixWindow->show();
+    m_window.m_detachedMixWindow->raise();
+    m_window.m_detachedMixWindow->requestActivate();
+    if (!m_window.m_projectStateChangeInProgress && m_window.hasOpenProject())
+    {
+        m_window.setProjectDirty(true);
+    }
+    if (!m_window.m_projectStateChangeInProgress)
+    {
+        m_window.showStatus(QStringLiteral("Mixer detached."));
+    }
+}
+
+void PanelLayoutController::attachMix()
+{
+    if (!m_window.m_mixDetached || !m_window.m_detachedMixWindow)
+    {
+        return;
+    }
+
+    m_window.m_detachedMixWindowGeometry = saveWindowGeometry(m_window.m_detachedMixWindow);
+    m_window.m_detachedMixWindow->hide();
+    m_window.m_mixDetached = false;
+    updateMixVisibility(m_window.m_showMixAction && m_window.m_showMixAction->isChecked());
+    updateDetachedPanelUiState();
+    if (m_window.m_mixQuickWidget && m_window.m_mixQuickWidget->isVisible())
+    {
+        m_window.m_mixQuickWidget->forceActiveFocus();
+    }
+    if (!m_window.m_projectStateChangeInProgress && m_window.hasOpenProject())
+    {
+        m_window.setProjectDirty(true);
+    }
+    if (!m_window.m_projectStateChangeInProgress)
+    {
+        m_window.showStatus(QStringLiteral("Mixer attached."));
+    }
+}
+
+void PanelLayoutController::detachAudioPool()
+{
+    if (m_window.m_audioPoolDetached || !m_window.m_detachedAudioPoolWindow || !m_window.m_audioPoolAction)
+    {
+        return;
+    }
+
+    if (!m_window.m_audioPoolAction->isChecked())
+    {
+        const QSignalBlocker blocker{m_window.m_audioPoolAction};
+        m_window.m_audioPoolAction->setChecked(true);
+    }
+
+    if (!m_window.m_detachedAudioPoolWindowGeometry.isEmpty())
+    {
+        restoreWindowGeometry(m_window.m_detachedAudioPoolWindow, m_window.m_detachedAudioPoolWindowGeometry);
+    }
+    else
+    {
+        const auto panelSize = m_window.m_audioPoolQuickWidget
+            ? QSize(
+                static_cast<int>(std::lround(m_window.m_audioPoolQuickWidget->width())),
+                static_cast<int>(std::lround(m_window.m_audioPoolQuickWidget->height())))
+            : QSize{420, 640};
+        m_window.m_detachedAudioPoolWindow->resize(panelSize.expandedTo(QSize{320, 420}));
+    }
+
+    m_window.m_audioPoolDetached = true;
+    updateAudioPoolVisibility(true);
+    updateDetachedPanelUiState();
+    m_window.m_detachedAudioPoolWindow->show();
+    m_window.m_detachedAudioPoolWindow->raise();
+    m_window.m_detachedAudioPoolWindow->requestActivate();
+    if (!m_window.m_projectStateChangeInProgress && m_window.hasOpenProject())
+    {
+        m_window.setProjectDirty(true);
+    }
+    if (!m_window.m_projectStateChangeInProgress)
+    {
+        m_window.showStatus(QStringLiteral("Audio Pool detached."));
+    }
+}
+
+void PanelLayoutController::attachAudioPool()
+{
+    if (!m_window.m_audioPoolDetached || !m_window.m_detachedAudioPoolWindow)
+    {
+        return;
+    }
+
+    m_window.m_detachedAudioPoolWindowGeometry = saveWindowGeometry(m_window.m_detachedAudioPoolWindow);
+    m_window.m_detachedAudioPoolWindow->hide();
+    m_window.m_audioPoolDetached = false;
+    updateAudioPoolVisibility(m_window.m_audioPoolAction && m_window.m_audioPoolAction->isChecked());
+    updateDetachedPanelUiState();
+    if (m_window.m_audioPoolQuickWidget && m_window.m_audioPoolQuickWidget->isVisible())
+    {
+        m_window.m_audioPoolQuickWidget->forceActiveFocus();
+    }
+    if (!m_window.m_projectStateChangeInProgress && m_window.hasOpenProject())
+    {
+        m_window.setProjectDirty(true);
+    }
+    if (!m_window.m_projectStateChangeInProgress)
+    {
+        m_window.showStatus(QStringLiteral("Audio Pool attached."));
+    }
+}
+
 void PanelLayoutController::updateDetachedVideoUiState()
 {
+    const auto nativePresentationEnabled = shouldUseNativeVideoPresentation();
+    if (m_window.m_controller)
+    {
+        m_window.m_controller->setNativeVideoPresentationEnabled(nativePresentationEnabled);
+    }
+    if (m_window.m_videoViewportQuickController)
+    {
+        m_window.m_videoViewportQuickController->setNativePresentationEnabled(nativePresentationEnabled);
+    }
+    if (m_window.m_detachedVideoViewportQuickController)
+    {
+        m_window.m_detachedVideoViewportQuickController->setNativePresentationEnabled(false);
+    }
+
     if (m_window.m_detachVideoAction)
     {
         m_window.m_detachVideoAction->setText(
             m_window.m_videoDetached ? QStringLiteral("Attach Video") : QStringLiteral("Detach Video"));
         m_window.m_detachVideoAction->setEnabled(m_window.m_videoViewportQuickWidget != nullptr);
+    }
+}
+
+void PanelLayoutController::updateDetachedPanelUiState()
+{
+    updateDetachedVideoUiState();
+
+    if (m_window.m_detachTimelineAction)
+    {
+        m_window.m_detachTimelineAction->setText(
+            m_window.m_timelineDetached ? QStringLiteral("Attach Timeline") : QStringLiteral("Detach Timeline"));
+        m_window.m_detachTimelineAction->setEnabled(m_window.m_timelineQuickWidget != nullptr);
+    }
+    if (m_window.m_detachClipEditorAction)
+    {
+        m_window.m_detachClipEditorAction->setText(
+            m_window.m_clipEditorDetached ? QStringLiteral("Attach Clip Editor") : QStringLiteral("Detach Clip Editor"));
+        m_window.m_detachClipEditorAction->setEnabled(m_window.m_clipEditorQuickWidget != nullptr);
+    }
+    if (m_window.m_detachMixAction)
+    {
+        m_window.m_detachMixAction->setText(
+            m_window.m_mixDetached ? QStringLiteral("Attach Mixer") : QStringLiteral("Detach Mixer"));
+        m_window.m_detachMixAction->setEnabled(m_window.m_mixQuickWidget != nullptr);
+    }
+    if (m_window.m_detachAudioPoolAction)
+    {
+        m_window.m_detachAudioPoolAction->setText(
+            m_window.m_audioPoolDetached ? QStringLiteral("Attach Audio Pool") : QStringLiteral("Detach Audio Pool"));
+        m_window.m_detachAudioPoolAction->setEnabled(m_window.m_audioPoolQuickWidget != nullptr);
     }
 }
 
@@ -489,5 +882,23 @@ void PanelLayoutController::syncMainVerticalPanelSizes()
         m_window.m_timelinePreferredHeight,
         m_window.m_clipEditorPreferredHeight,
         m_window.m_mixPreferredHeight);
+    m_window.m_shellLayoutController->setTimelineVisible(
+        m_window.m_showTimelineAction && m_window.m_showTimelineAction->isChecked() && !m_window.m_timelineDetached);
+    m_window.m_shellLayoutController->setClipEditorVisible(
+        m_window.m_showClipEditorAction && m_window.m_showClipEditorAction->isChecked() && !m_window.m_clipEditorDetached);
+    m_window.m_shellLayoutController->setMixVisible(
+        m_window.m_showMixAction && m_window.m_showMixAction->isChecked() && !m_window.m_mixDetached);
+    m_window.m_shellLayoutController->setAudioPoolVisible(
+        m_window.m_audioPoolAction && m_window.m_audioPoolAction->isChecked() && !m_window.m_audioPoolDetached);
     m_window.syncShellPanelGeometry();
+}
+
+bool PanelLayoutController::shouldUseNativeVideoPresentation() const
+{
+    return m_window.m_nativeVideoPresentationAllowed
+        && !m_window.m_videoDetached
+        && !m_window.m_timelineDetached
+        && !m_window.m_clipEditorDetached
+        && !m_window.m_mixDetached
+        && !m_window.m_audioPoolDetached;
 }

@@ -306,6 +306,46 @@ void ProjectWindowController::updateWindowTitle()
         m_window.m_detachedVideoWindow->setTitle(detachedParts.join(QStringLiteral(" - ")));
         m_window.m_detachedVideoWindow->setIcon(m_window.windowIcon());
     }
+    if (m_window.m_detachedTimelineWindow)
+    {
+        QStringList detachedParts{QStringLiteral("Detached Timeline"), QStringLiteral("dawg")};
+        if (!m_window.m_currentProjectName.isEmpty())
+        {
+            detachedParts.push_back(m_window.m_currentProjectName);
+        }
+        m_window.m_detachedTimelineWindow->setTitle(detachedParts.join(QStringLiteral(" - ")));
+        m_window.m_detachedTimelineWindow->setIcon(m_window.windowIcon());
+    }
+    if (m_window.m_detachedClipEditorWindow)
+    {
+        QStringList detachedParts{QStringLiteral("Detached Clip Editor"), QStringLiteral("dawg")};
+        if (!m_window.m_currentProjectName.isEmpty())
+        {
+            detachedParts.push_back(m_window.m_currentProjectName);
+        }
+        m_window.m_detachedClipEditorWindow->setTitle(detachedParts.join(QStringLiteral(" - ")));
+        m_window.m_detachedClipEditorWindow->setIcon(m_window.windowIcon());
+    }
+    if (m_window.m_detachedMixWindow)
+    {
+        QStringList detachedParts{QStringLiteral("Detached Mixer"), QStringLiteral("dawg")};
+        if (!m_window.m_currentProjectName.isEmpty())
+        {
+            detachedParts.push_back(m_window.m_currentProjectName);
+        }
+        m_window.m_detachedMixWindow->setTitle(detachedParts.join(QStringLiteral(" - ")));
+        m_window.m_detachedMixWindow->setIcon(m_window.windowIcon());
+    }
+    if (m_window.m_detachedAudioPoolWindow)
+    {
+        QStringList detachedParts{QStringLiteral("Detached Audio Pool"), QStringLiteral("dawg")};
+        if (!m_window.m_currentProjectName.isEmpty())
+        {
+            detachedParts.push_back(m_window.m_currentProjectName);
+        }
+        m_window.m_detachedAudioPoolWindow->setTitle(detachedParts.join(QStringLiteral(" - ")));
+        m_window.m_detachedAudioPoolWindow->setIcon(m_window.windowIcon());
+    }
 }
 
 void ProjectWindowController::restoreLastProjectOnStartup()

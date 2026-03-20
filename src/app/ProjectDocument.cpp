@@ -417,6 +417,18 @@ QJsonObject uiStateToJson(const UiState& state)
         {QStringLiteral("videoDetached"), state.videoDetached},
         {QStringLiteral("detachedVideoWindowGeometry"),
          QString::fromLatin1(state.detachedVideoWindowGeometry.toBase64())},
+        {QStringLiteral("timelineDetached"), state.timelineDetached},
+        {QStringLiteral("detachedTimelineWindowGeometry"),
+         QString::fromLatin1(state.detachedTimelineWindowGeometry.toBase64())},
+        {QStringLiteral("clipEditorDetached"), state.clipEditorDetached},
+        {QStringLiteral("detachedClipEditorWindowGeometry"),
+         QString::fromLatin1(state.detachedClipEditorWindowGeometry.toBase64())},
+        {QStringLiteral("mixDetached"), state.mixDetached},
+        {QStringLiteral("detachedMixWindowGeometry"),
+         QString::fromLatin1(state.detachedMixWindowGeometry.toBase64())},
+        {QStringLiteral("audioPoolDetached"), state.audioPoolDetached},
+        {QStringLiteral("detachedAudioPoolWindowGeometry"),
+         QString::fromLatin1(state.detachedAudioPoolWindowGeometry.toBase64())},
         {QStringLiteral("timelineVisible"), state.timelineVisible},
         {QStringLiteral("clipEditorVisible"), state.clipEditorVisible},
         {QStringLiteral("mixVisible"), state.mixVisible},
@@ -442,6 +454,18 @@ UiState uiStateFromJson(const QJsonObject& object)
     state.videoDetached = object.value(QStringLiteral("videoDetached")).toBool(false);
     state.detachedVideoWindowGeometry = QByteArray::fromBase64(
         object.value(QStringLiteral("detachedVideoWindowGeometry")).toString().toLatin1());
+    state.timelineDetached = object.value(QStringLiteral("timelineDetached")).toBool(false);
+    state.detachedTimelineWindowGeometry = QByteArray::fromBase64(
+        object.value(QStringLiteral("detachedTimelineWindowGeometry")).toString().toLatin1());
+    state.clipEditorDetached = object.value(QStringLiteral("clipEditorDetached")).toBool(false);
+    state.detachedClipEditorWindowGeometry = QByteArray::fromBase64(
+        object.value(QStringLiteral("detachedClipEditorWindowGeometry")).toString().toLatin1());
+    state.mixDetached = object.value(QStringLiteral("mixDetached")).toBool(false);
+    state.detachedMixWindowGeometry = QByteArray::fromBase64(
+        object.value(QStringLiteral("detachedMixWindowGeometry")).toString().toLatin1());
+    state.audioPoolDetached = object.value(QStringLiteral("audioPoolDetached")).toBool(false);
+    state.detachedAudioPoolWindowGeometry = QByteArray::fromBase64(
+        object.value(QStringLiteral("detachedAudioPoolWindowGeometry")).toString().toLatin1());
     state.timelineVisible = object.value(QStringLiteral("timelineVisible")).toBool(true);
     state.clipEditorVisible = object.value(QStringLiteral("clipEditorVisible")).toBool(false);
     state.mixVisible = object.value(QStringLiteral("mixVisible")).toBool(false);
@@ -528,7 +552,7 @@ std::optional<Document> loadDocument(const QString& projectFilePath, QString* er
 
     const auto root = document.object();
     const auto schemaVersion = root.value(QStringLiteral("schemaVersion")).toInt(-1);
-    if (schemaVersion != 1 && schemaVersion != kSchemaVersion)
+    if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != kSchemaVersion)
     {
         if (errorMessage)
         {

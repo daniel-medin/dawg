@@ -177,6 +177,11 @@ QUrl timelineSceneUrl()
     return QUrl(QStringLiteral("qrc:/qml/TimelineScene.qml"));
 }
 
+QUrl audioPoolSceneUrl()
+{
+    return QUrl(QStringLiteral("qrc:/qml/AudioPoolScene.qml"));
+}
+
 QUrl videoViewportSceneUrl()
 {
     return QUrl(QStringLiteral("qrc:/qml/VideoViewportScene.qml"));
@@ -831,7 +836,7 @@ MainWindow::MainWindow(QWindow* parent)
         m_actionRegistry->rebuild();
     }
     rebuildRecentProjectsMenu();
-    updateDetachedVideoUiState();
+    updateDetachedPanelUiState();
     qApp->installEventFilter(this);
     m_clearAllShortcutTimer.setSingleShot(true);
     m_clearAllShortcutTimer.setInterval(1500);
@@ -877,6 +882,50 @@ MainWindow::MainWindow(QWindow* parent)
         else
         {
             detachVideo();
+        }
+    });
+    connect(m_detachTimelineAction, &QAction::triggered, this, [this]()
+    {
+        if (m_timelineDetached)
+        {
+            attachTimeline();
+        }
+        else
+        {
+            detachTimeline();
+        }
+    });
+    connect(m_detachClipEditorAction, &QAction::triggered, this, [this]()
+    {
+        if (m_clipEditorDetached)
+        {
+            attachClipEditor();
+        }
+        else
+        {
+            detachClipEditor();
+        }
+    });
+    connect(m_detachMixAction, &QAction::triggered, this, [this]()
+    {
+        if (m_mixDetached)
+        {
+            attachMix();
+        }
+        else
+        {
+            detachMix();
+        }
+    });
+    connect(m_detachAudioPoolAction, &QAction::triggered, this, [this]()
+    {
+        if (m_audioPoolDetached)
+        {
+            attachAudioPool();
+        }
+        else
+        {
+            detachAudioPool();
         }
     });
     connect(m_showTimelineAction, &QAction::toggled, this, [this](const bool visible)
@@ -1384,6 +1433,30 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
     if (watched == m_detachedVideoWindow && event && event->type() == QEvent::Close && m_videoDetached && !m_shuttingDown)
     {
         attachVideo();
+        event->ignore();
+        return true;
+    }
+    if (watched == m_detachedTimelineWindow && event && event->type() == QEvent::Close && m_timelineDetached && !m_shuttingDown)
+    {
+        attachTimeline();
+        event->ignore();
+        return true;
+    }
+    if (watched == m_detachedClipEditorWindow && event && event->type() == QEvent::Close && m_clipEditorDetached && !m_shuttingDown)
+    {
+        attachClipEditor();
+        event->ignore();
+        return true;
+    }
+    if (watched == m_detachedMixWindow && event && event->type() == QEvent::Close && m_mixDetached && !m_shuttingDown)
+    {
+        attachMix();
+        event->ignore();
+        return true;
+    }
+    if (watched == m_detachedAudioPoolWindow && event && event->type() == QEvent::Close && m_audioPoolDetached && !m_shuttingDown)
+    {
+        attachAudioPool();
         event->ignore();
         return true;
     }
@@ -2385,9 +2458,54 @@ void MainWindow::attachVideo()
     m_panelLayoutController->attachVideo();
 }
 
+void MainWindow::detachTimeline()
+{
+    m_panelLayoutController->detachTimeline();
+}
+
+void MainWindow::attachTimeline()
+{
+    m_panelLayoutController->attachTimeline();
+}
+
+void MainWindow::detachClipEditor()
+{
+    m_panelLayoutController->detachClipEditor();
+}
+
+void MainWindow::attachClipEditor()
+{
+    m_panelLayoutController->attachClipEditor();
+}
+
+void MainWindow::detachMix()
+{
+    m_panelLayoutController->detachMix();
+}
+
+void MainWindow::attachMix()
+{
+    m_panelLayoutController->attachMix();
+}
+
+void MainWindow::detachAudioPool()
+{
+    m_panelLayoutController->detachAudioPool();
+}
+
+void MainWindow::attachAudioPool()
+{
+    m_panelLayoutController->attachAudioPool();
+}
+
 void MainWindow::updateDetachedVideoUiState()
 {
     m_panelLayoutController->updateDetachedVideoUiState();
+}
+
+void MainWindow::updateDetachedPanelUiState()
+{
+    m_panelLayoutController->updateDetachedPanelUiState();
 }
 
 void MainWindow::resetOutputFpsTracking()
@@ -2774,7 +2892,7 @@ void MainWindow::syncClipWaveformItem()
 
 void MainWindow::refreshMixView()
 {
-    if (m_mixQuickController && m_mixQuickWidget && m_mixQuickWidget->isVisible())
+    if (m_mixQuickController && (m_mixQuickWidget || m_detachedMixWindow))
     {
         const auto laneStrips = m_controller->mixLaneStrips();
         const auto shouldRebuild = needsMixRebuild(laneStrips);
@@ -3419,6 +3537,73 @@ void MainWindow::buildUi()
 #endif
     m_detachedVideoWindow->hide();
     m_detachedVideoWindow->installEventFilter(this);
+    auto createDetachedPanelWindow =
+        [this](const QString& title, const QColor& color) -> QQuickView*
+    {
+        auto* window = new QQuickView();
+        window->setTitle(title);
+        window->setIcon(icon());
+        window->setColor(color);
+        window->setFlags(
+            Qt::Window
+            | Qt::WindowTitleHint
+            | Qt::WindowSystemMenuHint
+            | Qt::WindowMinimizeButtonHint
+            | Qt::WindowMaximizeButtonHint
+            | Qt::WindowCloseButtonHint);
+        window->setResizeMode(QQuickView::SizeRootObjectToView);
+        configureQuickEngine(*window->engine());
+        return window;
+    };
+    m_detachedTimelineWindow = createDetachedPanelWindow(
+        QStringLiteral("Detached Timeline"),
+        QColor(QStringLiteral("#050608")));
+    m_detachedTimelineWindow->rootContext()->setContextProperty(QStringLiteral("timelineController"), m_timelineQuickController);
+    m_detachedTimelineWindow->rootContext()->setContextProperty(QStringLiteral("videoViewportBridge"), this);
+    m_detachedTimelineWindow->setSource(timelineSceneUrl());
+#ifdef Q_OS_WIN
+    applyDarkTitleBar(m_detachedTimelineWindow);
+#endif
+    m_detachedTimelineWindow->hide();
+    m_detachedTimelineWindow->installEventFilter(this);
+
+    m_detachedClipEditorWindow = createDetachedPanelWindow(
+        QStringLiteral("Detached Clip Editor"),
+        QColor(QStringLiteral("#0f141b")));
+    m_detachedClipEditorWindow->rootContext()->setContextProperty(
+        QStringLiteral("clipEditorController"),
+        m_clipEditorQuickController);
+    m_detachedClipEditorWindow->setSource(clipEditorSceneUrl());
+#ifdef Q_OS_WIN
+    applyDarkTitleBar(m_detachedClipEditorWindow);
+#endif
+    m_detachedClipEditorWindow->hide();
+    m_detachedClipEditorWindow->installEventFilter(this);
+
+    m_detachedMixWindow = createDetachedPanelWindow(
+        QStringLiteral("Detached Mixer"),
+        QColor(QStringLiteral("#080b10")));
+    m_detachedMixWindow->rootContext()->setContextProperty(QStringLiteral("mixController"), m_mixQuickController);
+    m_detachedMixWindow->setSource(mixSceneUrl());
+#ifdef Q_OS_WIN
+    applyDarkTitleBar(m_detachedMixWindow);
+#endif
+    m_detachedMixWindow->hide();
+    m_detachedMixWindow->installEventFilter(this);
+
+    m_detachedAudioPoolWindow = createDetachedPanelWindow(
+        QStringLiteral("Detached Audio Pool"),
+        QColor(QStringLiteral("#07090c")));
+    m_detachedAudioPoolWindow->rootContext()->setContextProperty(
+        QStringLiteral("audioPoolController"),
+        m_audioPoolQuickController);
+    m_detachedAudioPoolWindow->rootContext()->setContextProperty(QStringLiteral("windowChrome"), m_windowChromeController);
+    m_detachedAudioPoolWindow->setSource(audioPoolSceneUrl());
+#ifdef Q_OS_WIN
+    applyDarkTitleBar(m_detachedAudioPoolWindow);
+#endif
+    m_detachedAudioPoolWindow->hide();
+    m_detachedAudioPoolWindow->installEventFilter(this);
 
     if (m_shellLayoutController)
     {
@@ -3580,6 +3765,7 @@ void MainWindow::buildUi()
                     {
                         m_videoViewportQuickController->setNativePresentationEnabled(nativePresentationReady);
                     }
+                    updateDetachedPanelUiState();
                     if (quickDevice)
                     {
                         quickDevice->Release();
@@ -3600,6 +3786,7 @@ void MainWindow::buildUi()
                     {
                         m_videoViewportQuickController->setNativePresentationEnabled(false);
                     }
+                    updateDetachedPanelUiState();
                     updateMixQuickDiagnostics();
                 },
                 Qt::QueuedConnection);

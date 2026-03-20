@@ -979,6 +979,10 @@ void PlayerController::setPreferredD3D11Device(void* device)
 void PlayerController::setNativeVideoPresentationEnabled(const bool enabled)
 {
     m_videoPlaybackCoordinator->setNativePresentationEnabled(enabled);
+    if (hasVideoLoaded())
+    {
+        emitCurrentFrame();
+    }
 }
 
 bool PlayerController::hasVideoLoaded() const

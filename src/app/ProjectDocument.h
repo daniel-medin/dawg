@@ -13,7 +13,7 @@
 
 namespace dawg::project
 {
-constexpr int kSchemaVersion = 2;
+constexpr int kSchemaVersion = 3;
 constexpr auto kProjectFileSuffix = ".dawg";
 
 struct MixLaneState
@@ -47,6 +47,14 @@ struct UiState
 {
     bool videoDetached = false;
     QByteArray detachedVideoWindowGeometry;
+    bool timelineDetached = false;
+    QByteArray detachedTimelineWindowGeometry;
+    bool clipEditorDetached = false;
+    QByteArray detachedClipEditorWindowGeometry;
+    bool mixDetached = false;
+    QByteArray detachedMixWindowGeometry;
+    bool audioPoolDetached = false;
+    QByteArray detachedAudioPoolWindowGeometry;
     bool timelineVisible = true;
     bool clipEditorVisible = false;
     bool mixVisible = false;

@@ -17,9 +17,19 @@ public:
     void updateMixVisibility(bool visible);
     void detachVideo();
     void attachVideo();
+    void detachTimeline();
+    void attachTimeline();
+    void detachClipEditor();
+    void attachClipEditor();
+    void detachMix();
+    void attachMix();
+    void detachAudioPool();
+    void attachAudioPool();
     void updateDetachedVideoUiState();
+    void updateDetachedPanelUiState();
     void syncMainVerticalPanelSizes();
 
 private:
+    [[nodiscard]] bool shouldUseNativeVideoPresentation() const;
     MainWindow& m_window;
 };
