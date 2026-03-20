@@ -13,6 +13,7 @@ Rectangle {
     property bool pendingSeed: false
     property bool marqueeSelecting: false
     property string draggedTrackId: ""
+    property bool draggedTrackWasSelected: false
     property string hoveredTrackId: ""
 
     Keys.onTabPressed: function(event) {
@@ -105,10 +106,10 @@ Rectangle {
             y: root.selectionRect.y
             width: root.selectionRect.width
             height: root.selectionRect.height
-            color: "#2678aacc"
-            opacity: 0.25
+            color: "#0f3f8f"
+            opacity: 0.34
             border.width: 1
-            border.color: "#96c6ff"
+            border.color: "#8fc2ff"
         }
     }
 
@@ -191,7 +192,9 @@ Rectangle {
                 return
             }
 
+            root.draggedTrackWasSelected = false
             if (trackId !== "") {
+                root.draggedTrackWasSelected = videoViewportController.overlayIsSelected(trackId)
                 if ((mouse.modifiers & Qt.ControlModifier)
                         && videoViewportController.overlayHasAttachedAudio(trackId)) {
                     videoViewportBridge.requestTrackSelected(trackId)
@@ -200,7 +203,9 @@ Rectangle {
                 }
 
                 root.draggedTrackId = trackId
-                videoViewportBridge.requestTrackSelected(trackId)
+                if (!root.draggedTrackWasSelected) {
+                    videoViewportBridge.requestTrackSelected(trackId)
+                }
                 return
             }
 
@@ -250,6 +255,7 @@ Rectangle {
 
             if (root.draggedTrackId !== "") {
                 root.draggedTrackId = ""
+                root.draggedTrackWasSelected = false
                 return
             }
 
@@ -264,6 +270,7 @@ Rectangle {
                 videoViewportBridge.requestTracksSelected(selectedIds)
                 root.marqueeSelecting = false
                 root.pendingSeed = false
+                root.draggedTrackWasSelected = false
                 root.selectionRect = Qt.rect(0, 0, 0, 0)
                 return
             }
@@ -274,6 +281,7 @@ Rectangle {
             }
 
             root.pendingSeed = false
+            root.draggedTrackWasSelected = false
             root.selectionRect = Qt.rect(0, 0, 0, 0)
         }
 

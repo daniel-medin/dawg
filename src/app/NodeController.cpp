@@ -687,6 +687,70 @@ void NodeController::deleteSelectedTrack()
             : QStringLiteral("Deleted %1 selected nodes.").arg(removedCount));
 }
 
+int NodeController::emptyTrackCount() const
+{
+    return static_cast<int>(std::count_if(
+        m_controller.m_tracker.tracks().cbegin(),
+        m_controller.m_tracker.tracks().cend(),
+        [](const TrackPoint& track)
+        {
+            return !track.attachedAudio.has_value();
+        }));
+}
+
+void NodeController::deleteAllEmptyTracks()
+{
+    std::vector<QUuid> emptyTrackIds;
+    emptyTrackIds.reserve(m_controller.m_tracker.tracks().size());
+
+    for (const auto& track : m_controller.m_tracker.tracks())
+    {
+        if (!track.attachedAudio.has_value())
+        {
+            emptyTrackIds.push_back(track.id);
+        }
+    }
+
+    if (emptyTrackIds.empty())
+    {
+        emit m_controller.statusChanged(QStringLiteral("There are no empty grey nodes to delete."));
+        return;
+    }
+
+    m_controller.saveUndoState();
+    const auto removedCount = m_controller.m_trackEditService->removeTracks(emptyTrackIds);
+    if (removedCount <= 0)
+    {
+        m_controller.m_undoTrackerState.reset();
+        m_controller.m_undoSelectedTrackIds.clear();
+        emit m_controller.editStateChanged();
+        emit m_controller.statusChanged(QStringLiteral("Failed to delete the empty grey nodes."));
+        return;
+    }
+
+    std::vector<QUuid> remainingSelection;
+    remainingSelection.reserve(m_controller.m_selectionController->selectedTrackIds().size());
+    for (const auto& trackId : m_controller.m_selectionController->selectedTrackIds())
+    {
+        if (m_controller.m_tracker.hasTrack(trackId))
+        {
+            remainingSelection.push_back(trackId);
+        }
+    }
+
+    static_cast<void>(m_controller.m_selectionController->setSelectedTrackIds(remainingSelection));
+    m_controller.m_selectionFadeTimer.stop();
+    m_controller.refreshOverlays();
+    emit m_controller.selectionChanged(m_controller.m_selectionController->hasSelection());
+    emit m_controller.trackAvailabilityChanged(m_controller.hasTracks());
+    emit m_controller.audioPoolChanged();
+    emit m_controller.editStateChanged();
+    emit m_controller.statusChanged(
+        removedCount == 1
+            ? QStringLiteral("Deleted 1 empty grey node.")
+            : QStringLiteral("Deleted %1 empty grey nodes.").arg(removedCount));
+}
+
 void NodeController::clearAllTracks()
 {
     if (!m_controller.hasTracks())
@@ -1048,6 +1112,16 @@ void PlayerController::nudgeSelectedTracks(const QPointF& delta)
 void PlayerController::deleteSelectedTrack()
 {
     m_nodeController->deleteSelectedTrack();
+}
+
+int PlayerController::emptyTrackCount() const
+{
+    return m_nodeController->emptyTrackCount();
+}
+
+void PlayerController::deleteAllEmptyTracks()
+{
+    m_nodeController->deleteAllEmptyTracks();
 }
 
 void PlayerController::clearAllTracks()

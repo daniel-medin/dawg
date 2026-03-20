@@ -976,6 +976,17 @@ bool PlayerController::hasTracks() const
     return !m_tracker.tracks().empty();
 }
 
+bool PlayerController::hasEmptyTracks() const
+{
+    return std::any_of(
+        m_tracker.tracks().cbegin(),
+        m_tracker.tracks().cend(),
+        [](const TrackPoint& track)
+        {
+            return !track.attachedAudio.has_value();
+        });
+}
+
 bool PlayerController::canPasteTracks() const
 {
     return hasVideoLoaded() && m_trackEditService->hasCopiedTracks();

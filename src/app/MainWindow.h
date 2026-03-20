@@ -98,6 +98,7 @@ private slots:
     void cutSelectedNode();
     void undoNodeEdit();
     void redoNodeEdit();
+    void deleteAllEmptyNodes();
     void selectNextVisibleNode();
     void moveSelectedNodeUp();
     void moveSelectedNodeDown();
@@ -305,6 +306,7 @@ private:
     QAction* m_mixSoloModeAction = nullptr;
     QAction* m_audioPoolAction = nullptr;
     QAction* m_deleteNodeAction = nullptr;
+    QAction* m_deleteEmptyNodesAction = nullptr;
     QAction* m_clearAllAction = nullptr;
     QAction* m_motionTrackingAction = nullptr;
     QAction* m_toggleDebugAction = nullptr;

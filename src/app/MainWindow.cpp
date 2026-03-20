@@ -999,6 +999,7 @@ MainWindow::MainWindow(QWindow* parent)
                 : QStringLiteral("Node names only show when relevant."));
     });
     connect(m_deleteNodeAction, &QAction::triggered, m_controller, &PlayerController::deleteSelectedTrack);
+    connect(m_deleteEmptyNodesAction, &QAction::triggered, this, &MainWindow::deleteAllEmptyNodes);
     connect(m_clearAllAction, &QAction::triggered, m_controller, &PlayerController::clearAllTracks);
     connect(m_timelineQuickController, &TimelineQuickController::frameRequested, m_controller, &PlayerController::seekToFrame);
     connect(
@@ -1856,10 +1857,13 @@ void MainWindow::requestTracksSelected(const QVariantList& trackIds)
         }
     }
 
-    if (!uuids.isEmpty())
+    if (uuids.isEmpty())
     {
-        m_controller->selectTracks(uuids);
+        m_controller->clearSelection();
+        return;
     }
+
+    m_controller->selectTracks(uuids);
 }
 
 void MainWindow::requestTrackGainPopup(const QString& trackId, const double localX, const double localY)
@@ -2064,6 +2068,31 @@ void MainWindow::undoNodeEdit()
 void MainWindow::redoNodeEdit()
 {
     m_controller->redoLastTrackEdit();
+    updateEditActionState();
+}
+
+void MainWindow::deleteAllEmptyNodes()
+{
+    const auto emptyNodeCount = m_controller->emptyTrackCount();
+    if (emptyNodeCount <= 0)
+    {
+        showStatus(QStringLiteral("There are no empty grey nodes to delete."));
+        return;
+    }
+
+    const auto choice = m_dialogController->execMessage(
+        QStringLiteral("Delete All Empty Nodes"),
+        QStringLiteral("Are you sure?"),
+        QStringLiteral("This will delete all %1 empty grey node(s) in the project. Nodes with attached audio will be kept.")
+            .arg(emptyNodeCount),
+        {DialogController::Button::Yes, DialogController::Button::Cancel},
+        DialogController::Button::Cancel);
+    if (choice != DialogController::Button::Yes)
+    {
+        return;
+    }
+
+    m_controller->deleteAllEmptyTracks();
     updateEditActionState();
 }
 
@@ -3101,6 +3130,13 @@ void MainWindow::buildUi()
         if (m_saveProjectAsAction)
         {
             m_saveProjectAsAction->trigger();
+        }
+    }, Qt::ApplicationShortcut);
+    new QShortcut(QKeySequence::Quit, this, [this]()
+    {
+        if (m_quitAction)
+        {
+            m_quitAction->trigger();
         }
     }, Qt::ApplicationShortcut);
     new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), this, [this]()

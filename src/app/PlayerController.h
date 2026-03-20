@@ -73,6 +73,8 @@ public:
     void moveSelectedTrack(const QPointF& imagePoint);
     void nudgeSelectedTracks(const QPointF& delta);
     void deleteSelectedTrack();
+    [[nodiscard]] int emptyTrackCount() const;
+    void deleteAllEmptyTracks();
     void clearAllTracks();
     void setSelectedTrackStartToCurrentFrame();
     void setSelectedTrackEndToCurrentFrame();
@@ -119,6 +121,7 @@ public:
     [[nodiscard]] bool isMotionTrackingEnabled() const;
     [[nodiscard]] bool hasSelection() const;
     [[nodiscard]] bool hasTracks() const;
+    [[nodiscard]] bool hasEmptyTracks() const;
     [[nodiscard]] bool canPasteTracks() const;
     [[nodiscard]] bool canUndoTrackEdit() const;
     [[nodiscard]] bool canRedoTrackEdit() const;

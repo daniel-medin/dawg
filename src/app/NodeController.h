@@ -35,6 +35,8 @@ public:
     void moveSelectedTrack(const QPointF& imagePoint);
     void nudgeSelectedTracks(const QPointF& delta);
     void deleteSelectedTrack();
+    [[nodiscard]] int emptyTrackCount() const;
+    void deleteAllEmptyTracks();
     void clearAllTracks();
     void setSelectedTrackStartToCurrentFrame();
     void setSelectedTrackEndToCurrentFrame();

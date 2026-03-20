@@ -66,6 +66,7 @@ void MainWindowActions::buildMenus()
     m_window.m_mixSoloModeAction = new QAction(QStringLiteral("Solo Mode: X-OR"), &m_window);
     m_window.m_audioPoolAction = new QAction(QStringLiteral("Audio Pool (P)"), &m_window);
     m_window.m_deleteNodeAction = new QAction(QStringLiteral("Delete (Backspace)"), &m_window);
+    m_window.m_deleteEmptyNodesAction = new QAction(QStringLiteral("Delete All Empty Nodes"), &m_window);
     m_window.m_clearAllAction = new QAction(QStringLiteral("Clear All (Ctrl+Shift+A, Backspace)"), &m_window);
 
     m_window.m_motionTrackingAction = new QAction(QStringLiteral("Motion Tracking"), &m_window);
@@ -117,6 +118,7 @@ void MainWindowActions::buildMenus()
     m_window.m_undoAction->setEnabled(false);
     m_window.m_redoAction->setEnabled(false);
     m_window.m_deleteNodeAction->setEnabled(false);
+    m_window.m_deleteEmptyNodesAction->setEnabled(false);
     m_window.m_selectAllAction->setEnabled(false);
     m_window.m_unselectAllAction->setEnabled(false);
     m_window.m_clearAllAction->setEnabled(false);
@@ -185,6 +187,10 @@ void MainWindowActions::updateEditActionState()
     if (m_window.m_cutAction)
     {
         m_window.m_cutAction->setEnabled(m_window.m_controller->hasSelection());
+    }
+    if (m_window.m_deleteEmptyNodesAction)
+    {
+        m_window.m_deleteEmptyNodesAction->setEnabled(m_window.m_controller->hasEmptyTracks());
     }
     if (m_window.m_pasteAction)
     {
