@@ -7,6 +7,7 @@ Rectangle {
     color: "#0c1016"
     clip: true
     focus: true
+    readonly property bool allowNativePresentation: videoViewportAllowNativePresentation
 
     property point pressPoint: Qt.point(0, 0)
     property rect selectionRect: Qt.rect(0, 0, 0, 0)
@@ -72,8 +73,10 @@ Rectangle {
         y: root.frameRect.y
         width: root.frameRect.width
         height: root.frameRect.height
-        visible: videoViewportController.hasFrame && !videoViewportController.nativePresentationActive
-        source: videoViewportController.hasFrame && !videoViewportController.nativePresentationActive
+        visible: videoViewportController.hasFrame
+            && (!root.allowNativePresentation || !videoViewportController.nativePresentationActive)
+        source: videoViewportController.hasFrame
+            && (!root.allowNativePresentation || !videoViewportController.nativePresentationActive)
             ? videoViewportController.frameSource
             : ""
         asynchronous: false
@@ -87,7 +90,7 @@ Rectangle {
         y: root.frameRect.y
         width: root.frameRect.width
         height: root.frameRect.height
-        visible: videoViewportController.nativePresentationActive
+        visible: root.allowNativePresentation && videoViewportController.nativePresentationActive
         controller: videoViewportController
     }
 

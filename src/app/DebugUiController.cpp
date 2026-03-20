@@ -280,6 +280,13 @@ void DebugUiController::updateFrame(const QImage& image, const int frameIndex, c
 {
     m_window.m_lastPresentedFrame = image;
     m_window.m_videoViewportQuickController->setPresentedFrame(image, m_window.m_controller->currentVideoFrame(), m_window.m_controller->videoFrameSize());
+    if (m_window.m_detachedVideoViewportQuickController)
+    {
+        m_window.m_detachedVideoViewportQuickController->setPresentedFrame(
+            image,
+            m_window.m_controller->currentVideoFrame(),
+            m_window.m_controller->videoFrameSize());
+    }
     if (m_window.m_nativeViewportWindow && m_window.m_nativeViewportWindow->isVisible() && m_window.m_nativeViewport)
     {
         m_window.m_nativeViewport->setPresentedFrame(

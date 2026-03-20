@@ -43,6 +43,7 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <windowsx.h>
+#include <dwmapi.h>
 #include <d3d11.h>
 #include <d3d11_4.h>
 #include <dxgi1_4.h>
@@ -103,6 +104,38 @@ void enableD3D11MultithreadProtection(ID3D11Device* device)
     }
 
     deviceContext->Release();
+}
+
+void applyDarkTitleBar(QWindow* window)
+{
+    if (!window)
+    {
+        return;
+    }
+
+    const auto hwnd = reinterpret_cast<HWND>(window->winId());
+    if (!hwnd)
+    {
+        return;
+    }
+
+    const auto library = LoadLibraryW(L"dwmapi.dll");
+    if (!library)
+    {
+        return;
+    }
+
+    using DwmSetWindowAttributeFn = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
+    const auto setWindowAttribute =
+        reinterpret_cast<DwmSetWindowAttributeFn>(GetProcAddress(library, "DwmSetWindowAttribute"));
+    if (setWindowAttribute)
+    {
+        constexpr DWORD kUseImmersiveDarkMode = 20;
+        const BOOL enabled = TRUE;
+        setWindowAttribute(hwnd, kUseImmersiveDarkMode, &enabled, sizeof(enabled));
+    }
+
+    FreeLibrary(library);
 }
 #endif
 
@@ -2224,6 +2257,10 @@ void MainWindow::updateDebugText()
 void MainWindow::refreshOverlays()
 {
     m_videoViewportQuickController->setOverlays(m_controller->currentOverlays());
+    if (m_detachedVideoViewportQuickController)
+    {
+        m_detachedVideoViewportQuickController->setOverlays(m_controller->currentOverlays());
+    }
     if (m_nativeViewportWindow && m_nativeViewportWindow->isVisible() && m_nativeViewport)
     {
         m_nativeViewport->setOverlays(m_controller->currentOverlays());
@@ -3245,6 +3282,8 @@ void MainWindow::buildUi()
 
     m_shellLayoutController = new ShellLayoutController(this);
     m_videoViewportQuickController = new VideoViewportQuickController(this);
+    m_detachedVideoViewportQuickController = new VideoViewportQuickController(this);
+    m_detachedVideoViewportQuickController->setNativePresentationEnabled(false);
     m_timelineQuickController = new TimelineQuickController(this);
     ensureQuickTypesRegistered();
     m_clipEditorQuickController = new ClipEditorQuickController(this);
@@ -3275,6 +3314,7 @@ void MainWindow::buildUi()
     rootContext()->setContextProperty(QStringLiteral("shellLayoutController"), m_shellLayoutController);
     rootContext()->setContextProperty(QStringLiteral("videoViewportController"), m_videoViewportQuickController);
     rootContext()->setContextProperty(QStringLiteral("videoViewportBridge"), this);
+    rootContext()->setContextProperty(QStringLiteral("videoViewportAllowNativePresentation"), true);
     rootContext()->setContextProperty(QStringLiteral("timelineController"), m_timelineQuickController);
     rootContext()->setContextProperty(QStringLiteral("clipEditorController"), m_clipEditorQuickController);
     rootContext()->setContextProperty(QStringLiteral("mixController"), m_mixQuickController);
@@ -3351,18 +3391,32 @@ void MainWindow::buildUi()
     m_detachedVideoWindow->setTitle(QStringLiteral("Detached Video"));
     m_detachedVideoWindow->setIcon(icon());
     m_detachedVideoWindow->setColor(QColor(QStringLiteral("#0c1016")));
+    m_detachedVideoWindow->setFlags(
+        Qt::Window
+        | Qt::WindowStaysOnTopHint
+        | Qt::WindowTitleHint
+        | Qt::WindowSystemMenuHint
+        | Qt::WindowMinimizeButtonHint
+        | Qt::WindowMaximizeButtonHint
+        | Qt::WindowCloseButtonHint);
     m_detachedVideoWindow->setResizeMode(QQuickView::SizeRootObjectToView);
     configureQuickEngine(*m_detachedVideoWindow->engine());
     m_detachedVideoWindow->engine()->addImageProvider(
         QStringLiteral("videoViewport"),
-        new VideoViewportImageProvider(*m_videoViewportQuickController));
+        new VideoViewportImageProvider(*m_detachedVideoViewportQuickController));
     m_detachedVideoWindow->rootContext()->setContextProperty(
         QStringLiteral("videoViewportController"),
-        m_videoViewportQuickController);
+        m_detachedVideoViewportQuickController);
     m_detachedVideoWindow->rootContext()->setContextProperty(
         QStringLiteral("videoViewportBridge"),
         this);
+    m_detachedVideoWindow->rootContext()->setContextProperty(
+        QStringLiteral("videoViewportAllowNativePresentation"),
+        false);
     m_detachedVideoWindow->setSource(videoViewportSceneUrl());
+#ifdef Q_OS_WIN
+    applyDarkTitleBar(m_detachedVideoWindow);
+#endif
     m_detachedVideoWindow->hide();
     m_detachedVideoWindow->installEventFilter(this);
 
@@ -3520,6 +3574,7 @@ void MainWindow::buildUi()
                         }
                     }
 
+                    m_nativeVideoPresentationAllowed = nativePresentationReady;
                     m_controller->setNativeVideoPresentationEnabled(nativePresentationReady);
                     if (m_videoViewportQuickController)
                     {
@@ -3539,6 +3594,7 @@ void MainWindow::buildUi()
                 [this]()
                 {
                     clearStuckWaitCursor(this);
+                    m_nativeVideoPresentationAllowed = false;
                     m_controller->setNativeVideoPresentationEnabled(false);
                     if (m_videoViewportQuickController)
                     {

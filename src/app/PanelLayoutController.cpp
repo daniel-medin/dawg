@@ -360,6 +360,36 @@ void PanelLayoutController::detachVideo()
         return;
     }
 
+    if (m_window.m_controller)
+    {
+        m_window.m_controller->setNativeVideoPresentationEnabled(false);
+    }
+    if (m_window.m_videoViewportQuickController)
+    {
+        m_window.m_videoViewportQuickController->setNativePresentationEnabled(false);
+    }
+    if (m_window.m_detachedVideoViewportQuickController)
+    {
+        m_window.m_detachedVideoViewportQuickController->setNativePresentationEnabled(false);
+    }
+
+    if (m_window.m_detachedVideoViewportQuickController && m_window.m_controller)
+    {
+        m_window.m_detachedVideoViewportQuickController->setPresentedFrame(
+            m_window.m_lastPresentedFrame,
+            m_window.m_controller->currentVideoFrame(),
+            m_window.m_controller->videoFrameSize());
+        m_window.m_detachedVideoViewportQuickController->setOverlays(m_window.m_controller->currentOverlays());
+        m_window.m_detachedVideoViewportQuickController->setShowAllLabels(
+            m_window.m_videoViewportQuickController
+                ? m_window.m_videoViewportQuickController->showAllLabels()
+                : false);
+        m_window.m_detachedVideoViewportQuickController->setDisplayScaleFactor(
+            m_window.m_videoViewportQuickController
+                ? m_window.m_videoViewportQuickController->displayScaleFactor()
+                : 1.0);
+    }
+
     if (!m_window.m_detachedVideoWindowGeometry.isEmpty())
     {
         restoreWindowGeometry(m_window.m_detachedVideoWindow, m_window.m_detachedVideoWindowGeometry);
@@ -404,6 +434,19 @@ void PanelLayoutController::attachVideo()
 
     m_window.m_detachedVideoWindow->hide();
     m_window.m_videoDetached = false;
+    if (m_window.m_controller)
+    {
+        m_window.m_controller->setNativeVideoPresentationEnabled(m_window.m_nativeVideoPresentationAllowed);
+    }
+    if (m_window.m_videoViewportQuickController)
+    {
+        m_window.m_videoViewportQuickController->setNativePresentationEnabled(
+            m_window.m_nativeVideoPresentationAllowed);
+    }
+    if (m_window.m_detachedVideoViewportQuickController)
+    {
+        m_window.m_detachedVideoViewportQuickController->setNativePresentationEnabled(false);
+    }
     if (m_window.m_shellLayoutController)
     {
         m_window.m_shellLayoutController->setVideoDetached(false);

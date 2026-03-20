@@ -237,6 +237,8 @@ private:
     ShellLayoutController* m_shellLayoutController = nullptr;
     QQuickItem* m_videoViewportQuickWidget = nullptr;
     VideoViewportQuickController* m_videoViewportQuickController = nullptr;
+    VideoViewportQuickController* m_detachedVideoViewportQuickController = nullptr;
+    bool m_nativeVideoPresentationAllowed = false;
     QQuickItem* m_timelineQuickWidget = nullptr;
     TimelineQuickController* m_timelineQuickController = nullptr;
     QQuickItem* m_clipEditorQuickWidget = nullptr;
