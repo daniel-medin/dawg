@@ -5,7 +5,7 @@
 - Use this repo as the source of truth: `C:\Users\danie\source\repos\daniel-medin\dawg`
 - The current in-repo build output is:
   - `build/windows-msvc-current/Debug/dawg.exe`
-- Do not assume `C:\dawg-dev\out\Debug\dawg.exe` is the active binary unless the user explicitly asks to use the helper-script mirror.
+- Helper scripts should target the in-repo build tree by default, not a mirrored `C:\dawg-dev` workspace.
 
 ## Project Startup
 

@@ -8,6 +8,7 @@ rel2/
 out/
 dist/
 .watch-*.log
+.aiexclude
 *.user
 *.VC.db
 *.VC.opendb

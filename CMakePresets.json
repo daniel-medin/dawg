@@ -10,7 +10,7 @@
       "name": "windows-msvc",
       "displayName": "Windows MSVC + vcpkg",
       "generator": "Visual Studio 17 2022",
-      "binaryDir": "${sourceDir}/build/windows-msvc",
+      "binaryDir": "${sourceDir}/build/windows-msvc-current",
       "architecture": {
         "value": "x64",
         "strategy": "set"

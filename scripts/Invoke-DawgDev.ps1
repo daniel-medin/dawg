@@ -79,7 +79,7 @@ function Ensure-Directory {
     }
 }
 
-function Ensure-ShortPathVcpkg {
+function Ensure-Vcpkg {
     param([string]$VcpkgRoot)
 
     $vcpkgExe = Join-Path $VcpkgRoot "vcpkg.exe"
@@ -90,59 +90,15 @@ function Ensure-ShortPathVcpkg {
     Ensure-Directory -Path $VcpkgRoot
 
     if (-not (Test-Path (Join-Path $VcpkgRoot ".git"))) {
-        Write-Step "Cloning short-path vcpkg"
+        Write-Step "Cloning vcpkg"
         Invoke-Native -FailureMessage "Failed to clone vcpkg." -Command {
             git clone https://github.com/microsoft/vcpkg $VcpkgRoot
         }
     }
 
-    Write-Step "Bootstrapping short-path vcpkg"
+    Write-Step "Bootstrapping vcpkg"
     Invoke-Native -FailureMessage "Failed to bootstrap vcpkg." -Command {
         cmd /c (Join-Path $VcpkgRoot "bootstrap-vcpkg.bat")
-    }
-}
-
-function Sync-RepoToShortPath {
-    param(
-        [string]$Source,
-        [string]$Destination
-    )
-
-    Ensure-Directory -Path $Destination
-
-    $excludeDirs = @(
-        '.git',
-        '.vs',
-        '.tools',
-        'build',
-        'b',
-        'rel',
-        'rel2',
-        'out'
-    )
-
-    $roboArgs = @(
-        $Source,
-        $Destination,
-        '/MIR',
-        '/R:3',
-        '/W:1',
-        '/NFL',
-        '/NDL',
-        '/NJH',
-        '/NJS',
-        '/NP',
-        '/XD'
-    ) + $excludeDirs + @(
-        '/XF',
-        '*.user',
-        '*.suo'
-    )
-
-    & robocopy @roboArgs | Out-Null
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -gt 7) {
-        throw "Sync to short-path workspace failed with robocopy exit code $exitCode."
     }
 }
 
@@ -158,11 +114,15 @@ function Stop-DawgProcess {
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
-
-$workspaceRoot = if ($env:DAWG_DEV_ROOT) { $env:DAWG_DEV_ROOT } else { 'C:\dawg-dev' }
-$shortRepoRoot = Join-Path $workspaceRoot 'src'
-$buildRoot = Join-Path $workspaceRoot 'out'
-$vcpkgRoot = if ($env:DAWG_VCPKG_ROOT) { $env:DAWG_VCPKG_ROOT } else { 'C:\dv' }
+$buildRoot = Join-Path $repoRoot 'build\windows-msvc-current'
+$repoLocalVcpkgRoot = Join-Path $repoRoot '.tools\vcpkg'
+$vcpkgRoot = if ($env:DAWG_VCPKG_ROOT) {
+    $env:DAWG_VCPKG_ROOT
+} elseif ($env:VCPKG_ROOT) {
+    $env:VCPKG_ROOT
+} else {
+    $repoLocalVcpkgRoot
+}
 
 Add-ToolToPath "C:\Program Files\CMake\bin"
 
@@ -171,9 +131,9 @@ Ensure-Command -Name git -InstallHint "Install Git for Windows and try again."
 Ensure-Command -Name cmake -InstallHint "Install CMake and re-open the terminal."
 $null = Ensure-VisualStudio
 
-Write-Step "Preparing short-path workspace"
-Sync-RepoToShortPath -Source $repoRoot -Destination $shortRepoRoot
-Ensure-ShortPathVcpkg -VcpkgRoot $vcpkgRoot
+Write-Step "Preparing repo-local build"
+Ensure-Directory -Path $buildRoot
+Ensure-Vcpkg -VcpkgRoot $vcpkgRoot
 
 $env:VCPKG_ROOT = $vcpkgRoot
 $env:VCPKG_MAX_CONCURRENCY = '4'
@@ -184,7 +144,7 @@ if ($KillRunning) {
 
 Write-Step "Configuring project"
 Invoke-Native -FailureMessage "CMake configure failed." -Command {
-    cmake -S $shortRepoRoot `
+    cmake -S $repoRoot `
         -B $buildRoot `
         -G "Visual Studio 17 2022" `
         -A x64 `
@@ -204,7 +164,7 @@ if (-not (Test-Path $exePath)) {
 }
 
 Write-Step "Ready"
-Write-Host "Short-path workspace: $shortRepoRoot"
+Write-Host "Repo root: $repoRoot"
 Write-Host "Build output: $exePath"
 
 if ($Launch) {

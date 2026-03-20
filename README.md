@@ -95,6 +95,7 @@ Startup no longer depends on a debug-only local `.dev` bootstrap path. Project o
 - Visual Studio 2022 with C++ desktop tools
 - CMake 3.27+
 - `vcpkg`
+- `VCPKG_ROOT` set to your local `vcpkg` checkout when using the CMake preset directly
 
 ### Standard build
 
@@ -103,9 +104,11 @@ cmake --preset windows-msvc
 cmake --build --preset windows-msvc-debug
 ```
 
+The preset writes to `build/windows-msvc-current` and expects `VCPKG_ROOT` to already be set in the shell.
+
 ### Recommended dev loop
 
-The repo includes helper scripts that mirror the source into a short path to avoid Windows path-length pain with Qt, vcpkg, and generated artifacts:
+The repo includes helper scripts for the normal in-repo build and run flow:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Dawg.ps1
@@ -113,7 +116,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Run-Dawg.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Watch-Dawg.ps1
 ```
 
-These scripts build in a short-path workspace like `C:\dawg-dev\src` and keep your normal checkout as the source of truth.
+These scripts configure and build the active repo directly into `build/windows-msvc-current`.
+
+They use `DAWG_VCPKG_ROOT` if set, otherwise `VCPKG_ROOT` if set, and otherwise fall back to the repo-local `.tools/vcpkg` checkout.
 
 ## Local Dev Notes
 
@@ -126,9 +131,9 @@ That means the repo folder can be very large on disk without GitHub receiving al
 
 DAWG now writes lightweight runtime performance events to `.watch-out.log`.
 
-If you use the helper scripts, the active runtime log is typically written in the short-path build workspace, for example:
+If you use the helper scripts, the active runtime log is written next to the built app in the repo-local build folder, for example:
 
-- `C:\dawg-dev\out\Debug\.watch-out.log`
+- `build/windows-msvc-current/Debug/.watch-out.log`
 
 That log can contain entries such as:
 
@@ -137,7 +142,7 @@ That log can contain entries such as:
 - `playback_hitch` for frame pacing issues during playback
 - `stop` for transport stop points
 
-The repo-root `.watch-out.log` may not be the live one if the app is launched through the short-path scripts.
+The repo-root `.watch-out.log` may not be the live one if the app is launched from the built `Debug` folder.
 
 ## What Is Actually Pushed To GitHub
 
