@@ -13,7 +13,7 @@
 
 namespace dawg::project
 {
-constexpr int kSchemaVersion = 3;
+constexpr int kSchemaVersion = 4;
 constexpr auto kProjectFileSuffix = ".dawg";
 
 struct MixLaneState
@@ -63,6 +63,7 @@ struct UiState
     bool audioPoolShowSize = true;
     bool showAllNodeNames = true;
     bool timelineClickSeeks = true;
+    bool timelineThumbnailsVisible = true;
     int audioPoolPreferredWidth = 320;
     int timelinePreferredHeight = 148;
     int clipEditorPreferredHeight = 224;

@@ -70,77 +70,34 @@ Item {
         id: trackGainPopup
 
         visible: shellOverlay.trackGainPopupVisible
-        width: 72
-        height: 182
-        radius: 10
-        color: "#f70c1016"
+        width: 96
+        height: 224
+        radius: 12
+        color: "#ee0f141b"
         border.width: 1
-        border.color: "#2a3644"
+        border.color: "#324155"
         z: 10
 
         readonly property real preferredX: shellOverlay.trackGainPopupAnchorX + 14
         readonly property real preferredY: shellOverlay.trackGainPopupAnchorY - (height / 2)
+        readonly property real gainDb: shellOverlay.trackGainPopupSliderValue <= shellOverlay.trackGainPopupMinimum
+            ? -100.0
+            : shellOverlay.trackGainPopupSliderValue / 10.0
 
         x: Math.max(8, Math.min(root.width - width - 8, preferredX))
         y: Math.max(8, Math.min(root.height - height - 8, preferredY))
 
-        Column {
-            anchors.fill: parent
-            anchors.margins: 10
-            spacing: 8
+        ClipGainStrip {
+            id: gainFader
 
-            Slider {
-                id: gainSlider
+            anchors.centerIn: parent
+            gainDb: trackGainPopup.gainDb
+            meterLevel: 0.0
+            showMeter: false
 
-                anchors.horizontalCenter: parent.horizontalCenter
-                orientation: Qt.Vertical
-                from: shellOverlay.trackGainPopupMinimum
-                to: shellOverlay.trackGainPopupMaximum
-                stepSize: 1
-                live: true
-                value: shellOverlay.trackGainPopupSliderValue
-                height: 132
-
-                onMoved: shellOverlay.setTrackGainPopupSliderValueFromUi(Math.round(value))
-
-                background: Rectangle {
-                    x: (parent.width - width) / 2
-                    y: parent.topPadding
-                    width: 8
-                    height: parent.availableHeight
-                    radius: 4
-                    color: "#0b1016"
-                    border.width: 1
-                    border.color: "#1d2733"
-
-                    Rectangle {
-                        width: parent.width - 2
-                        x: 1
-                        y: gainSlider.visualPosition * (parent.height - height)
-                        height: parent.height - y - 1
-                        radius: 3
-                        color: "#3d6ea5"
-                    }
-                }
-
-                handle: Rectangle {
-                    x: (gainSlider.width - width) / 2
-                    y: gainSlider.topPadding + gainSlider.visualPosition * (gainSlider.availableHeight - height)
-                    width: 16
-                    height: 12
-                    radius: 6
-                    color: "#d7dee7"
-                    border.width: 1
-                    border.color: "#eff3f7"
-                }
-            }
-
-            Text {
-                width: parent.width
-                text: shellOverlay.trackGainPopupValue
-                color: "#eef2f6"
-                font.pixelSize: 12
-                horizontalAlignment: Text.AlignHCenter
+            onGainDragged: function(gainDb) {
+                var sliderValue = gainDb <= -99.95 ? shellOverlay.trackGainPopupMinimum : Math.round(gainDb * 10.0)
+                shellOverlay.setTrackGainPopupSliderValueFromUi(sliderValue)
             }
         }
 
@@ -152,7 +109,7 @@ Item {
 
         onVisibleChanged: {
             if (visible) {
-                gainSlider.forceActiveFocus()
+                gainFader.forceActiveFocus()
             }
         }
     }

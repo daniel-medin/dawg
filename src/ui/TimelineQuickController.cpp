@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <cmath>
 
+#include <QDir>
+#include <QFileInfo>
 #include <QToolTip>
 #include <QUrl>
-
-#include "ui/TimelineThumbnailCache.h"
 
 namespace
 {
@@ -27,14 +27,6 @@ int roundedFpsFrames(const double fps)
     return std::max(1, static_cast<int>(std::lround(fps > 0.0 ? fps : 30.0)));
 }
 
-QString thumbnailSourceUrl(const QString& videoPath, const int frameIndex)
-{
-    const auto encodedPath = QString::fromLatin1(QUrl::toPercentEncoding(videoPath));
-    return QStringLiteral("image://timeline-thumbnail/")
-        + encodedPath
-        + QLatin1Char('/')
-        + QString::number(frameIndex);
-}
 }
 
 TimelineQuickController::TimelineQuickController(QObject* parent)
@@ -43,26 +35,6 @@ TimelineQuickController::TimelineQuickController(QObject* parent)
     m_scrubRequestTimer.setSingleShot(true);
     m_scrubRequestTimer.setInterval(16);
     connect(&m_scrubRequestTimer, &QTimer::timeout, this, &TimelineQuickController::flushPendingFrameRequest);
-    connect(
-        &timelineThumbnailCache(),
-        &TimelineThumbnailCache::thumbnailReady,
-        this,
-        [this](const QString& videoPath, const int frameIndex)
-        {
-            if (videoPath != m_videoPath)
-            {
-                return;
-            }
-
-            const auto sourceUrl = thumbnailSourceUrl(videoPath, frameIndex);
-            if (m_thumbnailSources.value(frameIndex) == sourceUrl)
-            {
-                return;
-            }
-
-            m_thumbnailSources.insert(frameIndex, sourceUrl);
-            refreshVisuals();
-        });
 }
 
 void TimelineQuickController::clear()
@@ -92,12 +64,25 @@ void TimelineQuickController::clear()
     m_lastRequestedFrame = -1;
     m_pendingRequestedFrame = -1;
     m_cursorShape = static_cast<int>(Qt::ArrowCursor);
+    m_projectRootPath.clear();
     m_videoPath.clear();
     m_thumbnailFrames.clear();
-    m_thumbnailSources.clear();
+    m_thumbnailManifest.reset();
     m_scrubRequestTimer.stop();
-    timelineThumbnailCache().clear();
     QToolTip::hideText();
+    refreshVisuals();
+}
+
+void TimelineQuickController::setProjectRootPath(const QString& projectRootPath)
+{
+    const auto cleanedPath = QDir::cleanPath(QDir::fromNativeSeparators(projectRootPath));
+    if (m_projectRootPath == cleanedPath)
+    {
+        return;
+    }
+
+    m_projectRootPath = cleanedPath;
+    reloadThumbnailManifest();
     refreshVisuals();
 }
 
@@ -110,11 +95,7 @@ void TimelineQuickController::setVideoPath(const QString& videoPath)
 
     m_videoPath = videoPath;
     m_thumbnailFrames.clear();
-    m_thumbnailSources.clear();
-    if (m_videoPath.isEmpty())
-    {
-        timelineThumbnailCache().clear();
-    }
+    reloadThumbnailManifest();
     refreshVisuals();
 }
 
@@ -444,7 +425,7 @@ void TimelineQuickController::handleMousePress(
     const int button,
     const double x,
     const double y,
-    const int modifiers,
+    const int /*modifiers*/,
     const int globalX,
     const int globalY)
 {
@@ -455,7 +436,6 @@ void TimelineQuickController::handleMousePress(
 
     const auto position = QPointF{x, y};
     const auto globalPosition = QPoint{globalX, globalY};
-
     if (button == static_cast<int>(Qt::RightButton))
     {
         if (const auto loopGeometry = loopRangeAt(position); loopGeometry.has_value())
@@ -556,13 +536,6 @@ void TimelineQuickController::handleMousePress(
     if (const auto track = trackAt(position); track.has_value())
     {
         emit trackSelected(track->id);
-
-        if ((modifiers & static_cast<int>(Qt::ControlModifier)) && track->hasAttachedAudio)
-        {
-            emit trackGainPopupRequested(track->id, globalPosition);
-            refreshVisuals();
-            return;
-        }
 
         if (track->startHandleRect.contains(position))
         {
@@ -697,7 +670,7 @@ void TimelineQuickController::handleWheel(
     {
         if (const auto track = trackAt(QPointF{x, y}); track.has_value())
         {
-            if (track->selected && track->hasAttachedAudio)
+            if (track->hasAttachedAudio)
             {
                 emit trackGainAdjustRequested(track->id, angleDeltaY, QPoint{globalX, globalY});
                 return;
@@ -1090,8 +1063,6 @@ void TimelineQuickController::refreshVisuals()
     {
         m_thumbnailFrames = nextThumbnailFrames;
     }
-    requestThumbnailFrames(m_thumbnailFrames);
-
     m_thumbnailTiles.clear();
     if (!m_thumbnailFrames.isEmpty())
     {
@@ -1106,7 +1077,7 @@ void TimelineQuickController::refreshVisuals()
             tile.insert(QStringLiteral("width"), tileWidth);
             tile.insert(QStringLiteral("height"), filmstripRect.height());
             tile.insert(QStringLiteral("frameIndex"), frameIndex);
-            tile.insert(QStringLiteral("source"), m_thumbnailSources.value(frameIndex));
+            tile.insert(QStringLiteral("source"), thumbnailSourceForFrame(frameIndex));
             m_thumbnailTiles.push_back(tile);
         }
     }
@@ -1251,7 +1222,7 @@ QRectF TimelineQuickController::computeTrackAreaRect() const
 QVector<int> TimelineQuickController::computeThumbnailFrames() const
 {
     QVector<int> frameIndices;
-    if (!m_showThumbnails || m_totalFrames <= 0 || m_videoPath.isEmpty())
+    if (!m_showThumbnails || m_totalFrames <= 0 || m_videoPath.isEmpty() || !m_thumbnailManifest.has_value())
     {
         return frameIndices;
     }
@@ -1270,31 +1241,76 @@ QVector<int> TimelineQuickController::computeThumbnailFrames() const
     return frameIndices;
 }
 
-void TimelineQuickController::requestThumbnailFrames(const QVector<int>& frameIndices)
+void TimelineQuickController::reloadThumbnailManifest()
 {
-    if (m_videoPath.isEmpty() || frameIndices.isEmpty())
+    if (m_projectRootPath.isEmpty() || m_videoPath.isEmpty())
     {
+        m_thumbnailManifest.reset();
         return;
     }
 
-    QVector<int> missingFrames;
-    missingFrames.reserve(frameIndices.size());
-    for (const auto frameIndex : frameIndices)
+    const auto manifest = dawg::timeline::loadTimelineThumbnailManifest(m_projectRootPath);
+    if (!manifest.has_value())
     {
-        if (!m_thumbnailSources.contains(frameIndex) && !timelineThumbnailCache().hasThumbnail(m_videoPath, frameIndex))
+        m_thumbnailManifest.reset();
+        return;
+    }
+
+    const auto absoluteManifestVideoPath =
+        QDir(m_projectRootPath).absoluteFilePath(manifest->videoRelativePath);
+    if (QDir::cleanPath(QDir::fromNativeSeparators(absoluteManifestVideoPath))
+        != QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(m_videoPath).absoluteFilePath())))
+    {
+        m_thumbnailManifest.reset();
+        return;
+    }
+
+    m_thumbnailManifest = manifest;
+}
+
+QString TimelineQuickController::thumbnailSourceForFrame(const int targetFrameIndex) const
+{
+    if (!m_thumbnailManifest.has_value() || m_projectRootPath.isEmpty())
+    {
+        return {};
+    }
+
+    const int thumbnailCount = std::max(1, static_cast<int>(m_thumbnailFrames.size()));
+    const auto desiredStepFrames = std::max(1.0, visibleFrameSpan() / static_cast<double>(thumbnailCount));
+    const auto* selectedLevel = &m_thumbnailManifest->levels.front();
+    auto bestDistance = std::abs(static_cast<double>(selectedLevel->frameStep) - desiredStepFrames);
+    for (const auto& level : m_thumbnailManifest->levels)
+    {
+        const auto distance = std::abs(static_cast<double>(level.frameStep) - desiredStepFrames);
+        if (distance < bestDistance)
         {
-            missingFrames.push_back(frameIndex);
-        }
-        else if (!m_thumbnailSources.contains(frameIndex) && timelineThumbnailCache().hasThumbnail(m_videoPath, frameIndex))
-        {
-            m_thumbnailSources.insert(frameIndex, thumbnailSourceUrl(m_videoPath, frameIndex));
+            selectedLevel = &level;
+            bestDistance = distance;
         }
     }
 
-    if (!missingFrames.isEmpty())
+    if (selectedLevel->frames.isEmpty())
     {
-        timelineThumbnailCache().requestFrames(m_videoPath, missingFrames);
+        return {};
     }
+
+    int bestFrameIndex = selectedLevel->frames.front();
+    int bestFrameDistance = std::abs(bestFrameIndex - targetFrameIndex);
+    for (const int frameIndex : selectedLevel->frames)
+    {
+        const int distance = std::abs(frameIndex - targetFrameIndex);
+        if (distance < bestFrameDistance)
+        {
+            bestFrameIndex = frameIndex;
+            bestFrameDistance = distance;
+        }
+    }
+
+    const auto path = dawg::timeline::timelineThumbnailFilePath(
+        m_projectRootPath,
+        selectedLevel->index,
+        bestFrameIndex);
+    return QFileInfo::exists(path) ? QUrl::fromLocalFile(path).toString() : QString{};
 }
 
 double TimelineQuickController::visibleFrameSpan() const

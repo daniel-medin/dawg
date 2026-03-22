@@ -59,6 +59,8 @@ add_executable(dawg WIN32
     src/app/TimelineLayoutService.h
     src/app/ProjectDocument.cpp
     src/app/ProjectDocument.h
+    src/app/ProjectTimelineThumbnails.cpp
+    src/app/ProjectTimelineThumbnails.h
     src/app/ProjectWindowController.cpp
     src/app/ProjectWindowController.h
     src/app/PerformanceLogger.cpp

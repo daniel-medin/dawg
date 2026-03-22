@@ -4,5 +4,50 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"files.watcherExclude": {
+			"**/.git/**": true,
+			"**/.git/objects/**": true,
+			"**/.git/subtree-cache/**": true,
+			"**/.vs/**": true,
+			"**/.dev/**": true,
+			"**/.tools/**": true,
+			"**/.tools/vcpkg/**": true,
+			"**/b/**": true,
+			"**/build/**": true,
+			"**/rel/**": true,
+			"**/rel2/**": true,
+			"**/out/**": true,
+			"**/dist/**": true,
+			"**/.watch-*.log": true
+		},
+		"search.exclude": {
+			"**/.git": true,
+			"**/.vs": true,
+			"**/.dev": true,
+			"**/.tools": true,
+			"**/.tools/vcpkg": true,
+			"**/b": true,
+			"**/build": true,
+			"**/rel": true,
+			"**/rel2": true,
+			"**/out": true,
+			"**/dist": true
+		},
+		"files.exclude": {
+			"**/.git": true,
+			"**/.vs": true,
+			"**/.dev": true,
+			"**/.tools": true,
+			"**/b": true,
+			"**/build": true,
+			"**/rel": true,
+			"**/rel2": true,
+			"**/out": true,
+			"**/dist": true
+		},
+		"cmake.configureOnOpen": false,
+		"geminicodeassist.enable": false,
+		"geminicodeassist.localCodebaseAwareness": false
+	}
 }

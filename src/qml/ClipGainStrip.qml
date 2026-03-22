@@ -5,6 +5,7 @@ Rectangle {
 
     property real gainDb: 0.0
     property real meterLevel: 0.0
+    property bool showMeter: true
 
     signal gainDragged(real gainDb)
 
@@ -63,6 +64,7 @@ Rectangle {
 
                 Rectangle {
                     id: meterTrack
+                    visible: root.showMeter
                     width: 12
                     height: parent.height
                     radius: 4

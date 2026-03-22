@@ -13,6 +13,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include "app/ProjectTimelineThumbnails.h"
 #include "ui/TimelineTypes.h"
 
 class TimelineQuickController : public QObject
@@ -40,6 +41,7 @@ public:
     explicit TimelineQuickController(QObject* parent = nullptr);
 
     void clear();
+    void setProjectRootPath(const QString& projectRootPath);
     void setVideoPath(const QString& videoPath);
     void setTimeline(int totalFrames, double fps);
     void setCurrentFrame(int frameIndex);
@@ -152,7 +154,8 @@ private:
     [[nodiscard]] QRectF computeLoopBarRect() const;
     [[nodiscard]] QRectF computeTrackAreaRect() const;
     [[nodiscard]] QVector<int> computeThumbnailFrames() const;
-    void requestThumbnailFrames(const QVector<int>& frameIndices);
+    void reloadThumbnailManifest();
+    [[nodiscard]] QString thumbnailSourceForFrame(int targetFrameIndex) const;
     [[nodiscard]] double visibleFrameSpan() const;
     [[nodiscard]] double visibleFrameSpanForZoom(double zoomScale) const;
     [[nodiscard]] double maxZoomScale() const;
@@ -213,9 +216,10 @@ private:
     bool m_hasHoverLine = false;
     double m_hoverX = 0.0;
     int m_cursorShape = static_cast<int>(Qt::ArrowCursor);
+    QString m_projectRootPath;
     QString m_videoPath;
     QVector<int> m_thumbnailFrames;
-    QHash<int, QString> m_thumbnailSources;
+    std::optional<dawg::timeline::ThumbnailManifest> m_thumbnailManifest;
     bool m_showThumbnails = true;
     bool m_playbackActive = false;
 };

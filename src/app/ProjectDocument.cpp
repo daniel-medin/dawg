@@ -437,6 +437,7 @@ QJsonObject uiStateToJson(const UiState& state)
         {QStringLiteral("audioPoolShowSize"), state.audioPoolShowSize},
         {QStringLiteral("showAllNodeNames"), state.showAllNodeNames},
         {QStringLiteral("timelineClickSeeks"), state.timelineClickSeeks},
+        {QStringLiteral("timelineThumbnailsVisible"), state.timelineThumbnailsVisible},
         {QStringLiteral("audioPoolPreferredWidth"), state.audioPoolPreferredWidth},
         {QStringLiteral("timelinePreferredHeight"), state.timelinePreferredHeight},
         {QStringLiteral("clipEditorPreferredHeight"), state.clipEditorPreferredHeight},
@@ -474,6 +475,7 @@ UiState uiStateFromJson(const QJsonObject& object)
     state.audioPoolShowSize = object.value(QStringLiteral("audioPoolShowSize")).toBool(true);
     state.showAllNodeNames = object.value(QStringLiteral("showAllNodeNames")).toBool(true);
     state.timelineClickSeeks = object.value(QStringLiteral("timelineClickSeeks")).toBool(true);
+    state.timelineThumbnailsVisible = object.value(QStringLiteral("timelineThumbnailsVisible")).toBool(true);
     state.audioPoolPreferredWidth = object.value(QStringLiteral("audioPoolPreferredWidth")).toInt(320);
     state.timelinePreferredHeight = object.value(QStringLiteral("timelinePreferredHeight")).toInt(148);
     state.clipEditorPreferredHeight = object.value(QStringLiteral("clipEditorPreferredHeight")).toInt(224);
@@ -552,7 +554,7 @@ std::optional<Document> loadDocument(const QString& projectFilePath, QString* er
 
     const auto root = document.object();
     const auto schemaVersion = root.value(QStringLiteral("schemaVersion")).toInt(-1);
-    if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != kSchemaVersion)
+    if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3 && schemaVersion != kSchemaVersion)
     {
         if (errorMessage)
         {
