@@ -362,6 +362,9 @@ void ProjectWindowController::restoreLastProjectOnStartup()
     QSettings settings;
     const auto lastProjectPath = normalizeProjectFilePath(
         settings.value(QString::fromLatin1(kLastProjectPathSettingsKey)).toString());
+    qInfo().noquote()
+        << "Startup restore begin:"
+        << "lastProjectPath=" << lastProjectPath;
     const auto storedRecentPaths = recentProjectPaths();
     QStringList existingRecentPaths;
     existingRecentPaths.reserve(storedRecentPaths.size());
@@ -375,6 +378,10 @@ void ProjectWindowController::restoreLastProjectOnStartup()
 
     if (existingRecentPaths != storedRecentPaths)
     {
+        qInfo().noquote()
+            << "Startup restore pruning recent paths:"
+            << "stored=" << storedRecentPaths
+            << "existing=" << existingRecentPaths;
         storeRecentProjectPaths(existingRecentPaths);
         rebuildRecentProjectsMenu();
     }
@@ -403,16 +410,30 @@ void ProjectWindowController::restoreLastProjectOnStartup()
     {
         if (!QFileInfo::exists(candidatePath))
         {
+            qInfo().noquote()
+                << "Startup restore skipping missing candidate:"
+                << candidatePath;
             continue;
         }
 
+        qInfo().noquote()
+            << "Startup restore loading candidate:"
+            << candidatePath;
         if (loadProjectFile(candidatePath))
         {
+            qInfo().noquote()
+                << "Startup restore loaded candidate:"
+                << candidatePath;
             settings.setValue(QString::fromLatin1(kLastProjectPathSettingsKey), candidatePath);
             return;
         }
+
+        qInfo().noquote()
+            << "Startup restore failed candidate:"
+            << candidatePath;
     }
 
+    qInfo().noquote() << "Startup restore found no loadable project. Clearing current project.";
     settings.remove(QString::fromLatin1(kLastProjectPathSettingsKey));
     clearCurrentProject();
 }
@@ -907,6 +928,7 @@ bool ProjectWindowController::saveProjectAsNewCopy()
 
 bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
 {
+    qInfo().noquote() << "loadProjectFile begin:" << projectFilePath;
     QString errorMessage;
     const auto document = dawg::project::loadDocument(projectFilePath, &errorMessage);
     if (!document.has_value())
@@ -949,16 +971,24 @@ bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
     const auto recoveredMediaFromFolders =
         recoverProjectMediaFromFolders(&absoluteControllerState, projectRootPath, &recoveryMessage);
 
+    qInfo().noquote()
+        << "loadProjectFile restoring controller state:"
+        << "project=" << projectFilePath
+        << "videoPath=" << absoluteControllerState.videoPath
+        << "audioPoolCount=" << absoluteControllerState.audioPoolAssetPaths.size()
+        << "trackCount=" << absoluteControllerState.trackerState.tracks.size();
     m_window.m_projectStateChangeInProgress = true;
     const auto restored = m_window.m_controller->restoreProjectState(absoluteControllerState, &errorMessage);
     if (restored)
     {
+        qInfo().noquote() << "loadProjectFile controller restore succeeded:" << projectFilePath;
+        qInfo().noquote() << "loadProjectFile applying UI state:" << projectFilePath;
         m_window.applyProjectUiState(document->ui);
+        qInfo().noquote() << "loadProjectFile UI state applied:" << projectFilePath;
         setCurrentProject(projectFilePath, document->name);
         addRecentProjectPath(projectFilePath);
         setProjectDirty(false);
         m_window.refreshTimeline();
-        m_window.requestProjectTimelineThumbnailsGeneration();
         if (recoveredMediaFromFolders)
         {
             setProjectDirty(true);
@@ -968,6 +998,10 @@ bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
 
     if (!restored)
     {
+        qInfo().noquote()
+            << "loadProjectFile controller restore failed:"
+            << projectFilePath
+            << "error=" << errorMessage;
         m_window.m_dialogController->execMessage(
             QStringLiteral("Open Project"),
             errorMessage,
@@ -980,6 +1014,7 @@ bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
         recoveredMediaFromFolders
             ? QStringLiteral("Opened project %1. %2").arg(document->name, recoveryMessage)
             : QStringLiteral("Opened project %1.").arg(document->name));
+    qInfo().noquote() << "loadProjectFile complete:" << projectFilePath;
     return true;
 }
 

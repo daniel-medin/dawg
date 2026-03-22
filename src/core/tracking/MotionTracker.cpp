@@ -108,6 +108,12 @@ bool MotionTracker::updateTrackSample(const QUuid& trackId, const int frameIndex
             continue;
         }
 
+        const auto existingIt = track.samples.find(frameIndex);
+        if (existingIt != track.samples.end() && existingIt->second == imagePoint)
+        {
+            return false;
+        }
+
         track.samples.insert_or_assign(frameIndex, imagePoint);
         return true;
     }

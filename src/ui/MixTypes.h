@@ -31,3 +31,11 @@ struct MixLaneStrip
             && useStereoMeter == other.useStereoMeter;
     }
 };
+
+struct MixLaneMeterState
+{
+    int laneIndex = 0;
+    float meterLevel = 0.0F;
+    float meterLeftLevel = 0.0F;
+    float meterRightLevel = 0.0F;
+};

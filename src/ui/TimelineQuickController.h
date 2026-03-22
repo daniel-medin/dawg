@@ -74,6 +74,11 @@ public:
     [[nodiscard]] double hoverX() const;
     [[nodiscard]] int cursorShape() const;
     [[nodiscard]] bool playbackActive() const;
+    [[nodiscard]] bool thumbnailsVisible() const;
+    [[nodiscard]] bool hasThumbnailManifest() const;
+    [[nodiscard]] int thumbnailTileCount() const;
+    [[nodiscard]] int thumbnailFrameCount() const;
+    [[nodiscard]] bool lastCurrentFrameAutoScrolled() const;
 
     Q_INVOKABLE void setViewportSize(double width, double height);
     Q_INVOKABLE void handleMousePress(int button, double x, double y, int modifiers, int globalX, int globalY);
@@ -222,4 +227,5 @@ private:
     std::optional<dawg::timeline::ThumbnailManifest> m_thumbnailManifest;
     bool m_showThumbnails = true;
     bool m_playbackActive = false;
+    bool m_lastCurrentFrameAutoScrolled = false;
 };

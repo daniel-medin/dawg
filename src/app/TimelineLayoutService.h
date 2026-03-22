@@ -28,4 +28,9 @@ public:
         const std::unordered_map<int, float>& gainByLane,
         const std::unordered_map<int, bool>& mutedByLane,
         const std::unordered_map<int, bool>& soloByLane);
+
+    [[nodiscard]] static std::vector<MixLaneMeterState> mixLaneMeterStates(
+        const std::vector<TimelineTrackSpan>& spans,
+        const std::vector<TrackPoint>& tracks,
+        const AudioEngine& audioEngine);
 };

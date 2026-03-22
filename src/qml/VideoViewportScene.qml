@@ -67,31 +67,20 @@ Rectangle {
         visible: root.frameRect.width > 0 && root.frameRect.height > 0
     }
 
-    Image {
-        id: frameImage
+    Loader {
+        active: videoViewportController.hasFrame
+            && root.frameRect.width > 0
+            && root.frameRect.height > 0
         x: root.frameRect.x
         y: root.frameRect.y
         width: root.frameRect.width
         height: root.frameRect.height
-        visible: videoViewportController.hasFrame
-            && (!root.allowNativePresentation || !videoViewportController.nativePresentationActive)
-        source: videoViewportController.hasFrame
-            && (!root.allowNativePresentation || !videoViewportController.nativePresentationActive)
-            ? videoViewportController.frameSource
-            : ""
-        asynchronous: false
-        cache: false
-        smooth: true
-        fillMode: Image.PreserveAspectFit
-    }
-
-    VideoViewportQuickItem {
-        x: root.frameRect.x
-        y: root.frameRect.y
-        width: root.frameRect.width
-        height: root.frameRect.height
-        visible: root.allowNativePresentation && videoViewportController.nativePresentationActive
-        controller: videoViewportController
+        visible: active
+        sourceComponent: Component {
+            VideoViewportQuickItem {
+                controller: videoViewportController
+            }
+        }
     }
 
     Item {
@@ -99,7 +88,11 @@ Rectangle {
         visible: videoViewportController.hasFrame
 
         VideoOverlayQuickItem {
-            anchors.fill: parent
+            x: root.frameRect.x
+            y: root.frameRect.y
+            width: root.frameRect.width
+            height: root.frameRect.height
+            visible: root.frameRect.width > 0 && root.frameRect.height > 0
             controller: videoViewportController
         }
 
@@ -211,12 +204,13 @@ Rectangle {
                 return
             }
 
-            root.hoveredTrackId = videoViewportController.trackIdAt(mouse.x, mouse.y, root.width, root.height)
             if (root.draggedTrackId !== "") {
                 const point = videoViewportController.widgetToImagePoint(mouse.x, mouse.y, root.width, root.height)
                 videoViewportBridge.requestSelectedTrackMoved(point.x, point.y)
                 return
             }
+
+            root.hoveredTrackId = videoViewportController.trackIdAt(mouse.x, mouse.y, root.width, root.height)
 
             if (!root.pendingSeed) {
                 return

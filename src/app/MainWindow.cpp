@@ -245,19 +245,14 @@ public:
     QImage requestImage(const QString& id, QSize* size, const QSize& requestedSize) override
     {
         Q_UNUSED(id);
+        Q_UNUSED(requestedSize);
 
         const auto image = m_controller.currentFrame();
         if (size)
         {
             *size = image.size();
         }
-
-        if (image.isNull() || !requestedSize.isValid())
-        {
-            return image;
-        }
-
-        return image.scaled(requestedSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        return image;
     }
 
 private:
@@ -848,7 +843,7 @@ MainWindow::MainWindow(QWindow* parent)
     m_clipEditorPreviewTimer.setInterval(16);
     connect(&m_clearAllShortcutTimer, &QTimer::timeout, this, &MainWindow::clearPendingClearAllShortcut);
     connect(&m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsage);
-    connect(&m_mixMeterTimer, &QTimer::timeout, this, &MainWindow::refreshMixView);
+    connect(&m_mixMeterTimer, &QTimer::timeout, this, &MainWindow::updateMixMeterLevels);
     connect(&m_clipEditorPreviewTimer, &QTimer::timeout, this, &MainWindow::refreshClipEditor);
     m_statusToastTimer.setSingleShot(true);
     m_statusToastTimer.setInterval(2800);
@@ -1352,10 +1347,6 @@ MainWindow::MainWindow(QWindow* parent)
     clearCurrentProject();
     QTimer::singleShot(0, this, [this]()
     {
-        if (m_startupProjectRestoreEnabled)
-        {
-            restoreLastProjectOnStartup();
-        }
         if (!hasOpenProject())
         {
             showStatus(QStringLiteral("Create or open a project to start adding nodes."));
@@ -1364,11 +1355,6 @@ MainWindow::MainWindow(QWindow* parent)
 }
 
 MainWindow::~MainWindow() = default;
-
-void MainWindow::setStartupProjectRestoreEnabled(const bool enabled)
-{
-    m_startupProjectRestoreEnabled = enabled;
-}
 
 void MainWindow::setWindowTitle(const QString& title)
 {
@@ -1779,20 +1765,32 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    qInfo().noquote()
+        << "MainWindow::closeEvent begin:"
+        << "accepted=" << event->isAccepted()
+        << "visible=" << isVisible()
+        << "geometry=" << geometry()
+        << "projectDirty=" << m_projectDirty;
     if (!promptToSaveIfDirty(QStringLiteral("close the app")))
     {
+        qInfo().noquote() << "MainWindow::closeEvent ignored by dirty-project prompt.";
         event->ignore();
         return;
     }
 
     if (hasOpenProject() && !m_projectDirty && !saveProjectToCurrentPath())
     {
+        qInfo().noquote() << "MainWindow::closeEvent ignored because project save failed.";
         event->ignore();
         return;
     }
 
     m_shuttingDown = true;
     QQuickView::closeEvent(event);
+    qInfo().noquote()
+        << "MainWindow::closeEvent after base:"
+        << "accepted=" << event->isAccepted()
+        << "visible=" << isVisible();
     if (event->isAccepted())
     {
         return;
@@ -2396,6 +2394,8 @@ void MainWindow::updatePlaybackState(const bool playing)
         resetOutputFpsTracking();
         m_audioPoolPlaybackRefreshTimer.invalidate();
     }
+    m_timelinePlaybackUiTimer.invalidate();
+    m_lastTimelinePlaybackUiFrame = -1;
     if (playing)
     {
         hideCanvasTipsOverlay();
@@ -3032,12 +3032,24 @@ void MainWindow::refreshMixView()
             syncMixStripStates();
         }
 
-        const auto masterStereoLevels = m_controller->masterMixStereoLevels();
-        m_mixQuickController->setMasterMeterLevels(masterStereoLevels.left, masterStereoLevels.right);
-        for (const auto& strip : laneStrips)
-        {
-            m_mixQuickController->setLaneMeterLevels(strip.laneIndex, strip.meterLeftLevel, strip.meterRightLevel);
-        }
+        updateMixMeterLevels();
+    }
+}
+
+void MainWindow::updateMixMeterLevels()
+{
+    if (!m_mixQuickController || !(m_mixQuickWidget || m_detachedMixWindow))
+    {
+        return;
+    }
+
+    const auto masterStereoLevels = m_controller->masterMixStereoLevels();
+    m_mixQuickController->setMasterMeterLevels(masterStereoLevels.left, masterStereoLevels.right);
+
+    const auto meterStates = m_controller->mixLaneMeterStates(m_timelineTrackSpans);
+    for (const auto& state : meterStates)
+    {
+        m_mixQuickController->setLaneMeterLevels(state.laneIndex, state.meterLeftLevel, state.meterRightLevel);
     }
 }
 
@@ -3553,7 +3565,7 @@ void MainWindow::buildUi()
     rootContext()->setContextProperty(QStringLiteral("shellLayoutController"), m_shellLayoutController);
     rootContext()->setContextProperty(QStringLiteral("videoViewportController"), m_videoViewportQuickController);
     rootContext()->setContextProperty(QStringLiteral("videoViewportBridge"), this);
-    rootContext()->setContextProperty(QStringLiteral("videoViewportAllowNativePresentation"), true);
+    rootContext()->setContextProperty(QStringLiteral("videoViewportAllowNativePresentation"), false);
     rootContext()->setContextProperty(QStringLiteral("timelineController"), m_timelineQuickController);
     rootContext()->setContextProperty(QStringLiteral("clipEditorController"), m_clipEditorQuickController);
     rootContext()->setContextProperty(QStringLiteral("mixController"), m_mixQuickController);
@@ -3881,11 +3893,6 @@ void MainWindow::buildUi()
                     }
 
                     m_nativeVideoPresentationAllowed = nativePresentationReady;
-                    m_controller->setNativeVideoPresentationEnabled(nativePresentationReady);
-                    if (m_videoViewportQuickController)
-                    {
-                        m_videoViewportQuickController->setNativePresentationEnabled(nativePresentationReady);
-                    }
                     updateDetachedPanelUiState();
                     if (quickDevice)
                     {
@@ -3902,11 +3909,6 @@ void MainWindow::buildUi()
                 {
                     clearStuckWaitCursor(this);
                     m_nativeVideoPresentationAllowed = false;
-                    m_controller->setNativeVideoPresentationEnabled(false);
-                    if (m_videoViewportQuickController)
-                    {
-                        m_videoViewportQuickController->setNativePresentationEnabled(false);
-                    }
                     updateDetachedPanelUiState();
                     updateMixQuickDiagnostics();
                 },

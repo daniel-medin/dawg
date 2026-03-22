@@ -53,7 +53,6 @@ public:
     explicit MainWindow(QWindow* parent = nullptr);
     ~MainWindow() override;
     [[nodiscard]] bool openProjectFilePath(const QString& projectFilePath);
-    void setStartupProjectRestoreEnabled(bool enabled);
     void setWindowTitle(const QString& title);
     [[nodiscard]] QString windowTitle() const;
     [[nodiscard]] QString currentProjectTitle() const;
@@ -62,6 +61,7 @@ public:
     [[nodiscard]] bool isMaximized() const;
     [[nodiscard]] QByteArray saveGeometry() const;
     bool restoreGeometry(const QByteArray& geometry);
+    void restoreLastProjectOnStartup();
 
     Q_INVOKABLE void requestImportVideo();
     Q_INVOKABLE void requestSeedPoint(double imageX, double imageY);
@@ -214,7 +214,6 @@ private:
     void clearCurrentProject();
     void setProjectDirty(bool dirty);
     void updateWindowTitle();
-    void restoreLastProjectOnStartup();
     [[nodiscard]] QStringList recentProjectPaths() const;
     void storeRecentProjectPaths(const QStringList& projectPaths);
     void addRecentProjectPath(const QString& projectFilePath);
@@ -227,6 +226,7 @@ private:
     [[nodiscard]] QString chooseExistingDirectory(
         const QString& title,
         const QString& directory = {}) const;
+    void updateMixMeterLevels();
     [[nodiscard]] bool needsMixRebuild(const std::vector<MixLaneStrip>& laneStrips) const;
     void syncMixStripStates();
     void rebuildMixStrips();
@@ -414,14 +414,20 @@ private:
     QElapsedTimer m_outputFpsTimer;
     QElapsedTimer m_debugTextTimer;
     QElapsedTimer m_audioPoolPlaybackRefreshTimer;
+    QElapsedTimer m_timelinePlaybackUiTimer;
     int m_outputFpsFrameCount = 0;
+    int m_lastTimelinePlaybackUiFrame = -1;
     double m_outputFps = 0.0;
+    double m_uiViewportUpdateMs = 0.0;
+    double m_uiTimelineUpdateMs = 0.0;
+    double m_uiChromeUpdateMs = 0.0;
+    double m_uiClipEditorUpdateMs = 0.0;
+    double m_uiDebugTextUpdateMs = 0.0;
     bool m_videoDetached = false;
     bool m_timelineDetached = false;
     bool m_clipEditorDetached = false;
     bool m_mixDetached = false;
     bool m_audioPoolDetached = false;
-    bool m_startupProjectRestoreEnabled = true;
     bool m_shuttingDown = false;
     QThread* m_timelineThumbnailGenerationThread = nullptr;
     std::optional<TimelineThumbnailGenerationRequest> m_pendingTimelineThumbnailGenerationRequest;

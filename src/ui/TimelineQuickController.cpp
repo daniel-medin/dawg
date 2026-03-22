@@ -68,6 +68,7 @@ void TimelineQuickController::clear()
     m_videoPath.clear();
     m_thumbnailFrames.clear();
     m_thumbnailManifest.reset();
+    m_lastCurrentFrameAutoScrolled = false;
     m_scrubRequestTimer.stop();
     QToolTip::hideText();
     refreshVisuals();
@@ -151,7 +152,8 @@ void TimelineQuickController::setCurrentFrame(const int frameIndex)
     m_pendingRequestedFrame = -1;
     const auto previousViewStartFrame = m_viewStartFrame;
     ensureFrameVisible(m_currentFrame);
-    if (std::abs(m_viewStartFrame - previousViewStartFrame) > 0.001)
+    m_lastCurrentFrameAutoScrolled = std::abs(m_viewStartFrame - previousViewStartFrame) > 0.001;
+    if (m_lastCurrentFrameAutoScrolled)
     {
         refreshVisuals();
         return;
@@ -407,6 +409,31 @@ int TimelineQuickController::cursorShape() const
 bool TimelineQuickController::playbackActive() const
 {
     return m_playbackActive;
+}
+
+bool TimelineQuickController::thumbnailsVisible() const
+{
+    return m_showThumbnails;
+}
+
+bool TimelineQuickController::hasThumbnailManifest() const
+{
+    return m_thumbnailManifest.has_value();
+}
+
+int TimelineQuickController::thumbnailTileCount() const
+{
+    return static_cast<int>(m_thumbnailTiles.size());
+}
+
+int TimelineQuickController::thumbnailFrameCount() const
+{
+    return static_cast<int>(m_thumbnailFrames.size());
+}
+
+bool TimelineQuickController::lastCurrentFrameAutoScrolled() const
+{
+    return m_lastCurrentFrameAutoScrolled;
 }
 
 void TimelineQuickController::setViewportSize(const double width, const double height)

@@ -174,9 +174,54 @@ int main(int argc, char* argv[])
 
     const auto arguments = QCoreApplication::arguments();
     const bool skipStartupRestore = arguments.contains(QStringLiteral("--no-startup-restore"));
+    QString startupProjectPath;
+    if (arguments.size() > 1)
+    {
+        for (int index = 1; index < arguments.size(); ++index)
+        {
+            if (arguments.at(index) == QStringLiteral("--no-startup-restore"))
+            {
+                continue;
+            }
+
+            const QFileInfo candidatePath(arguments.at(index));
+            if (candidatePath.exists()
+                && candidatePath.isFile()
+                && candidatePath.suffix().compare(
+                    QString::fromLatin1(dawg::project::kProjectFileSuffix).mid(1),
+                    Qt::CaseInsensitive) == 0)
+            {
+                startupProjectPath = candidatePath.absoluteFilePath();
+            }
+            break;
+        }
+    }
 
     MainWindow window;
-    window.setStartupProjectRestoreEnabled(!skipStartupRestore);
+    QObject::connect(&app, &QGuiApplication::lastWindowClosed, []()
+    {
+        qInfo().noquote() << "QGuiApplication::lastWindowClosed";
+    });
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, []()
+    {
+        qInfo().noquote() << "QCoreApplication::aboutToQuit";
+    });
+    QObject::connect(&window, &QWindow::visibleChanged, [&window]()
+    {
+        qInfo().noquote()
+            << "Main window visibleChanged:"
+            << "visible=" << window.isVisible()
+            << "visibility=" << window.visibility()
+            << "geometry=" << window.geometry();
+    });
+    QObject::connect(&window, &QWindow::visibilityChanged, [&window](const QWindow::Visibility visibility)
+    {
+        qInfo().noquote()
+            << "Main window visibilityChanged:"
+            << "visible=" << window.isVisible()
+            << "visibility=" << visibility
+            << "geometry=" << window.geometry();
+    });
     window.create();
     window.show();
     window.raise();
@@ -208,26 +253,17 @@ int main(int argc, char* argv[])
         << "geometry=" << window.geometry()
         << "visibility=" << window.visibility();
 
-    if (arguments.size() > 1)
+    if (!startupProjectPath.isEmpty())
     {
-        for (int index = 1; index < arguments.size(); ++index)
-        {
-            if (arguments.at(index) == QStringLiteral("--no-startup-restore"))
-            {
-                continue;
-            }
-
-            const QFileInfo candidatePath(arguments.at(index));
-            if (candidatePath.exists()
-                && candidatePath.isFile()
-                && candidatePath.suffix().compare(
-                    QString::fromLatin1(dawg::project::kProjectFileSuffix).mid(1),
-                    Qt::CaseInsensitive) == 0)
-            {
-                static_cast<void>(window.openProjectFilePath(candidatePath.absoluteFilePath()));
-            }
-            break;
-        }
+        qInfo().noquote() << "Startup main: opening explicit project path:" << startupProjectPath;
+        static_cast<void>(window.openProjectFilePath(startupProjectPath));
+        qInfo().noquote() << "Startup main: explicit project open returned.";
+    }
+    else if (!skipStartupRestore)
+    {
+        qInfo().noquote() << "Startup main: restoring last project.";
+        window.restoreLastProjectOnStartup();
+        qInfo().noquote() << "Startup main: last project restore returned.";
     }
 
     return app.exec();

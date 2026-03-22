@@ -57,6 +57,17 @@ int audioClipPlaybackOffsetMs(
 
     return clipStartMs + std::max(0, elapsedWithinNodeMs);
 }
+
+double elapsedMs(const QElapsedTimer& timer)
+{
+    return static_cast<double>(timer.nsecsElapsed()) / 1'000'000.0;
+}
+
+void updateSmoothedMs(double& target, const double sampleMs)
+{
+    constexpr double kBlend = 0.2;
+    target = target <= 0.0 ? sampleMs : ((target * (1.0 - kBlend)) + (sampleMs * kBlend));
+}
 }
 
 PlayerController::PlayerController(QObject* parent)
@@ -120,6 +131,7 @@ void PlayerController::clearProjectStateAfterMediaStop(const bool resetVideoPlay
     m_mixStateStore->reset();
     m_audioDurationMsByPath.clear();
     m_audioChannelCountByPath.clear();
+    m_playbackDebugStats = {};
     m_clipEditorSession->reset();
     m_audioPlaybackCoordinator->reset();
     m_mixStateStore->applyMasterGain(*m_audioEngine);
@@ -691,6 +703,7 @@ void PlayerController::togglePlayback()
     }
 
     stopSelectedTrackClipPreview();
+    m_playbackDebugStats = {};
     static_cast<void>(m_videoPlaybackCoordinator->applyPresentationScaleForPlaybackState(
         true,
         [this]()
@@ -1378,6 +1391,49 @@ std::vector<MixLaneStrip> PlayerController::mixLaneStrips() const
     return strips;
 }
 
+std::vector<MixLaneMeterState> PlayerController::mixLaneMeterStates(const std::vector<TimelineTrackSpan>& spans) const
+{
+    auto meterStates = TimelineLayoutService::mixLaneMeterStates(spans, m_tracker.tracks(), *m_audioEngine);
+    if (!m_audioPlaybackCoordinator->isClipPreviewPlaying())
+    {
+        return meterStates;
+    }
+
+    const auto sourceTrackId = m_audioPlaybackCoordinator->clipPreviewSourceTrackId();
+    if (sourceTrackId.isNull())
+    {
+        return meterStates;
+    }
+
+    const auto spanIt = std::find_if(
+        spans.begin(),
+        spans.end(),
+        [&sourceTrackId](const TimelineTrackSpan& span)
+        {
+            return span.id == sourceTrackId;
+        });
+    if (spanIt == spans.end())
+    {
+        return meterStates;
+    }
+
+    const auto previewStereoLevels = m_audioEngine->trackStereoLevels(m_audioPlaybackCoordinator->clipPreviewTrackId());
+    for (auto& state : meterStates)
+    {
+        if (state.laneIndex != spanIt->laneIndex)
+        {
+            continue;
+        }
+
+        state.meterLeftLevel = std::max(state.meterLeftLevel, previewStereoLevels.left);
+        state.meterRightLevel = std::max(state.meterRightLevel, previewStereoLevels.right);
+        state.meterLevel = std::max(state.meterLevel, std::max(previewStereoLevels.left, previewStereoLevels.right));
+        break;
+    }
+
+    return meterStates;
+}
+
 std::vector<TimelineTrackSpan> PlayerController::timelineTrackSpans() const
 {
     return TimelineLayoutService::timelineTrackSpans(
@@ -1391,17 +1447,33 @@ const std::vector<TrackOverlay>& PlayerController::currentOverlays() const
     return m_currentOverlays;
 }
 
+PlaybackDebugStats PlayerController::playbackDebugStats() const
+{
+    return m_playbackDebugStats;
+}
+
 void PlayerController::advancePlayback()
 {
+    QElapsedTimer advanceTimer;
+    advanceTimer.start();
     VideoPlaybackCoordinator::PlaybackCallbacks callbacks;
     callbacks.onFrameChanged = [this]()
     {
+        QElapsedTimer frameCallbackTimer;
+        frameCallbackTimer.start();
+        QElapsedTimer overlayTimer;
+        overlayTimer.start();
         refreshOverlays();
+        updateSmoothedMs(m_playbackDebugStats.overlayRefreshMs, elapsedMs(overlayTimer));
         emitCurrentFrame();
+        updateSmoothedMs(m_playbackDebugStats.frameCallbackMs, elapsedMs(frameCallbackTimer));
     };
     callbacks.onSyncAudio = [this]()
     {
+        QElapsedTimer audioTimer;
+        audioTimer.start();
         syncAttachedAudioForCurrentFrame();
+        updateSmoothedMs(m_playbackDebugStats.syncAudioMs, elapsedMs(audioTimer));
     };
     callbacks.onPausePlayback = [this](const bool restorePlaybackAnchor)
     {
@@ -1416,6 +1488,8 @@ void PlayerController::advancePlayback()
         return activeLoopRange();
     };
     m_videoPlaybackCoordinator->advancePlayback(callbacks);
+    updateSmoothedMs(m_playbackDebugStats.advancePlaybackMs, elapsedMs(advanceTimer));
+    m_playbackDebugStats.runtimeStats = m_videoPlaybackCoordinator->runtimeStats();
 }
 
 void PlayerController::advanceSelectionFade()
@@ -1551,11 +1625,22 @@ void PlayerController::restoreTrackEditState(
 
 void PlayerController::refreshOverlays()
 {
+    QElapsedTimer timer;
+    timer.start();
     m_currentOverlays = m_tracker.overlaysForFrame(
         m_videoPlaybackCoordinator->currentFrame().index,
         m_selectionController->selectedTrackIds(),
         m_selectionController->fadingDeselectedTrackId(),
         m_selectionController->fadingDeselectedTrackOpacity());
+    updateSmoothedMs(m_playbackDebugStats.overlayBuildMs, elapsedMs(timer));
+    m_playbackDebugStats.overlayCount = static_cast<int>(m_currentOverlays.size());
+    m_playbackDebugStats.overlayLabelCount = static_cast<int>(std::count_if(
+        m_currentOverlays.begin(),
+        m_currentOverlays.end(),
+        [](const TrackOverlay& overlay)
+        {
+            return overlay.showLabel;
+        }));
     emit overlaysChanged();
 }
 
@@ -1626,11 +1711,18 @@ void PlayerController::setSelectedTrackId(const QUuid& trackId, const bool fadeP
 
 void PlayerController::emitCurrentFrame()
 {
+    QElapsedTimer presentTimer;
+    presentTimer.start();
     const auto presentedFrame = m_videoPlaybackCoordinator->presentCurrentFrame(m_transport.isPlaying());
+    updateSmoothedMs(m_playbackDebugStats.presentFrameMs, elapsedMs(presentTimer));
+    QElapsedTimer dispatchTimer;
+    dispatchTimer.start();
     emit frameReady(
         presentedFrame.image,
         presentedFrame.frameIndex,
         presentedFrame.timestampSeconds);
+    updateSmoothedMs(m_playbackDebugStats.frameReadyDispatchMs, elapsedMs(dispatchTimer));
+    m_playbackDebugStats.runtimeStats = m_videoPlaybackCoordinator->runtimeStats();
 }
 
 std::optional<std::pair<int, int>> PlayerController::activeLoopRange() const

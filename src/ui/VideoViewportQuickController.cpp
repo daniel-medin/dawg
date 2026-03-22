@@ -164,7 +164,7 @@ bool VideoViewportQuickController::hasFrame() const
 
 QString VideoViewportQuickController::frameSource() const
 {
-    return m_frameSource;
+    return m_frame.isNull() ? QString{} : m_frameSource;
 }
 
 QVariantList VideoViewportQuickController::overlays() const
@@ -371,7 +371,9 @@ void VideoViewportQuickController::updateNativePresentationState()
 void VideoViewportQuickController::bumpFrameRevision()
 {
     ++m_frameRevision;
-    m_frameSource = QStringLiteral("image://videoViewport/frame/%1").arg(m_frameRevision);
+    m_frameSource = m_frame.isNull()
+        ? QString{}
+        : QStringLiteral("image://videoViewport/frame/%1").arg(m_frameRevision);
     emit frameSourceChanged();
 }
 

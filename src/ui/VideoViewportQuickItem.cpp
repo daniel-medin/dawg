@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 #include <QQuickWindow>
 #include <QSGRendererInterface>
@@ -68,14 +69,19 @@ struct VideoTextureNode final : QSGSimpleTextureNode
     ID3D11VideoProcessorOutputView* videoProcessorOutputView = nullptr;
     ID3D11Texture2D* convertedTexture = nullptr;
     ID3D11Texture2D* sampleTexture = nullptr;
+    std::unique_ptr<QSGTexture> activeTexture;
+    std::unique_ptr<QSGTexture> retiredTexture;
 
     VideoTextureNode()
     {
-        setOwnsTexture(true);
+        setOwnsTexture(false);
     }
 
     ~VideoTextureNode() override
     {
+        setTexture(nullptr);
+        activeTexture.reset();
+        retiredTexture.reset();
         releaseProcessorResources();
         releaseTyped(videoContext);
         releaseTyped(videoDevice);
@@ -94,6 +100,13 @@ struct VideoTextureNode final : QSGSimpleTextureNode
         inputSize = {};
         inputFormat = DXGI_FORMAT_UNKNOWN;
         renderedRevision = -1;
+    }
+
+    void replaceTexture(QSGTexture* nextTexture)
+    {
+        retiredTexture = std::move(activeTexture);
+        activeTexture.reset(nextTexture);
+        setTexture(activeTexture.get());
     }
 
     bool ensureVideoInterfaces(ID3D11Device* nextDevice)
@@ -233,7 +246,7 @@ struct VideoTextureNode final : QSGSimpleTextureNode
             return false;
         }
 
-        setTexture(wrappedTexture);
+        replaceTexture(wrappedTexture);
         setFiltering(QSGTexture::Linear);
         inputSize = nextInputSize;
         outputSize = nextOutputSize;
@@ -313,6 +326,25 @@ struct VideoTextureNode final : QSGSimpleTextureNode
         deviceContext->CopyResource(sampleTexture, convertedTexture);
         return true;
     }
+
+    bool uploadImage(QQuickWindow* window, const QImage& image)
+    {
+        if (!window || image.isNull())
+        {
+            return false;
+        }
+
+        auto* nextTexture = window->createTextureFromImage(image);
+        if (!nextTexture)
+        {
+            return false;
+        }
+
+        releaseProcessorResources();
+        replaceTexture(nextTexture);
+        setFiltering(QSGTexture::Linear);
+        return true;
+    }
 };
 #endif
 }
@@ -366,15 +398,10 @@ QSGNode* VideoViewportQuickItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNo
 {
     Q_UNUSED(updateData);
 
-#ifndef Q_OS_WIN
-    return nullptr;
-#else
     if (!window()
-        || !m_snapshot.nativePresentationActive
-        || !m_snapshot.videoFrame.hasNativeTexture()
         || width() <= 0.0
         || height() <= 0.0
-        || window()->rendererInterface()->graphicsApi() != QSGRendererInterface::Direct3D11)
+        || !m_snapshot.hasFrame)
     {
         return nullptr;
     }
@@ -385,10 +412,28 @@ QSGNode* VideoViewportQuickItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNo
         node = new VideoTextureNode();
     }
 
-    const QSize outputSize{
-        std::max(1, static_cast<int>(std::lround(width()))),
-        std::max(1, static_cast<int>(std::lround(height())))};
-    if (!node->convertFrame(window(), m_snapshot.videoFrame, outputSize) || !node->texture())
+    bool rendered = false;
+    bool renderedNative = false;
+#ifdef Q_OS_WIN
+    const bool canUseNative =
+        m_snapshot.nativePresentationActive
+        && m_snapshot.videoFrame.hasNativeTexture()
+        && window()->rendererInterface()->graphicsApi() == QSGRendererInterface::Direct3D11;
+    if (canUseNative)
+    {
+        const QSize outputSize{
+            std::max(1, static_cast<int>(std::lround(width()))),
+            std::max(1, static_cast<int>(std::lround(height())))};
+        rendered = node->convertFrame(window(), m_snapshot.videoFrame, outputSize);
+        renderedNative = rendered;
+    }
+#endif
+    if (!rendered && !m_snapshot.image.isNull())
+    {
+        rendered = node->uploadImage(window(), m_snapshot.image);
+    }
+
+    if (!rendered || !node->texture())
     {
         if (node != oldNode)
         {
@@ -397,11 +442,12 @@ QSGNode* VideoViewportQuickItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNo
         return nullptr;
     }
 
-    node->nativeResource = m_snapshot.videoFrame.nativeResource;
+    node->nativeResource = renderedNative
+        ? m_snapshot.videoFrame.nativeResource
+        : std::shared_ptr<void>{};
     node->renderedRevision = m_snapshot.revision;
     node->setRect(boundingRect());
     return node;
-#endif
 }
 
 void VideoViewportQuickItem::releaseResources()
@@ -417,7 +463,9 @@ void VideoViewportQuickItem::syncSnapshot()
         return;
     }
 
+    m_snapshot.image = m_controller->currentFrame();
     m_snapshot.videoFrame = m_controller->currentVideoFrame();
+    m_snapshot.hasFrame = m_controller->hasFrame();
     m_snapshot.nativePresentationActive = m_controller->nativePresentationActive();
     m_snapshot.revision = m_controller->frameRevision();
 }

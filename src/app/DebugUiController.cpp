@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <QFileInfo>
+#include <QElapsedTimer>
 #include <QSignalBlocker>
 
 #ifdef Q_OS_WIN
@@ -20,10 +21,23 @@
 #include "app/WindowChromeController.h"
 #include "ui/DebugOverlayWindow.h"
 #include "ui/NativeVideoViewport.h"
+#include "ui/TimelineQuickController.h"
+#include "ui/VideoOverlayQuickItem.h"
 #include "ui/VideoViewportQuickController.h"
 
 namespace
 {
+double elapsedMs(const QElapsedTimer& timer)
+{
+    return static_cast<double>(timer.nsecsElapsed()) / 1'000'000.0;
+}
+
+void updateSmoothedMs(double& target, const double sampleMs)
+{
+    constexpr double kBlend = 0.2;
+    target = target <= 0.0 ? sampleMs : ((target * (1.0 - kBlend)) + (sampleMs * kBlend));
+}
+
 #ifdef Q_OS_WIN
 class GpuEngineUsageSampler
 {
@@ -278,9 +292,15 @@ void DebugUiController::resetOutputFpsTracking()
 
 void DebugUiController::updateFrame(const QImage& image, const int frameIndex, const double timestampSeconds)
 {
+    constexpr qint64 kPlaybackTimelineUiIntervalMs = 66;
+
+    QElapsedTimer viewportTimer;
+    viewportTimer.start();
     m_window.m_lastPresentedFrame = image;
     m_window.m_videoViewportQuickController->setPresentedFrame(image, m_window.m_controller->currentVideoFrame(), m_window.m_controller->videoFrameSize());
-    if (m_window.m_detachedVideoViewportQuickController)
+    if (m_window.m_detachedVideoViewportQuickController
+        && m_window.m_detachedVideoWindow
+        && m_window.m_detachedVideoWindow->isVisible())
     {
         m_window.m_detachedVideoViewportQuickController->setPresentedFrame(
             image,
@@ -294,17 +314,36 @@ void DebugUiController::updateFrame(const QImage& image, const int frameIndex, c
             m_window.m_controller->currentVideoFrame(),
             m_window.m_controller->videoFrameSize());
     }
+    updateSmoothedMs(m_window.m_uiViewportUpdateMs, elapsedMs(viewportTimer));
+
+    QElapsedTimer timelineTimer;
+    timelineTimer.start();
     const auto displayFrameIndex = std::max(0, frameIndex);
     const auto displayTimestampSeconds = std::max(0.0, timestampSeconds);
-    m_window.setTimelineCurrentFrame(displayFrameIndex);
+    const bool playbackActive = m_window.m_controller->isPlaying();
+    const bool timelineUiDue = !playbackActive
+        || !m_window.m_timelinePlaybackUiTimer.isValid()
+        || m_window.m_timelinePlaybackUiTimer.elapsed() >= kPlaybackTimelineUiIntervalMs
+        || displayFrameIndex < m_window.m_lastTimelinePlaybackUiFrame;
+    if (timelineUiDue)
+    {
+        m_window.setTimelineCurrentFrame(displayFrameIndex);
+        m_window.m_timelinePlaybackUiTimer.restart();
+        m_window.m_lastTimelinePlaybackUiFrame = displayFrameIndex;
+        updateSmoothedMs(m_window.m_uiTimelineUpdateMs, elapsedMs(timelineTimer));
+    }
     const auto frameText = QStringLiteral("Frame %1  |  %2 s")
         .arg(displayFrameIndex)
         .arg(displayTimestampSeconds, 0, 'f', 2);
-    if (m_window.m_windowChromeController)
+    QElapsedTimer chromeTimer;
+    chromeTimer.start();
+    if (timelineUiDue && m_window.m_windowChromeController)
     {
         m_window.m_windowChromeController->setFrameText(frameText);
+        updateSmoothedMs(m_window.m_uiChromeUpdateMs, elapsedMs(chromeTimer));
     }
-    if (m_window.m_controller->isPlaying())
+
+    if (playbackActive)
     {
         if (!m_window.m_outputFpsTimer.isValid())
         {
@@ -324,8 +363,15 @@ void DebugUiController::updateFrame(const QImage& image, const int frameIndex, c
         }
     }
 
+    QElapsedTimer clipEditorTimer;
+    clipEditorTimer.start();
     m_window.refreshClipEditor();
+    updateSmoothedMs(m_window.m_uiClipEditorUpdateMs, elapsedMs(clipEditorTimer));
+
+    QElapsedTimer debugTextTimer;
+    debugTextTimer.start();
     updateDebugText();
+    updateSmoothedMs(m_window.m_uiDebugTextUpdateMs, elapsedMs(debugTextTimer));
 }
 
 void DebugUiController::updateMemoryUsage()
@@ -396,6 +442,48 @@ void DebugUiController::updateDebugText()
         .arg(m_window.m_qtQuickLoadText.isEmpty()
                 ? QStringLiteral("Unknown")
                 : m_window.m_qtQuickLoadText);
+    const auto playbackStats = m_window.m_controller->playbackDebugStats();
+    const auto playbackPerfText = QStringLiteral(
+        "Playback ms tick=%1 cb=%2 overlay=%3 build=%4 present=%5 ui=%6 audio=%7")
+                                      .arg(playbackStats.advancePlaybackMs, 0, 'f', 1)
+                                      .arg(playbackStats.frameCallbackMs, 0, 'f', 1)
+                                      .arg(playbackStats.overlayRefreshMs, 0, 'f', 1)
+                                      .arg(playbackStats.overlayBuildMs, 0, 'f', 1)
+                                      .arg(playbackStats.presentFrameMs, 0, 'f', 1)
+                                      .arg(playbackStats.frameReadyDispatchMs, 0, 'f', 1)
+                                      .arg(playbackStats.syncAudioMs, 0, 'f', 1);
+    const auto playbackQueueText = QStringLiteral(
+        "Playback queue %1/%2 wait=%3ms fallback=%4 starve=%5")
+                                       .arg(playbackStats.runtimeStats.queuedFrames)
+                                       .arg(playbackStats.runtimeStats.prefetchTargetFrames)
+                                       .arg(playbackStats.runtimeStats.lastStepWaitMs)
+                                        .arg(playbackStats.runtimeStats.lastStepUsedSynchronousFallback
+                                                 ? QStringLiteral("yes")
+                                                 : QStringLiteral("no"))
+                                       .arg(playbackStats.runtimeStats.queueStarvationCount);
+    const auto uiPerfText = QStringLiteral(
+        "UI ms viewport=%1 timeline=%2 chrome=%3 clip=%4 debug=%5")
+                                .arg(m_window.m_uiViewportUpdateMs, 0, 'f', 1)
+                                .arg(m_window.m_uiTimelineUpdateMs, 0, 'f', 1)
+                                .arg(m_window.m_uiChromeUpdateMs, 0, 'f', 1)
+                                .arg(m_window.m_uiClipEditorUpdateMs, 0, 'f', 1)
+                                .arg(m_window.m_uiDebugTextUpdateMs, 0, 'f', 1);
+    const auto overlayStats = VideoOverlayQuickItem::debugStats();
+    const auto overlayPaintText = QStringLiteral(
+        "Overlay ms paint=%1 nodes=%2 labels=%3 model=%4/%5")
+                                      .arg(overlayStats.paintMs, 0, 'f', 1)
+                                      .arg(overlayStats.overlayCount)
+                                      .arg(overlayStats.labelCount)
+                                      .arg(playbackStats.overlayCount)
+                                      .arg(playbackStats.overlayLabelCount);
+    const auto timelineThumbsText = m_window.m_timelineQuickController
+        ? QStringLiteral("Timeline thumbs visible=%1 manifest=%2 tiles=%3 frames=%4 scroll=%5")
+              .arg(m_window.m_timelineQuickController->thumbnailsVisible() ? QStringLiteral("yes") : QStringLiteral("no"))
+              .arg(m_window.m_timelineQuickController->hasThumbnailManifest() ? QStringLiteral("yes") : QStringLiteral("no"))
+              .arg(m_window.m_timelineQuickController->thumbnailTileCount())
+              .arg(m_window.m_timelineQuickController->thumbnailFrameCount())
+              .arg(m_window.m_timelineQuickController->lastCurrentFrameAutoScrolled() ? QStringLiteral("yes") : QStringLiteral("no"))
+        : QStringLiteral("Timeline thumbs unavailable");
 
     m_window.m_debugOverlay->setListText(
         QStringLiteral(
@@ -413,7 +501,12 @@ void DebugUiController::updateDebugText()
             "%12\n"
             "%13\n"
             "%14\n"
-            "%15")
+            "%15\n"
+            "%16\n"
+            "%17\n"
+            "%18\n"
+            "%19\n"
+            "%20")
             .arg(clipText)
             .arg(m_window.m_controller->isMotionTrackingEnabled() ? QStringLiteral("On") : QStringLiteral("Off"))
             .arg(insertionText)
@@ -428,7 +521,12 @@ void DebugUiController::updateDebugText()
             .arg(decoderText)
             .arg(renderText)
             .arg(qtQuickText)
-            .arg(qtQuickLoadText));
+            .arg(qtQuickLoadText)
+            .arg(playbackPerfText)
+            .arg(playbackQueueText)
+            .arg(uiPerfText)
+            .arg(timelineThumbsText)
+            .arg(overlayPaintText));
     m_window.m_debugTextTimer.restart();
 }
 

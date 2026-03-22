@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QList>
+#include <QImage>
 #include <QMetaObject>
 #include <QQuickItem>
 
@@ -30,7 +31,9 @@ protected:
 private:
     struct FrameSnapshot
     {
+        QImage image;
         VideoFrame videoFrame;
+        bool hasFrame = false;
         bool nativePresentationActive = false;
         int revision = 0;
     };

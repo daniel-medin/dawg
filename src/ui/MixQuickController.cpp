@@ -285,7 +285,7 @@ void MixQuickController::setMasterMeterLevels(const float leftLevel, const float
 
 void MixQuickController::setLaneStrips(const QVariantList& descriptors)
 {
-    qDeleteAll(m_laneStrips);
+    const auto previousStrips = m_laneStrips;
     m_laneStrips.clear();
     m_laneStripsByIndex.clear();
 
@@ -313,6 +313,15 @@ void MixQuickController::setLaneStrips(const QVariantList& descriptors)
     }
 
     emit laneStripsChanged();
+
+    // Let QML detach delegates from the old QObject model before destruction.
+    for (auto* strip : previousStrips)
+    {
+        if (strip)
+        {
+            strip->deleteLater();
+        }
+    }
 }
 
 void MixQuickController::setLaneState(const int laneIndex, const float gainDb, const bool muted, const bool soloed)

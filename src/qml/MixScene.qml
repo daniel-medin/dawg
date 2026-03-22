@@ -80,30 +80,36 @@ Rectangle {
 
                     property var strip: modelData
 
-                    masterStrip: strip.masterStrip
-                    titleText: strip.titleText
-                    detailText: strip.detailText
-                    footerText: strip.footerText
-                    accentColor: strip.accentColor
-                    gainDb: strip.gainDb
-                    muted: strip.muted
-                    soloEnabled: strip.soloEnabled
-                    soloed: strip.soloed
+                    masterStrip: strip ? strip.masterStrip : false
+                    titleText: strip ? strip.titleText : ""
+                    detailText: strip ? strip.detailText : ""
+                    footerText: strip ? strip.footerText : ""
+                    accentColor: strip ? strip.accentColor : "#f0f4f8"
+                    gainDb: strip ? strip.gainDb : 0.0
+                    muted: strip ? strip.muted : false
+                    soloEnabled: strip ? strip.soloEnabled : false
+                    soloed: strip ? strip.soloed : false
                     playbackActive: mixController.playbackActive
                     meterResetToken: mixController.meterResetToken
-                    useStereoMeter: strip.useStereoMeter
-                    meterLevel: strip.meterLevel
-                    meterLeftLevel: strip.meterLeftLevel
-                    meterRightLevel: strip.meterRightLevel
+                    useStereoMeter: strip ? strip.useStereoMeter : false
+                    meterLevel: strip ? strip.meterLevel : 0.0
+                    meterLeftLevel: strip ? strip.meterLeftLevel : 0.0
+                    meterRightLevel: strip ? strip.meterRightLevel : 0.0
                     height: stripsRow.height
                     onGainDragged: function(gainDb) {
-                        mixController.setLaneGainDb(strip.laneIndex, gainDb)
+                        if (strip) {
+                            mixController.setLaneGainDb(strip.laneIndex, gainDb)
+                        }
                     }
                     onMuteToggled: function(muted) {
-                        mixController.setLaneMuted(strip.laneIndex, muted)
+                        if (strip) {
+                            mixController.setLaneMuted(strip.laneIndex, muted)
+                        }
                     }
                     onSoloToggled: function(soloed) {
-                        mixController.setLaneSoloed(strip.laneIndex, soloed)
+                        if (strip) {
+                            mixController.setLaneSoloed(strip.laneIndex, soloed)
+                        }
                     }
                 }
             }

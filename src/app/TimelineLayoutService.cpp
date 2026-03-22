@@ -1,6 +1,9 @@
 #include "app/TimelineLayoutService.h"
 
 #include <algorithm>
+
+#include <QHash>
+
 #include "core/audio/AudioEngine.h"
 
 namespace
@@ -228,4 +231,64 @@ std::vector<MixLaneStrip> TimelineLayoutService::mixLaneStrips(
     }
 
     return strips;
+}
+
+std::vector<MixLaneMeterState> TimelineLayoutService::mixLaneMeterStates(
+    const std::vector<TimelineTrackSpan>& spans,
+    const std::vector<TrackPoint>& tracks,
+    const AudioEngine& audioEngine)
+{
+    std::vector<MixLaneMeterState> meterStates;
+    meterStates.reserve(spans.size());
+
+    QHash<QUuid, int> laneByTrackId;
+    for (const auto& span : spans)
+    {
+        laneByTrackId.insert(span.id, span.laneIndex);
+        const auto existingStateIt = std::find_if(
+            meterStates.begin(),
+            meterStates.end(),
+            [&span](const MixLaneMeterState& state)
+            {
+                return state.laneIndex == span.laneIndex;
+            });
+        if (existingStateIt == meterStates.end())
+        {
+            meterStates.push_back(MixLaneMeterState{.laneIndex = span.laneIndex});
+        }
+    }
+
+    for (const auto& track : tracks)
+    {
+        if (!track.attachedAudio.has_value())
+        {
+            continue;
+        }
+
+        const auto laneIt = laneByTrackId.constFind(track.id);
+        if (laneIt == laneByTrackId.cend())
+        {
+            continue;
+        }
+
+        const auto meterStateIt = std::find_if(
+            meterStates.begin(),
+            meterStates.end(),
+            [laneIndex = laneIt.value()](const MixLaneMeterState& state)
+            {
+                return state.laneIndex == laneIndex;
+            });
+        if (meterStateIt == meterStates.end())
+        {
+            continue;
+        }
+
+        const auto stereoLevels = audioEngine.trackStereoLevels(track.id);
+        meterStateIt->meterLeftLevel = std::max(meterStateIt->meterLeftLevel, stereoLevels.left);
+        meterStateIt->meterRightLevel = std::max(meterStateIt->meterRightLevel, stereoLevels.right);
+        meterStateIt->meterLevel =
+            std::max(meterStateIt->meterLevel, std::max(stereoLevels.left, stereoLevels.right));
+    }
+
+    return meterStates;
 }

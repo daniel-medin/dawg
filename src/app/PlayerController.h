@@ -34,6 +34,20 @@
 #include "ui/MixTypes.h"
 #include "ui/TimelineTypes.h"
 
+struct PlaybackDebugStats
+{
+    double advancePlaybackMs = 0.0;
+    double frameCallbackMs = 0.0;
+    double overlayRefreshMs = 0.0;
+    double overlayBuildMs = 0.0;
+    double presentFrameMs = 0.0;
+    double frameReadyDispatchMs = 0.0;
+    double syncAudioMs = 0.0;
+    int overlayCount = 0;
+    int overlayLabelCount = 0;
+    VideoPlaybackRuntimeStats runtimeStats;
+};
+
 class PlayerController final : public QObject
 {
     Q_OBJECT
@@ -162,8 +176,10 @@ public:
     [[nodiscard]] std::vector<AudioPoolItem> audioPoolItems() const;
     [[nodiscard]] dawg::project::ControllerState snapshotProjectState() const;
     [[nodiscard]] std::vector<MixLaneStrip> mixLaneStrips() const;
+    [[nodiscard]] std::vector<MixLaneMeterState> mixLaneMeterStates(const std::vector<TimelineTrackSpan>& spans) const;
     [[nodiscard]] std::vector<TimelineTrackSpan> timelineTrackSpans() const;
     [[nodiscard]] const std::vector<TrackOverlay>& currentOverlays() const;
+    [[nodiscard]] PlaybackDebugStats playbackDebugStats() const;
 
 signals:
     void frameReady(const QImage& image, int frameIndex, double timestampSeconds);
@@ -234,4 +250,5 @@ private:
     QTimer m_clipEditorPreviewStopTimer;
     mutable QHash<QString, std::optional<int>> m_audioDurationMsByPath;
     mutable QHash<QString, std::optional<int>> m_audioChannelCountByPath;
+    PlaybackDebugStats m_playbackDebugStats;
 };
