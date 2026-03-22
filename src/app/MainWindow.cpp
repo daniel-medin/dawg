@@ -22,6 +22,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPointer>
 #include <QPixmap>
 #include <QQuickItem>
 #include <QQuickImageProvider>
@@ -35,6 +36,7 @@
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QStandardPaths>
+#include <QThread>
 #include <QToolTip>
 #include <QResizeEvent>
 #include <QWidget>
@@ -64,6 +66,7 @@
 #include "app/DebugUiController.h"
 #include "app/MediaImportController.h"
 #include "app/ProjectDocument.h"
+#include "app/ProjectTimelineThumbnails.h"
 #include "app/WindowChromeController.h"
 #include "ui/ClipEditorQuickController.h"
 #include "ui/ClipWaveformQuickItem.h"
@@ -1341,20 +1344,31 @@ MainWindow::MainWindow(QWindow* parent)
     updateTrackAvailabilityState(m_controller->hasTracks());
     updateEditActionState();
     updateMemoryUsage();
-    updateDebugVisibility(true);
+    updateDebugVisibility(m_debugVisible);
     updateDebugText();
     refreshAudioPool();
     updateVideoAudioRow();
     m_memoryUsageTimer.start();
     clearCurrentProject();
-    restoreLastProjectOnStartup();
-    if (!hasOpenProject())
+    QTimer::singleShot(0, this, [this]()
     {
-        showStatus(QStringLiteral("Create or open a project to start adding nodes."));
-    }
+        if (m_startupProjectRestoreEnabled)
+        {
+            restoreLastProjectOnStartup();
+        }
+        if (!hasOpenProject())
+        {
+            showStatus(QStringLiteral("Create or open a project to start adding nodes."));
+        }
+    });
 }
 
 MainWindow::~MainWindow() = default;
+
+void MainWindow::setStartupProjectRestoreEnabled(const bool enabled)
+{
+    m_startupProjectRestoreEnabled = enabled;
+}
 
 void MainWindow::setWindowTitle(const QString& title)
 {
@@ -2814,6 +2828,7 @@ void MainWindow::refreshTimeline()
     m_timelineTrackSpans = trackSpans;
     if (m_timelineQuickController)
     {
+        m_timelineQuickController->setProjectRootPath(m_currentProjectRootPath);
         m_timelineQuickController->setVideoPath(m_controller->loadedPath());
         m_timelineQuickController->setTrackSpans(trackSpans);
         m_timelineQuickController->setLoopRanges(m_controller->loopRanges());
@@ -2824,6 +2839,114 @@ void MainWindow::refreshTimeline()
         m_clearLoopRangeAction->setEnabled(timelineHasSelectedLoopRange());
     }
     refreshMixView();
+}
+
+void MainWindow::requestProjectTimelineThumbnailsGeneration()
+{
+    if (m_currentProjectRootPath.isEmpty())
+    {
+        return;
+    }
+
+    TimelineThumbnailGenerationRequest request;
+    request.projectRootPath = m_currentProjectRootPath;
+    request.videoPath = m_controller ? m_controller->loadedPath() : QString{};
+    request.totalFrames = m_controller ? m_controller->totalFrames() : 0;
+    request.fps = m_controller ? m_controller->fps() : 0.0;
+
+    m_pendingTimelineThumbnailGenerationRequest = request;
+    if (m_timelineThumbnailGenerationThread)
+    {
+        return;
+    }
+
+    startProjectTimelineThumbnailsGeneration(*m_pendingTimelineThumbnailGenerationRequest);
+    m_pendingTimelineThumbnailGenerationRequest.reset();
+}
+
+void MainWindow::startProjectTimelineThumbnailsGeneration(const TimelineThumbnailGenerationRequest& request)
+{
+    const auto generationId = ++m_timelineThumbnailGenerationId;
+    QPointer<MainWindow> window(this);
+    auto* thread = QThread::create([window, generationId, request]()
+    {
+        QString errorMessage;
+        const bool success = dawg::timeline::ensureProjectTimelineThumbnails(
+            request.projectRootPath,
+            request.videoPath,
+            request.totalFrames,
+            request.fps,
+            &errorMessage);
+        if (!window)
+        {
+            return;
+        }
+        QMetaObject::invokeMethod(
+            window,
+            [window, generationId, request, success, errorMessage]()
+            {
+                if (!window)
+                {
+                    return;
+                }
+                window->handleProjectTimelineThumbnailsGenerationFinished(
+                    generationId,
+                    request,
+                    success,
+                    errorMessage);
+            },
+            Qt::QueuedConnection);
+    });
+
+    m_timelineThumbnailGenerationThread = thread;
+    connect(
+        thread,
+        &QThread::finished,
+        thread,
+        &QObject::deleteLater);
+    thread->start();
+}
+
+void MainWindow::handleProjectTimelineThumbnailsGenerationFinished(
+    const quint64 generationId,
+    const TimelineThumbnailGenerationRequest& request,
+    const bool success,
+    const QString& errorMessage)
+{
+    if (generationId != m_timelineThumbnailGenerationId)
+    {
+        return;
+    }
+
+    if (m_timelineThumbnailGenerationThread)
+    {
+        m_timelineThumbnailGenerationThread = nullptr;
+    }
+
+    const bool requestMatchesCurrentProject =
+        QDir::cleanPath(QDir::fromNativeSeparators(request.projectRootPath))
+            == QDir::cleanPath(QDir::fromNativeSeparators(m_currentProjectRootPath))
+        && QDir::cleanPath(QDir::fromNativeSeparators(request.videoPath))
+            == QDir::cleanPath(QDir::fromNativeSeparators(m_controller ? m_controller->loadedPath() : QString{}));
+
+    if (!success)
+    {
+        if (!errorMessage.isEmpty() && requestMatchesCurrentProject)
+        {
+            showStatus(QStringLiteral("Timeline thumbnails unavailable: %1").arg(errorMessage));
+        }
+    }
+    else if (requestMatchesCurrentProject)
+    {
+        refreshTimeline();
+    }
+
+    if (m_pendingTimelineThumbnailGenerationRequest.has_value())
+    {
+        const auto nextRequest = *m_pendingTimelineThumbnailGenerationRequest;
+        m_pendingTimelineThumbnailGenerationRequest.reset();
+        startProjectTimelineThumbnailsGeneration(nextRequest);
+    }
 }
 
 void MainWindow::refreshClipEditor()
@@ -3080,6 +3203,7 @@ void MainWindow::clearTimeline()
     m_timelineTrackSpans.clear();
     if (m_timelineQuickController)
     {
+        m_timelineQuickController->setProjectRootPath({});
         m_timelineQuickController->clear();
     }
     updateTimelineMinimumHeight();
@@ -3187,12 +3311,9 @@ void MainWindow::adjustTrackMixGainFromWheel(const QUuid& trackId, const int whe
         setProjectDirty(true);
     }
 
-    QToolTip::showText(globalPosition, mixGainDisplayText(*nextGainDb), nullptr, {}, 900);
-    if (m_shellOverlayController
-        && m_shellOverlayController->trackGainPopupVisible()
-        && m_trackGainPopupTrackId == trackId)
+    if (m_shellOverlayController)
     {
-        updateTrackMixGainPopupValue(*nextGainDb);
+        showTrackMixGainPopup(trackId, globalPosition);
     }
 }
 
@@ -3383,7 +3504,7 @@ void MainWindow::buildUi()
             m_saveProjectAsAction->trigger();
         }
     }, Qt::ApplicationShortcut);
-    new QShortcut(QKeySequence::Quit, this, [this]()
+    new QShortcut(QKeySequence(QStringLiteral("Ctrl+Q")), this, [this]()
     {
         if (m_quitAction)
         {

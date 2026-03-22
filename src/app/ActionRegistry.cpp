@@ -34,6 +34,14 @@ ActionEntry::ActionEntry(const QString& id, QAction* action, QObject* parent)
     }
 }
 
+ActionEntry::ActionEntry(const QString& id, const QString& text, QObject* parent)
+    : QObject(parent)
+    , m_id(id)
+    , m_text(text)
+    , m_enabled(true)
+{
+}
+
 ActionEntry::ActionEntry(
     const QString& id,
     const QString& text,
@@ -97,6 +105,27 @@ QString ActionEntry::shortcut() const
 bool ActionEntry::separator() const
 {
     return m_separator;
+}
+
+bool ActionEntry::hasSubmenu() const
+{
+    return !m_subItems.isEmpty();
+}
+
+QObjectList ActionEntry::subItems() const
+{
+    return m_subItems;
+}
+
+void ActionEntry::addSubEntry(ActionEntry* entry)
+{
+    if (!entry)
+    {
+        return;
+    }
+
+    entry->setParent(this);
+    m_subItems.push_back(entry);
 }
 
 void ActionEntry::trigger()
@@ -175,9 +204,18 @@ void ActionRegistry::rebuild()
     {
         m_window.storeRecentProjectPaths(existingPaths);
     }
+    auto* openRecentMenu = addSubmenu(fileMenu, QStringLiteral("openRecent"), QStringLiteral("Open Recent"));
     if (existingPaths.isEmpty())
     {
-        addCallback(fileMenu, QStringLiteral("openRecent.empty"), QStringLiteral("No Recent Projects"), {}, false);
+        if (openRecentMenu)
+        {
+            openRecentMenu->addSubEntry(new ActionEntry(
+                QStringLiteral("openRecent.empty"),
+                QStringLiteral("No Recent Projects"),
+                {},
+                false,
+                openRecentMenu));
+        }
     }
     else
     {
@@ -188,15 +226,18 @@ void ActionRegistry::rebuild()
                 ? projectInfo.fileName()
                 : projectInfo.completeBaseName();
             const auto parentPath = QDir::toNativeSeparators(projectInfo.absolutePath());
-            addCallback(
-                fileMenu,
-                QStringLiteral("openRecent.%1").arg(projectPath),
-                QStringLiteral("Open Recent: %1  -  %2").arg(displayName, parentPath),
-                [&window = m_window, projectPath]()
-                {
-                    static_cast<void>(window.openProjectFileWithPrompt(projectPath, QStringLiteral("open another project")));
-                },
-                true);
+            if (openRecentMenu)
+            {
+                openRecentMenu->addSubEntry(new ActionEntry(
+                    QStringLiteral("openRecent.%1").arg(projectPath),
+                    QStringLiteral("%1  -  %2").arg(displayName, parentPath),
+                    [&window = m_window, projectPath]()
+                    {
+                        static_cast<void>(window.openProjectFileWithPrompt(projectPath, QStringLiteral("open another project")));
+                    },
+                    true,
+                    openRecentMenu));
+            }
         }
     }
     addSeparator(fileMenu);
@@ -299,6 +340,18 @@ void ActionRegistry::addAction(ActionMenu* menu, const QString& id, QAction* act
     }
 
     menu->addEntry(new ActionEntry(id, action, menu));
+}
+
+ActionEntry* ActionRegistry::addSubmenu(ActionMenu* menu, const QString& id, const QString& text)
+{
+    if (!menu)
+    {
+        return nullptr;
+    }
+
+    auto* entry = new ActionEntry(id, text, menu);
+    menu->addEntry(entry);
+    return entry;
 }
 
 void ActionRegistry::addCallback(

@@ -516,7 +516,7 @@ Rectangle {
 
         onPressed: function(mouse) {
             if (root.pointInsideItem(root.activeMenuAnchor, parent, mouse.x, mouse.y)) {
-                mouse.accepted = true
+                mouse.accepted = false
                 return
             }
 

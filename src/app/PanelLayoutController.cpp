@@ -97,6 +97,8 @@ dawg::project::UiState PanelLayoutController::snapshotProjectUiState() const
     state.audioPoolShowSize = m_window.m_audioPoolShowSize;
     state.showAllNodeNames = m_window.m_showAllNodeNamesAction && m_window.m_showAllNodeNamesAction->isChecked();
     state.timelineClickSeeks = m_window.m_timelineClickSeeksAction && m_window.m_timelineClickSeeksAction->isChecked();
+    state.timelineThumbnailsVisible =
+        !m_window.m_showTimelineThumbnailsAction || m_window.m_showTimelineThumbnailsAction->isChecked();
     state.audioPoolPreferredWidth = m_window.m_audioPoolPreferredWidth;
     state.timelinePreferredHeight = m_window.m_timelinePreferredHeight;
     state.clipEditorPreferredHeight = m_window.m_clipEditorPreferredHeight;
@@ -190,6 +192,12 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
         m_window.m_timelineClickSeeksAction->setChecked(state.timelineClickSeeks);
     }
     m_window.setTimelineSeekOnClickEnabled(state.timelineClickSeeks || !m_window.m_controller->isPlaying());
+
+    if (m_window.m_showTimelineThumbnailsAction)
+    {
+        m_window.m_showTimelineThumbnailsAction->setChecked(state.timelineThumbnailsVisible);
+    }
+    m_window.setTimelineThumbnailsVisible(state.timelineThumbnailsVisible);
 
     updateTimelineVisibility(state.timelineVisible);
     updateClipEditorVisibility(state.clipEditorVisible);
@@ -895,10 +903,9 @@ void PanelLayoutController::syncMainVerticalPanelSizes()
 
 bool PanelLayoutController::shouldUseNativeVideoPresentation() const
 {
-    return m_window.m_nativeVideoPresentationAllowed
-        && !m_window.m_videoDetached
-        && !m_window.m_timelineDetached
-        && !m_window.m_clipEditorDetached
-        && !m_window.m_mixDetached
-        && !m_window.m_audioPoolDetached;
+    // Keep the attached viewport on the CPU-image Quick path for now.
+    // The native attached presentation path has been fragile and currently
+    // regressed visible playback, while detached playback remains stable
+    // without it.
+    return false;
 }

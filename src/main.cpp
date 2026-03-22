@@ -11,7 +11,9 @@
 #include <QPalette>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QRect>
 #include <QSettings>
+#include <QSize>
 #include <QStyleFactory>
 #include <QTextStream>
 
@@ -170,27 +172,61 @@ int main(int argc, char* argv[])
     registerDawgFileAssociation();
 #endif
 
-    MainWindow window;
-    window.show();
-    if (!window.isMaximized()
-        && (window.width() < window.minimumWidth() || window.height() < window.minimumHeight()))
-    {
-        window.resize(
-            std::max(1400, window.minimumWidth()),
-            std::max(900, window.minimumHeight()));
-    }
-
     const auto arguments = QCoreApplication::arguments();
+    const bool skipStartupRestore = arguments.contains(QStringLiteral("--no-startup-restore"));
+
+    MainWindow window;
+    window.setStartupProjectRestoreEnabled(!skipStartupRestore);
+    window.create();
+    window.show();
+    window.raise();
+    qInfo().noquote()
+        << "Main window shown:"
+        << "visible=" << window.isVisible()
+        << "geometry=" << window.geometry()
+        << "visibility=" << window.visibility();
+    if (!window.isMaximized()
+        && (window.width() < std::max(1000, window.minimumWidth())
+            || window.height() < std::max(700, window.minimumHeight())))
+    {
+        const QSize targetSize{
+            std::max(1400, window.minimumWidth()),
+            std::max(900, window.minimumHeight())
+        };
+        window.resize(targetSize);
+        const QRect availableGeometry = window.screen()
+            ? window.screen()->availableGeometry()
+            : QRect{0, 0, 1600, 900};
+        QRect nextGeometry(window.position(), targetSize);
+        nextGeometry.moveCenter(availableGeometry.center());
+        window.setGeometry(nextGeometry);
+    }
+    window.requestActivate();
+    qInfo().noquote()
+        << "Main window activated:"
+        << "visible=" << window.isVisible()
+        << "geometry=" << window.geometry()
+        << "visibility=" << window.visibility();
+
     if (arguments.size() > 1)
     {
-        const QFileInfo candidatePath(arguments.at(1));
-        if (candidatePath.exists()
-            && candidatePath.isFile()
-            && candidatePath.suffix().compare(
-                QString::fromLatin1(dawg::project::kProjectFileSuffix).mid(1),
-                Qt::CaseInsensitive) == 0)
+        for (int index = 1; index < arguments.size(); ++index)
         {
-            static_cast<void>(window.openProjectFilePath(candidatePath.absoluteFilePath()));
+            if (arguments.at(index) == QStringLiteral("--no-startup-restore"))
+            {
+                continue;
+            }
+
+            const QFileInfo candidatePath(arguments.at(index));
+            if (candidatePath.exists()
+                && candidatePath.isFile()
+                && candidatePath.suffix().compare(
+                    QString::fromLatin1(dawg::project::kProjectFileSuffix).mid(1),
+                    Qt::CaseInsensitive) == 0)
+            {
+                static_cast<void>(window.openProjectFilePath(candidatePath.absoluteFilePath()));
+            }
+            break;
         }
     }
 

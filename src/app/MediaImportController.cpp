@@ -211,6 +211,8 @@ void MediaImportController::openVideo()
     m_window.m_projectStateChangeInProgress = false;
     if (opened)
     {
+        m_window.refreshTimeline();
+        m_window.requestProjectTimelineThumbnailsGeneration();
         m_window.setProjectDirty(true);
     }
 }

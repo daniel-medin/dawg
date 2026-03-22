@@ -17,9 +17,12 @@ class ActionEntry final : public QObject
     Q_PROPERTY(bool checked READ checked NOTIFY changed)
     Q_PROPERTY(QString shortcut READ shortcut NOTIFY changed)
     Q_PROPERTY(bool separator READ separator CONSTANT)
+    Q_PROPERTY(bool hasSubmenu READ hasSubmenu CONSTANT)
+    Q_PROPERTY(QObjectList subItems READ subItems CONSTANT)
 
 public:
     explicit ActionEntry(const QString& id, QAction* action, QObject* parent = nullptr);
+    ActionEntry(const QString& id, const QString& text, QObject* parent = nullptr);
     ActionEntry(
         const QString& id,
         const QString& text,
@@ -35,6 +38,9 @@ public:
     [[nodiscard]] bool checked() const;
     [[nodiscard]] QString shortcut() const;
     [[nodiscard]] bool separator() const;
+    [[nodiscard]] bool hasSubmenu() const;
+    [[nodiscard]] QObjectList subItems() const;
+    void addSubEntry(ActionEntry* entry);
 
     Q_INVOKABLE void trigger();
 
@@ -48,6 +54,7 @@ private:
     bool m_enabled = false;
     std::function<void()> m_trigger;
     bool m_separator = false;
+    QObjectList m_subItems;
 };
 
 class ActionMenu final : public QObject
@@ -85,6 +92,7 @@ signals:
 private:
     [[nodiscard]] ActionMenu* addMenu(const QString& title);
     static void addAction(ActionMenu* menu, const QString& id, QAction* action);
+    static ActionEntry* addSubmenu(ActionMenu* menu, const QString& id, const QString& text);
     static void addCallback(
         ActionMenu* menu,
         const QString& id,

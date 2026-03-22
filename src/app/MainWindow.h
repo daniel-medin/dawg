@@ -43,6 +43,7 @@ class QWidget;
 class TimelineQuickController;
 class VideoViewportQuickController;
 class WindowChromeController;
+class QThread;
 
 class MainWindow final : public QQuickView
 {
@@ -52,6 +53,7 @@ public:
     explicit MainWindow(QWindow* parent = nullptr);
     ~MainWindow() override;
     [[nodiscard]] bool openProjectFilePath(const QString& projectFilePath);
+    void setStartupProjectRestoreEnabled(bool enabled);
     void setWindowTitle(const QString& title);
     [[nodiscard]] QString windowTitle() const;
     [[nodiscard]] QString currentProjectTitle() const;
@@ -141,6 +143,14 @@ private slots:
     void updateNativeViewportVisibility(bool visible);
 
 private:
+    struct TimelineThumbnailGenerationRequest
+    {
+        QString projectRootPath;
+        QString videoPath;
+        int totalFrames = 0;
+        double fps = 0.0;
+    };
+
     friend class MainWindowActions;
     friend class ProjectWindowController;
     friend class PanelLayoutController;
@@ -154,6 +164,13 @@ private:
     void buildMenus();
     void buildUi();
     void refreshTimeline();
+    void requestProjectTimelineThumbnailsGeneration();
+    void startProjectTimelineThumbnailsGeneration(const TimelineThumbnailGenerationRequest& request);
+    void handleProjectTimelineThumbnailsGenerationFinished(
+        quint64 generationId,
+        const TimelineThumbnailGenerationRequest& request,
+        bool success,
+        const QString& errorMessage);
     void refreshClipEditor();
     void refreshMixView();
     void updateEditActionState();
@@ -362,7 +379,7 @@ private:
     QShortcut* m_deleteShortcut = nullptr;
     QShortcut* m_unselectAllShortcut = nullptr;
     bool m_clearAllShortcutArmed = false;
-    bool m_debugVisible = true;
+    bool m_debugVisible = false;
     int m_audioPoolPreferredWidth = 320;
     bool m_audioPoolShowLength = true;
     bool m_audioPoolShowSize = true;
@@ -404,7 +421,11 @@ private:
     bool m_clipEditorDetached = false;
     bool m_mixDetached = false;
     bool m_audioPoolDetached = false;
+    bool m_startupProjectRestoreEnabled = true;
     bool m_shuttingDown = false;
+    QThread* m_timelineThumbnailGenerationThread = nullptr;
+    std::optional<TimelineThumbnailGenerationRequest> m_pendingTimelineThumbnailGenerationRequest;
+    quint64 m_timelineThumbnailGenerationId = 0;
     QString m_currentProjectFilePath;
     QString m_currentProjectRootPath;
     QString m_currentProjectName;

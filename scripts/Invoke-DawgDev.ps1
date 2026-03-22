@@ -26,14 +26,6 @@ function Ensure-Command {
     }
 }
 
-function Add-ToolToPath {
-    param([string]$Directory)
-
-    if ((Test-Path $Directory) -and ($env:Path -notlike "*$Directory*")) {
-        $env:Path = "$Directory;$env:Path"
-    }
-}
-
 function Invoke-Native {
     param(
         [Parameter(Mandatory = $true)]
@@ -45,60 +37,6 @@ function Invoke-Native {
     & $Command
     if ($LASTEXITCODE -ne 0) {
         throw $FailureMessage
-    }
-}
-
-function Find-VsWhere {
-    $candidate = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
-    if (Test-Path $candidate) {
-        return $candidate
-    }
-
-    return $null
-}
-
-function Ensure-VisualStudio {
-    $vsWhere = Find-VsWhere
-    if (-not $vsWhere) {
-        throw "Visual Studio Installer tools were not found. Install Visual Studio 2022 Community with Desktop development for C++."
-    }
-
-    $installationPath = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if (-not $installationPath) {
-        throw "Visual Studio 2022 with the C++ toolchain is required. Open Visual Studio Installer and add the Desktop development with C++ workload."
-    }
-
-    return $installationPath.Trim()
-}
-
-function Ensure-Directory {
-    param([string]$Path)
-
-    if (-not (Test-Path $Path)) {
-        New-Item -ItemType Directory -Force -Path $Path | Out-Null
-    }
-}
-
-function Ensure-Vcpkg {
-    param([string]$VcpkgRoot)
-
-    $vcpkgExe = Join-Path $VcpkgRoot "vcpkg.exe"
-    if (Test-Path $vcpkgExe) {
-        return
-    }
-
-    Ensure-Directory -Path $VcpkgRoot
-
-    if (-not (Test-Path (Join-Path $VcpkgRoot ".git"))) {
-        Write-Step "Cloning vcpkg"
-        Invoke-Native -FailureMessage "Failed to clone vcpkg." -Command {
-            git clone https://github.com/microsoft/vcpkg $VcpkgRoot
-        }
-    }
-
-    Write-Step "Bootstrapping vcpkg"
-    Invoke-Native -FailureMessage "Failed to bootstrap vcpkg." -Command {
-        cmd /c (Join-Path $VcpkgRoot "bootstrap-vcpkg.bat")
     }
 }
 
@@ -115,62 +53,42 @@ function Stop-DawgProcess {
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
 $buildRoot = Join-Path $repoRoot 'build\windows-msvc-current'
-$repoLocalVcpkgRoot = Join-Path $repoRoot '.tools\vcpkg'
-$vcpkgRoot = if ($env:DAWG_VCPKG_ROOT) {
-    $env:DAWG_VCPKG_ROOT
-} elseif (Test-Path (Join-Path $repoLocalVcpkgRoot 'vcpkg.exe')) {
-    $repoLocalVcpkgRoot
-} elseif ($env:VCPKG_ROOT) {
-    $env:VCPKG_ROOT
-} else {
-    $repoLocalVcpkgRoot
-}
-
-Add-ToolToPath "C:\Program Files\CMake\bin"
+$cachePath = Join-Path $buildRoot 'CMakeCache.txt'
+$exePath = Join-Path $buildRoot "$Configuration\dawg.exe"
 
 Write-Step "Checking prerequisites"
-Ensure-Command -Name git -InstallHint "Install Git for Windows and try again."
 Ensure-Command -Name cmake -InstallHint "Install CMake and re-open the terminal."
-$null = Ensure-VisualStudio
 
-Write-Step "Preparing repo-local build"
-Ensure-Directory -Path $buildRoot
-Ensure-Vcpkg -VcpkgRoot $vcpkgRoot
-
-$env:VCPKG_ROOT = $vcpkgRoot
-$env:VCPKG_MAX_CONCURRENCY = '4'
+if (-not (Test-Path $buildRoot) -or -not (Test-Path $cachePath)) {
+    throw "Expected existing build tree at $buildRoot. Configure the in-repo build once, then use this helper for normal debug build/run."
+}
 
 if ($KillRunning) {
     Stop-DawgProcess
 }
 
-Write-Step "Configuring project"
-Invoke-Native -FailureMessage "CMake configure failed." -Command {
-    cmake -S $repoRoot `
-        -B $buildRoot `
-        --fresh `
-        -G "Visual Studio 17 2022" `
-        -A x64 `
-        -DCMAKE_TOOLCHAIN_FILE="$vcpkgRoot\scripts\buildsystems\vcpkg.cmake" `
-        -DVCPKG_TARGET_TRIPLET=x64-windows `
-        -DCMAKE_CXX_STANDARD=20
-}
-
-Write-Step "Building app ($Configuration)"
+Write-Step "Building DAWG ($Configuration)"
 Invoke-Native -FailureMessage "CMake build failed." -Command {
-    cmake --build $buildRoot --config $Configuration
+    cmake --build $buildRoot --config $Configuration --target dawg
 }
 
-$exePath = Join-Path $buildRoot "$Configuration\dawg.exe"
 if (-not (Test-Path $exePath)) {
     throw "Build completed but the app executable was not found at $exePath"
 }
 
 Write-Step "Ready"
-Write-Host "Repo root: $repoRoot"
 Write-Host "Build output: $exePath"
 
 if ($Launch) {
     Write-Step "Starting DAWG"
-    Start-Process -FilePath $exePath -WorkingDirectory (Split-Path -Parent $exePath)
+    Push-Location $repoRoot
+    try {
+        & $exePath
+        if ($LASTEXITCODE -ne 0) {
+            throw "DAWG exited with code $LASTEXITCODE."
+        }
+    }
+    finally {
+        Pop-Location
+    }
 }

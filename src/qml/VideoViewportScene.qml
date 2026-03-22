@@ -154,15 +154,9 @@ Rectangle {
                     width: parent.width
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
-                    text: "Import a video to start placing nodes, attach sound, and stage movement directly on the film."
+                    text: "Create or open a project, then import a video to start placing nodes, attach sound, and stage movement directly on the film."
                     color: "#b6bfc9"
                     font.pointSize: 11
-                }
-
-                Button {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: "Import Video..."
-                    onClicked: videoViewportBridge.requestImportVideo()
                 }
             }
         }
@@ -198,13 +192,6 @@ Rectangle {
             root.draggedTrackWasSelected = false
             if (trackId !== "") {
                 root.draggedTrackWasSelected = videoViewportController.overlayIsSelected(trackId)
-                if ((mouse.modifiers & Qt.ControlModifier)
-                        && videoViewportController.overlayHasAttachedAudio(trackId)) {
-                    videoViewportBridge.requestTrackSelected(trackId)
-                    videoViewportBridge.requestTrackGainPopup(trackId, mouse.x, mouse.y)
-                    return
-                }
-
                 root.draggedTrackId = trackId
                 if (!root.draggedTrackWasSelected) {
                     videoViewportBridge.requestTrackSelected(trackId)
@@ -311,8 +298,7 @@ Rectangle {
 
             const trackId = videoViewportController.trackIdAt(wheel.x, wheel.y, root.width, root.height)
             if (trackId === ""
-                    || !videoViewportController.overlayHasAttachedAudio(trackId)
-                    || !videoViewportController.overlayIsSelected(trackId)) {
+                    || !videoViewportController.overlayHasAttachedAudio(trackId)) {
                 return
             }
 

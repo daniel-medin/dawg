@@ -16,6 +16,7 @@
 #include "app/FilePickerController.h"
 #include "app/MainWindow.h"
 #include "app/PlayerController.h"
+#include "ui/TimelineQuickController.h"
 
 namespace
 {
@@ -236,6 +237,10 @@ void ProjectWindowController::clearCurrentProject()
     m_window.m_currentProjectFilePath.clear();
     m_window.m_currentProjectRootPath.clear();
     m_window.m_currentProjectName.clear();
+    if (m_window.m_timelineQuickController)
+    {
+        m_window.m_timelineQuickController->setProjectRootPath({});
+    }
     m_window.m_projectDirty = false;
     if (m_window.m_saveProjectAction)
     {
@@ -253,6 +258,10 @@ void ProjectWindowController::setCurrentProject(const QString& projectFilePath, 
     m_window.m_currentProjectFilePath = normalizeProjectFilePath(projectFilePath);
     m_window.m_currentProjectRootPath = QFileInfo(m_window.m_currentProjectFilePath).absolutePath();
     m_window.m_currentProjectName = dawg::project::sanitizeProjectName(projectName);
+    if (m_window.m_timelineQuickController)
+    {
+        m_window.m_timelineQuickController->setProjectRootPath(m_window.m_currentProjectRootPath);
+    }
     m_window.m_projectDirty = false;
     if (m_window.m_saveProjectAction)
     {
@@ -351,19 +360,61 @@ void ProjectWindowController::updateWindowTitle()
 void ProjectWindowController::restoreLastProjectOnStartup()
 {
     QSettings settings;
-    const auto lastProjectPath = settings.value(QString::fromLatin1(kLastProjectPathSettingsKey)).toString();
-    if (lastProjectPath.isEmpty())
+    const auto lastProjectPath = normalizeProjectFilePath(
+        settings.value(QString::fromLatin1(kLastProjectPathSettingsKey)).toString());
+    const auto storedRecentPaths = recentProjectPaths();
+    QStringList existingRecentPaths;
+    existingRecentPaths.reserve(storedRecentPaths.size());
+    for (const auto& recentPath : storedRecentPaths)
     {
-        updateWindowTitle();
-        return;
+        if (QFileInfo::exists(recentPath))
+        {
+            existingRecentPaths.push_back(recentPath);
+        }
     }
 
-    if (!QFileInfo::exists(lastProjectPath) || !loadProjectFile(lastProjectPath))
+    if (existingRecentPaths != storedRecentPaths)
     {
-        settings.remove(QString::fromLatin1(kLastProjectPathSettingsKey));
-        removeRecentProjectPath(lastProjectPath);
-        clearCurrentProject();
+        storeRecentProjectPaths(existingRecentPaths);
+        rebuildRecentProjectsMenu();
     }
+
+    QStringList candidatePaths;
+    if (!lastProjectPath.isEmpty())
+    {
+        candidatePaths.push_back(lastProjectPath);
+    }
+    for (const auto& recentPath : existingRecentPaths)
+    {
+        const auto duplicateIt = std::find_if(
+            candidatePaths.cbegin(),
+            candidatePaths.cend(),
+            [&recentPath](const QString& candidatePath)
+            {
+                return projectPathMatches(candidatePath, recentPath);
+            });
+        if (duplicateIt == candidatePaths.cend())
+        {
+            candidatePaths.push_back(recentPath);
+        }
+    }
+
+    for (const auto& candidatePath : candidatePaths)
+    {
+        if (!QFileInfo::exists(candidatePath))
+        {
+            continue;
+        }
+
+        if (loadProjectFile(candidatePath))
+        {
+            settings.setValue(QString::fromLatin1(kLastProjectPathSettingsKey), candidatePath);
+            return;
+        }
+    }
+
+    settings.remove(QString::fromLatin1(kLastProjectPathSettingsKey));
+    clearCurrentProject();
 }
 
 QStringList ProjectWindowController::recentProjectPaths() const
@@ -679,7 +730,8 @@ bool ProjectWindowController::saveProjectAsNewCopy()
 
     if (!QDir().mkpath(targetRoot.filePath(QStringLiteral("audio")))
         || !QDir().mkpath(targetRoot.filePath(QStringLiteral("video")))
-        || !QDir().mkpath(targetRoot.filePath(QStringLiteral("settings"))))
+        || !QDir().mkpath(targetRoot.filePath(QStringLiteral("settings")))
+        || !QDir().mkpath(targetRoot.filePath(QStringLiteral("thumbnails/timeline"))))
     {
         m_window.m_dialogController->execMessage(
             QStringLiteral("Save Project As"),
@@ -847,6 +899,8 @@ bool ProjectWindowController::saveProjectAsNewCopy()
     setCurrentProject(targetProjectFilePath, sanitizedProjectName);
     addRecentProjectPath(targetProjectFilePath);
     setProjectDirty(false);
+    m_window.refreshTimeline();
+    m_window.requestProjectTimelineThumbnailsGeneration();
     m_window.showStatus(QStringLiteral("Saved project copy as %1.").arg(sanitizedProjectName));
     return true;
 }
@@ -903,6 +957,8 @@ bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
         setCurrentProject(projectFilePath, document->name);
         addRecentProjectPath(projectFilePath);
         setProjectDirty(false);
+        m_window.refreshTimeline();
+        m_window.requestProjectTimelineThumbnailsGeneration();
         if (recoveredMediaFromFolders)
         {
             setProjectDirty(true);
@@ -976,7 +1032,8 @@ bool ProjectWindowController::createProjectAt(const QString& projectName, const 
 
     if (!QDir().mkpath(projectRoot.filePath(QStringLiteral("audio")))
         || !QDir().mkpath(projectRoot.filePath(QStringLiteral("video")))
-        || !QDir().mkpath(projectRoot.filePath(QStringLiteral("settings"))))
+        || !QDir().mkpath(projectRoot.filePath(QStringLiteral("settings")))
+        || !QDir().mkpath(projectRoot.filePath(QStringLiteral("thumbnails/timeline"))))
     {
         m_window.m_dialogController->execMessage(
             QStringLiteral("New Project"),

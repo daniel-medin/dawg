@@ -119,6 +119,7 @@ Rectangle {
                 id: menuRoot
                 required property var modelData
                 property alias menuRef: menuPopup
+                property bool actionTriggerInProgress: false
 
                 width: menuButton.implicitWidth
                 height: root.height
@@ -176,6 +177,43 @@ Rectangle {
 
                     property real popupX: 0
                     property real popupY: 0
+                    property var activeSubmenuEntry: null
+                    property var activeSubmenuAnchor: null
+                    property real submenuPopupX: 0
+                    property real submenuPopupY: 0
+
+                    function closeSubmenu() {
+                        activeSubmenuEntry = null
+                        activeSubmenuAnchor = null
+                        submenuPopup.close()
+                    }
+
+                    function openSubmenu(anchorItem, entry) {
+                        if (!anchorItem || !entry || !entry.hasSubmenu) {
+                            closeSubmenu()
+                            return
+                        }
+
+                        activeSubmenuEntry = entry
+                        activeSubmenuAnchor = anchorItem
+
+                        var targetParent = submenuPopup.parent ? submenuPopup.parent : root
+                        var local = anchorItem.mapToItem(targetParent, anchorItem.width + 4, -6)
+                        var popupWidth = Math.max(240, submenuColumn.implicitWidth + submenuPopup.leftPadding + submenuPopup.rightPadding)
+                        var popupHeight = submenuColumn.implicitHeight + submenuPopup.topPadding + submenuPopup.bottomPadding
+                        var desiredX = local.x
+                        var desiredY = local.y
+                        var maxX = Math.max(8, targetParent.width - popupWidth - 8)
+                        var maxY = Math.max(8, targetParent.height - popupHeight - 8)
+
+                        if (desiredX + popupWidth > targetParent.width - 8) {
+                            desiredX = anchorItem.mapToItem(targetParent, -popupWidth - 4, -6).x
+                        }
+
+                        submenuPopupX = Math.max(8, Math.min(maxX, desiredX))
+                        submenuPopupY = Math.max(8, Math.min(maxY, desiredY))
+                        submenuPopup.open()
+                    }
 
                     parent: root.Window.window ? root.Window.window.contentItem : root
                     x: popupX
@@ -187,6 +225,7 @@ Rectangle {
                     closePolicy: Popup.CloseOnEscape
                     implicitWidth: Math.max(240, menuColumn.implicitWidth + leftPadding + rightPadding)
                     implicitHeight: menuColumn.implicitHeight + topPadding + bottomPadding
+                    onClosed: closeSubmenu()
 
                     background: Rectangle {
                         color: theme.menuBackground
@@ -203,6 +242,7 @@ Rectangle {
                             model: menuRoot.modelData.items
 
                             delegate: Item {
+                                id: menuItemRoot
                                 required property var modelData
                                 implicitWidth: itemRow.implicitWidth + 20
                                 implicitHeight: modelData.separator ? 10 : 32
@@ -255,8 +295,16 @@ Rectangle {
 
                                     Text {
                                         text: modelData.shortcut
-                                        visible: modelData.shortcut.length > 0
+                                        visible: !modelData.hasSubmenu && modelData.shortcut.length > 0
                                         color: root.menuPopupShortcutColor
+                                        font.pixelSize: 12
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    Text {
+                                        text: ">"
+                                        visible: modelData.hasSubmenu
+                                        color: modelData.enabled ? root.menuPopupShortcutColor : theme.menuItemDisabled
                                         font.pixelSize: 12
                                         verticalAlignment: Text.AlignVCenter
                                     }
@@ -268,9 +316,133 @@ Rectangle {
                                     enabled: !modelData.separator && modelData.enabled
                                     hoverEnabled: true
 
+                                    onEntered: {
+                                        if (modelData.hasSubmenu) {
+                                            menuPopup.openSubmenu(menuItemRoot, modelData)
+                                        } else {
+                                            menuPopup.closeSubmenu()
+                                        }
+                                    }
+
                                     onClicked: {
+                                        if (modelData.hasSubmenu) {
+                                            menuPopup.openSubmenu(menuItemRoot, modelData)
+                                            return
+                                        }
+                                        var entry = modelData
+                                        menuRoot.actionTriggerInProgress = true
+                                        submenuPopup.close()
                                         menuPopup.close()
-                                        modelData.trigger()
+                                        entry.trigger()
+                                        menuRoot.actionTriggerInProgress = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Popup {
+                        id: submenuPopup
+
+                        parent: root.Window.window ? root.Window.window.contentItem : root
+                        x: menuPopup.submenuPopupX
+                        y: menuPopup.submenuPopupY
+                        z: 1002
+                        modal: false
+                        focus: true
+                        padding: 6
+                        closePolicy: Popup.CloseOnEscape
+                        implicitWidth: Math.max(240, submenuColumn.implicitWidth + leftPadding + rightPadding)
+                        implicitHeight: submenuColumn.implicitHeight + topPadding + bottomPadding
+
+                        background: Rectangle {
+                            color: theme.menuBackground
+                            border.color: theme.menuBorder
+                            border.width: 1
+                            radius: 6
+                        }
+
+                        contentItem: Column {
+                            id: submenuColumn
+                            spacing: 2
+
+                            Repeater {
+                                model: menuPopup.activeSubmenuEntry ? menuPopup.activeSubmenuEntry.subItems : []
+
+                                delegate: Item {
+                                    required property var modelData
+                                    implicitWidth: submenuItemRow.implicitWidth + 20
+                                    implicitHeight: modelData.separator ? 10 : 32
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: modelData.separator ? 0 : 6
+                                        color: submenuHoverArea.containsMouse && !modelData.separator && modelData.enabled
+                                            ? theme.menuItemHover
+                                            : "transparent"
+                                    }
+
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        height: modelData.separator ? 1 : 0
+                                        visible: modelData.separator
+                                        color: theme.menuBorder
+                                    }
+
+                                    RowLayout {
+                                        id: submenuItemRow
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
+                                        spacing: 10
+                                        visible: !modelData.separator
+
+                                        Text {
+                                            text: modelData.checkable
+                                                ? (modelData.checked ? "\u2713" : "")
+                                                : ""
+                                            color: modelData.enabled ? root.menuPopupTextColor : theme.menuItemDisabled
+                                            font.pixelSize: 13
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            Layout.preferredWidth: 14
+                                        }
+
+                                        Text {
+                                            text: modelData.text
+                                            color: modelData.enabled ? root.menuPopupTextColor : theme.menuItemDisabled
+                                            font.pixelSize: 13
+                                            verticalAlignment: Text.AlignVCenter
+                                            Layout.fillWidth: true
+                                        }
+
+                                        Text {
+                                            text: modelData.shortcut
+                                            visible: modelData.shortcut.length > 0
+                                            color: root.menuPopupShortcutColor
+                                            font.pixelSize: 12
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: submenuHoverArea
+                                        anchors.fill: parent
+                                        enabled: !modelData.separator && modelData.enabled
+                                        hoverEnabled: true
+
+                                        onClicked: {
+                                            var entry = modelData
+                                            menuRoot.actionTriggerInProgress = true
+                                            submenuPopup.close()
+                                            menuPopup.close()
+                                            entry.trigger()
+                                            menuRoot.actionTriggerInProgress = false
+                                        }
                                     }
                                 }
                             }
@@ -279,7 +451,7 @@ Rectangle {
                 }
 
                 MouseArea {
-                    visible: menuPopup.opened
+                    visible: menuPopup.opened && !menuRoot.actionTriggerInProgress
                     parent: root.Window.window ? root.Window.window.contentItem : root
                     anchors.left: parent.left
                     anchors.right: parent.right
@@ -291,6 +463,12 @@ Rectangle {
                     hoverEnabled: false
 
                     onPressed: function(mouse) {
+                        if (root.pointInsideItem(menuPopup, parent, mouse.x, mouse.y)
+                                || root.pointInsideItem(submenuPopup, parent, mouse.x, mouse.y)) {
+                            mouse.accepted = false
+                            return
+                        }
+
                         root.closeAllMenus()
                         mouse.accepted = false
                     }

@@ -5,12 +5,24 @@ import QtQuick.Layouts 1.15
 Item {
     id: root
     visible: dialogController.visible
-    focus: dialogController.visible
     implicitWidth: 480
     implicitHeight: contentColumn.implicitHeight + 28
 
     AppTheme {
         id: theme
+    }
+
+    onVisibleChanged: {
+        if (!visible) {
+            return
+        }
+
+        if (dialogController.inputMode) {
+            inputField.forceActiveFocus()
+            inputField.selectAll()
+        } else {
+            root.forceActiveFocus()
+        }
     }
 
     Keys.onEscapePressed: dialogController.respond("cancel", inputField.text)
@@ -64,11 +76,11 @@ Item {
                 font.pixelSize: 13
             }
 
-            TextField {
-                id: inputField
+                TextField {
+                    id: inputField
 
-                Layout.fillWidth: true
-                visible: dialogController.inputMode
+                    Layout.fillWidth: true
+                    visible: dialogController.inputMode
                 text: dialogController.inputText
                 selectByMouse: true
                 onTextChanged: dialogController.inputText = text
@@ -125,11 +137,6 @@ Item {
 
                         onClicked: dialogController.respond(modelData.key, inputField.text)
 
-                        Component.onCompleted: {
-                            if (modelData.default) {
-                                forceActiveFocus()
-                            }
-                        }
                     }
                 }
             }

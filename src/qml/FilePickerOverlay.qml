@@ -5,12 +5,25 @@ import QtQuick.Layouts 1.15
 Item {
     id: root
     visible: filePickerController.visible
-    focus: filePickerController.visible
     implicitWidth: 840
     implicitHeight: 580
 
     AppTheme {
         id: theme
+    }
+
+    onVisibleChanged: {
+        if (!visible) {
+            return
+        }
+
+        if (filePickerController.saveMode) {
+            fileNameField.forceActiveFocus()
+            fileNameField.selectAll()
+        } else {
+            pathField.forceActiveFocus()
+            pathField.selectAll()
+        }
     }
 
     Keys.onEscapePressed: filePickerController.cancel()
@@ -100,7 +113,7 @@ Item {
                     selectedTextColor: "#0f141b"
                     selectionColor: "#76a9de"
                     placeholderTextColor: theme.subtitleText
-                    onTextChanged: filePickerController.fileName = text
+                    onTextEdited: filePickerController.fileName = text
                     onAccepted: filePickerController.acceptSelection()
 
                     background: Rectangle {
