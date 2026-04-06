@@ -58,6 +58,7 @@ struct UiState
     QByteArray detachedAudioPoolWindowGeometry;
     bool timelineVisible = true;
     bool clipEditorVisible = false;
+    bool nodeEditorVisible = false;
     bool mixVisible = false;
     bool audioPoolVisible = false;
     bool audioPoolShowLength = true;
@@ -69,6 +70,7 @@ struct UiState
     int audioPoolPreferredWidth = 320;
     int timelinePreferredHeight = 148;
     int clipEditorPreferredHeight = 224;
+    int nodeEditorPreferredHeight = 260;
     int mixPreferredHeight = 368;
     std::vector<int> contentSplitterSizes;
     std::vector<int> mainVerticalSplitterSizes;

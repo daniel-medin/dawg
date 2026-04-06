@@ -73,6 +73,7 @@
 #include "ui/ClipWaveformQuickItem.h"
 #include "ui/DebugOverlayWindow.h"
 #include "ui/MixQuickController.h"
+#include "ui/NodeEditorQuickController.h"
 #include "ui/NativeVideoViewport.h"
 #include "ui/QuickEngineSupport.h"
 #include "ui/TimelineQuickController.h"
@@ -84,6 +85,34 @@
 
 namespace
 {
+QString selectedNodeDisplayLabel(PlayerController* controller)
+{
+    if (!controller)
+    {
+        return {};
+    }
+
+    const auto selectedTrackId = controller->selectedTrackId();
+    if (selectedTrackId.isNull())
+    {
+        return {};
+    }
+
+    const auto label = controller->trackLabel(selectedTrackId).trimmed();
+    return label.isEmpty() ? QStringLiteral("Node") : label;
+}
+
+void setActionCheckedSilently(QAction* action, const bool checked)
+{
+    if (!action || action->isChecked() == checked)
+    {
+        return;
+    }
+
+    const QSignalBlocker blocker{action};
+    action->setChecked(checked);
+}
+
 Qt::CaseSensitivity pathCaseSensitivity()
 {
 #ifdef Q_OS_WIN
@@ -954,6 +983,11 @@ MainWindow::MainWindow(QWindow* parent)
     });
     connect(m_showTimelineAction, &QAction::toggled, this, [this](const bool visible)
     {
+        if (visible && m_showNodeEditorAction && m_showNodeEditorAction->isChecked())
+        {
+            setActionCheckedSilently(m_showNodeEditorAction, false);
+            updateNodeEditorVisibility(false);
+        }
         updateTimelineVisibility(visible);
         if (!m_projectStateChangeInProgress && hasOpenProject())
         {
@@ -963,6 +997,11 @@ MainWindow::MainWindow(QWindow* parent)
     });
     connect(m_showClipEditorAction, &QAction::toggled, this, [this](const bool visible)
     {
+        if (visible && m_showNodeEditorAction && m_showNodeEditorAction->isChecked())
+        {
+            setActionCheckedSilently(m_showNodeEditorAction, false);
+            updateNodeEditorVisibility(false);
+        }
         updateClipEditorVisibility(visible);
         if (!m_projectStateChangeInProgress && hasOpenProject())
         {
@@ -970,8 +1009,39 @@ MainWindow::MainWindow(QWindow* parent)
         }
         showStatus(visible ? QStringLiteral("Clip editor shown.") : QStringLiteral("Clip editor hidden."));
     });
+    connect(m_showNodeEditorAction, &QAction::toggled, this, [this](const bool visible)
+    {
+        if (visible)
+        {
+            if (!m_controller->hasSelection())
+            {
+                setActionCheckedSilently(m_showNodeEditorAction, false);
+                return;
+            }
+
+            setActionCheckedSilently(m_showTimelineAction, false);
+            setActionCheckedSilently(m_showClipEditorAction, false);
+            setActionCheckedSilently(m_showMixAction, false);
+            updateTimelineVisibility(false);
+            updateClipEditorVisibility(false);
+            updateMixVisibility(false);
+            refreshNodeEditor();
+        }
+
+        updateNodeEditorVisibility(visible);
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+        showStatus(visible ? QStringLiteral("Node Editor shown.") : QStringLiteral("Node Editor hidden."));
+    });
     connect(m_showMixAction, &QAction::toggled, this, [this](const bool visible)
     {
+        if (visible && m_showNodeEditorAction && m_showNodeEditorAction->isChecked())
+        {
+            setActionCheckedSilently(m_showNodeEditorAction, false);
+            updateNodeEditorVisibility(false);
+        }
         updateMixVisibility(visible);
         if (!m_projectStateChangeInProgress && hasOpenProject())
         {
@@ -1147,7 +1217,10 @@ MainWindow::MainWindow(QWindow* parent)
     connect(m_timelineQuickController, &TimelineQuickController::trackActivated, this, [this](const QUuid& trackId)
     {
         m_controller->selectTrack(trackId);
-        updateClipEditorVisibility(true);
+        if (m_showNodeEditorAction)
+        {
+            m_showNodeEditorAction->setChecked(true);
+        }
     });
     connect(
         m_timelineQuickController,
@@ -2012,7 +2085,10 @@ void MainWindow::requestTrackActivated(const QString& trackId)
     if (!uuid.isNull())
     {
         m_controller->selectTrack(uuid);
-        updateClipEditorVisibility(true);
+        if (m_showNodeEditorAction)
+        {
+            m_showNodeEditorAction->setChecked(true);
+        }
     }
 }
 
@@ -2457,11 +2533,14 @@ void MainWindow::updateMotionTrackingState(const bool enabled)
 void MainWindow::updateSelectionState(const bool hasSelection)
 {
     m_actionsController->updateSelectionState(hasSelection);
+    syncNodeEditorActionAvailability();
 }
 
 void MainWindow::updateTrackAvailabilityState(const bool hasTracks)
 {
     m_actionsController->updateTrackAvailabilityState(hasTracks);
+    Q_UNUSED(hasTracks);
+    syncNodeEditorActionAvailability();
 }
 
 void MainWindow::handleVideoLoaded(const QString& filePath, const int totalFrames, const double fps)
@@ -2492,6 +2571,11 @@ void MainWindow::updateTimelineVisibility(const bool visible)
 void MainWindow::updateClipEditorVisibility(const bool visible)
 {
     m_panelLayoutController->updateClipEditorVisibility(visible);
+}
+
+void MainWindow::updateNodeEditorVisibility(const bool visible)
+{
+    m_panelLayoutController->updateNodeEditorVisibility(visible);
 }
 
 void MainWindow::updateMixVisibility(const bool visible)
@@ -2791,6 +2875,13 @@ void MainWindow::showNodeContextMenu(const QUuid& trackId, const QPoint& globalP
 
     QVariantList items;
     items.push_back(QVariantMap{
+        {QStringLiteral("key"), QStringLiteral("node.openEditor")},
+        {QStringLiteral("text"), QStringLiteral("Open Node Editor")},
+        {QStringLiteral("enabled"), true},
+        {QStringLiteral("checkable"), false},
+        {QStringLiteral("checked"), false},
+        {QStringLiteral("separator"), false}});
+    items.push_back(QVariantMap{
         {QStringLiteral("key"), QStringLiteral("node.rename")},
         {QStringLiteral("text"), QStringLiteral("Rename Node...")},
         {QStringLiteral("enabled"), true},
@@ -3071,6 +3162,46 @@ void MainWindow::refreshClipEditor()
     else
     {
         m_clipEditorPreviewTimer.stop();
+    }
+}
+
+void MainWindow::refreshNodeEditor()
+{
+    if (!m_nodeEditorQuickController)
+    {
+        return;
+    }
+
+    m_nodeEditorQuickController->setSelectedNodeLabel(selectedNodeDisplayLabel(m_controller));
+    syncNodeEditorActionAvailability();
+}
+
+void MainWindow::syncNodeEditorActionAvailability()
+{
+    if (!m_showNodeEditorAction || !m_controller)
+    {
+        return;
+    }
+
+    const auto enabled = m_controller->hasSelection();
+    const auto previousEnabled = m_showNodeEditorAction->isEnabled();
+    if (previousEnabled != enabled)
+    {
+        m_showNodeEditorAction->setEnabled(enabled);
+    }
+
+    if (!enabled)
+    {
+        if (m_showNodeEditorAction->isChecked())
+        {
+            setActionCheckedSilently(m_showNodeEditorAction, false);
+            updateNodeEditorVisibility(false);
+        }
+    }
+
+    if (previousEnabled != enabled && m_actionRegistry)
+    {
+        m_actionRegistry->rebuild();
     }
 }
 
@@ -3554,7 +3685,7 @@ void MainWindow::buildUi()
     m_nodeStartShortcut = new QShortcut(QKeySequence(Qt::Key_A), this);
     m_nodeEndShortcut = new QShortcut(QKeySequence(Qt::Key_S), this);
     m_selectNextNodeShortcut = new QShortcut(QKeySequence(Qt::Key_Tab), this);
-    m_showTimelineShortcut = new QShortcut(QKeySequence(Qt::Key_T), this);
+    m_showTimelineShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+T")), this);
     m_showClipEditorShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+-")), this);
     m_showMixShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl++")), this);
     m_trimNodeShortcut = new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_T), this);
@@ -3639,6 +3770,7 @@ void MainWindow::buildUi()
     m_timelineQuickController = new TimelineQuickController(this);
     ensureQuickTypesRegistered();
     m_clipEditorQuickController = new ClipEditorQuickController(this);
+    m_nodeEditorQuickController = new NodeEditorQuickController(this);
     m_mixQuickController = new MixQuickController(this);
     m_audioPoolQuickController = new AudioPoolQuickController(*this, this);
     m_audioPoolQuickController->setShowLength(m_audioPoolShowLength);
@@ -3652,6 +3784,7 @@ void MainWindow::buildUi()
         m_audioPoolPreferredWidth,
         m_timelinePreferredHeight,
         m_clipEditorPreferredHeight,
+        m_nodeEditorPreferredHeight,
         m_mixPreferredHeight);
 
     configureQuickEngine(*engine());
@@ -3669,6 +3802,7 @@ void MainWindow::buildUi()
     rootContext()->setContextProperty(QStringLiteral("videoViewportAllowNativePresentation"), false);
     rootContext()->setContextProperty(QStringLiteral("timelineController"), m_timelineQuickController);
     rootContext()->setContextProperty(QStringLiteral("clipEditorController"), m_clipEditorQuickController);
+    rootContext()->setContextProperty(QStringLiteral("nodeEditorController"), m_nodeEditorQuickController);
     rootContext()->setContextProperty(QStringLiteral("mixController"), m_mixQuickController);
     rootContext()->setContextProperty(QStringLiteral("audioPoolController"), m_audioPoolQuickController);
     rootContext()->setContextProperty(QStringLiteral("contextMenuController"), m_contextMenuController);
@@ -3693,6 +3827,8 @@ void MainWindow::buildUi()
         m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("timelineScene")) : nullptr;
     m_clipEditorQuickWidget =
         m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("clipEditorScene")) : nullptr;
+    m_nodeEditorQuickWidget =
+        m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("nodeEditorScene")) : nullptr;
     m_mixQuickWidget =
         m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("mixScene")) : nullptr;
     m_audioPoolQuickWidget =
@@ -3719,11 +3855,12 @@ void MainWindow::buildUi()
         m_shellLayoutController,
         &ShellLayoutController::preferredSizesChanged,
         this,
-        [this](const int audioPoolWidth, const int timelineHeight, const int clipEditorHeight, const int mixHeight)
+        [this](const int audioPoolWidth, const int timelineHeight, const int clipEditorHeight, const int nodeEditorHeight, const int mixHeight)
         {
             m_audioPoolPreferredWidth = std::max(240, audioPoolWidth);
             m_timelinePreferredHeight = std::max(timelineMinimumHeight(), timelineHeight);
             m_clipEditorPreferredHeight = std::max(148, clipEditorHeight);
+            m_nodeEditorPreferredHeight = std::max(148, nodeEditorHeight);
             m_mixPreferredHeight = std::max(132, mixHeight);
             if (!m_projectStateChangeInProgress && hasOpenProject())
             {
@@ -3844,6 +3981,7 @@ void MainWindow::buildUi()
         m_shellLayoutController->setTimelineMinimumHeight(timelineMinimumHeight());
         m_shellLayoutController->setTimelineVisible(true);
         m_shellLayoutController->setClipEditorVisible(false);
+        m_shellLayoutController->setNodeEditorVisible(false);
         m_shellLayoutController->setMixVisible(false);
         m_shellLayoutController->setAudioPoolVisible(false);
         m_shellLayoutController->setVideoDetached(false);
@@ -3851,6 +3989,7 @@ void MainWindow::buildUi()
             m_audioPoolPreferredWidth,
             m_timelinePreferredHeight,
             m_clipEditorPreferredHeight,
+            m_nodeEditorPreferredHeight,
             m_mixPreferredHeight);
     }
 
@@ -3862,6 +4001,18 @@ void MainWindow::buildUi()
     });
     connect(m_contextMenuController, &ContextMenuController::itemTriggered, this, [this](const QString& key)
     {
+        if (key == QStringLiteral("node.openEditor"))
+        {
+            if (!m_contextMenuTrackId.isNull())
+            {
+                m_controller->selectTrack(m_contextMenuTrackId);
+            }
+            if (m_showNodeEditorAction)
+            {
+                m_showNodeEditorAction->setChecked(true);
+            }
+            return;
+        }
         if (key == QStringLiteral("node.rename"))
         {
             const auto text = m_dialogController
@@ -3876,6 +4027,7 @@ void MainWindow::buildUi()
                 if (!updatedLabel.isEmpty() && updatedLabel != m_contextMenuNodeLabel && !m_contextMenuTrackId.isNull())
                 {
                     m_controller->renameTrack(m_contextMenuTrackId, updatedLabel);
+                    refreshNodeEditor();
                 }
             }
             return;

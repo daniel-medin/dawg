@@ -672,6 +672,7 @@ void TimelineQuickController::handleMouseRelease(const int button)
 {
     if (button == static_cast<int>(Qt::LeftButton))
     {
+        const auto previousCursorShape = m_cursorShape;
         flushPendingFrameRequest();
         m_trimmedTrack.reset();
         m_draggedTrack.reset();
@@ -681,7 +682,13 @@ void TimelineQuickController::handleMouseRelease(const int button)
         m_dragAnchorFrame = 0;
         m_dragAccumulatedDeltaFrames = 0;
         m_dragging = false;
+        QToolTip::hideText();
+        m_cursorShape = static_cast<int>(Qt::ArrowCursor);
         refreshVisuals();
+        if (m_cursorShape != previousCursorShape)
+        {
+            emit cursorShapeChanged();
+        }
     }
 }
 
@@ -733,7 +740,7 @@ void TimelineQuickController::handleWheel(
     refreshVisuals();
 }
 
-void TimelineQuickController::handleHoverMove(const double x, const double y, const int globalX, const int globalY)
+void TimelineQuickController::handleHoverMove(const double x, const double y, const int /*globalX*/, const int /*globalY*/)
 {
     if (m_playbackActive)
     {
@@ -742,7 +749,6 @@ void TimelineQuickController::handleHoverMove(const double x, const double y, co
 
     const auto position = QPointF{x, y};
     updateHoverState(position);
-    updateCursorAndTooltip(position, QPoint{globalX, globalY});
 }
 
 void TimelineQuickController::handleHoverLeave()
@@ -753,14 +759,22 @@ void TimelineQuickController::handleHoverLeave()
     }
 
     const auto previousCursorShape = m_cursorShape;
+    const auto previousHasHoverLine = m_hasHoverLine;
+    const auto previousHoverX = m_hoverX;
     if (m_hoveredLoopFrame.has_value() || m_hoveredTimelineX.has_value())
     {
         m_hoveredLoopFrame.reset();
         m_hoveredTimelineX.reset();
     }
+    m_hasHoverLine = false;
+    m_hoverX = 0.0;
     QToolTip::hideText();
     m_cursorShape = static_cast<int>(Qt::ArrowCursor);
-    refreshVisuals();
+    if (m_hasHoverLine != previousHasHoverLine
+        || std::abs(m_hoverX - previousHoverX) > 0.001)
+    {
+        emit overlayChanged();
+    }
     if (m_cursorShape != previousCursorShape)
     {
         emit cursorShapeChanged();
@@ -932,6 +946,8 @@ void TimelineQuickController::updateSpanDragAt(const QPointF& position)
 
 void TimelineQuickController::updateHoverState(const QPointF& position)
 {
+    const auto previousHasHoverLine = m_hasHoverLine;
+    const auto previousHoverX = m_hoverX;
     std::optional<int> nextHoveredLoopFrame;
     std::optional<double> nextHoveredTimelineX;
     if (computeLoopBarRect().contains(position))
@@ -949,7 +965,16 @@ void TimelineQuickController::updateHoverState(const QPointF& position)
     {
         m_hoveredLoopFrame = nextHoveredLoopFrame;
         m_hoveredTimelineX = nextHoveredTimelineX;
-        refreshVisuals();
+        const auto loopRect = computeLoopBarRect();
+        m_hasHoverLine = m_hoveredTimelineX.has_value();
+        m_hoverX = m_hasHoverLine
+            ? std::clamp(*m_hoveredTimelineX, loopRect.left(), loopRect.right())
+            : 0.0;
+        if (m_hasHoverLine != previousHasHoverLine
+            || std::abs(m_hoverX - previousHoverX) > 0.001)
+        {
+            emit overlayChanged();
+        }
     }
 }
 

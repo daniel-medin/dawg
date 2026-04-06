@@ -11,10 +11,12 @@ class ShellLayoutController final : public QObject
     Q_PROPERTY(QVariantMap canvasRect READ canvasRect NOTIFY layoutChanged)
     Q_PROPERTY(QVariantMap timelineRect READ timelineRect NOTIFY layoutChanged)
     Q_PROPERTY(QVariantMap clipEditorRect READ clipEditorRect NOTIFY layoutChanged)
+    Q_PROPERTY(QVariantMap nodeEditorRect READ nodeEditorRect NOTIFY layoutChanged)
     Q_PROPERTY(QVariantMap mixRect READ mixRect NOTIFY layoutChanged)
     Q_PROPERTY(QVariantMap audioPoolRect READ audioPoolRect NOTIFY layoutChanged)
     Q_PROPERTY(QVariantMap timelineHandleRect READ timelineHandleRect NOTIFY layoutChanged)
     Q_PROPERTY(QVariantMap clipEditorHandleRect READ clipEditorHandleRect NOTIFY layoutChanged)
+    Q_PROPERTY(QVariantMap nodeEditorHandleRect READ nodeEditorHandleRect NOTIFY layoutChanged)
     Q_PROPERTY(QVariantMap mixHandleRect READ mixHandleRect NOTIFY layoutChanged)
     Q_PROPERTY(QVariantMap audioPoolHandleRect READ audioPoolHandleRect NOTIFY layoutChanged)
     Q_PROPERTY(int handleThickness READ handleThickness CONSTANT)
@@ -25,10 +27,12 @@ public:
     [[nodiscard]] QVariantMap canvasRect() const;
     [[nodiscard]] QVariantMap timelineRect() const;
     [[nodiscard]] QVariantMap clipEditorRect() const;
+    [[nodiscard]] QVariantMap nodeEditorRect() const;
     [[nodiscard]] QVariantMap mixRect() const;
     [[nodiscard]] QVariantMap audioPoolRect() const;
     [[nodiscard]] QVariantMap timelineHandleRect() const;
     [[nodiscard]] QVariantMap clipEditorHandleRect() const;
+    [[nodiscard]] QVariantMap nodeEditorHandleRect() const;
     [[nodiscard]] QVariantMap mixHandleRect() const;
     [[nodiscard]] QVariantMap audioPoolHandleRect() const;
     [[nodiscard]] int handleThickness() const;
@@ -36,10 +40,12 @@ public:
     [[nodiscard]] QRect canvasPanelRect() const;
     [[nodiscard]] QRect timelinePanelRect() const;
     [[nodiscard]] QRect clipEditorPanelRect() const;
+    [[nodiscard]] QRect nodeEditorPanelRect() const;
     [[nodiscard]] QRect mixPanelRect() const;
     [[nodiscard]] QRect audioPoolPanelRect() const;
     [[nodiscard]] bool timelineVisible() const;
     [[nodiscard]] bool clipEditorVisible() const;
+    [[nodiscard]] bool nodeEditorVisible() const;
     [[nodiscard]] bool mixVisible() const;
     [[nodiscard]] bool audioPoolVisible() const;
 
@@ -47,9 +53,10 @@ public:
     void setVideoDetached(bool detached);
     void setTimelineVisible(bool visible);
     void setClipEditorVisible(bool visible);
+    void setNodeEditorVisible(bool visible);
     void setMixVisible(bool visible);
     void setAudioPoolVisible(bool visible);
-    void setPreferredSizes(int audioPoolWidth, int timelineHeight, int clipEditorHeight, int mixHeight);
+    void setPreferredSizes(int audioPoolWidth, int timelineHeight, int clipEditorHeight, int nodeEditorHeight, int mixHeight);
     void setTimelineMinimumHeight(int height);
 
     Q_INVOKABLE void beginResize(const QString& handleKey, double x, double y);
@@ -58,7 +65,7 @@ public:
 
 signals:
     void layoutChanged();
-    void preferredSizesChanged(int audioPoolWidth, int timelineHeight, int clipEditorHeight, int mixHeight);
+    void preferredSizesChanged(int audioPoolWidth, int timelineHeight, int clipEditorHeight, int nodeEditorHeight, int mixHeight);
 
 private:
     enum class ActiveHandle
@@ -67,6 +74,7 @@ private:
         AudioPool,
         Timeline,
         ClipEditor,
+        NodeEditor,
         Mix,
     };
 
@@ -76,6 +84,7 @@ private:
         int previousAudioPoolWidth,
         int previousTimelineHeight,
         int previousClipEditorHeight,
+        int previousNodeEditorHeight,
         int previousMixHeight);
 
     int m_viewportWidth = 0;
@@ -83,21 +92,25 @@ private:
     bool m_videoDetached = false;
     bool m_timelineVisible = true;
     bool m_clipEditorVisible = false;
+    bool m_nodeEditorVisible = false;
     bool m_mixVisible = false;
     bool m_audioPoolVisible = false;
     int m_audioPoolPreferredWidth = 320;
     int m_timelinePreferredHeight = 148;
     int m_clipEditorPreferredHeight = 224;
+    int m_nodeEditorPreferredHeight = 260;
     int m_mixPreferredHeight = 368;
     int m_timelineMinimumHeight = 154;
 
     QRect m_canvasRect;
     QRect m_timelineRect;
     QRect m_clipEditorRect;
+    QRect m_nodeEditorRect;
     QRect m_mixRect;
     QRect m_audioPoolRect;
     QRect m_timelineHandleRect;
     QRect m_clipEditorHandleRect;
+    QRect m_nodeEditorHandleRect;
     QRect m_mixHandleRect;
     QRect m_audioPoolHandleRect;
 
@@ -107,5 +120,6 @@ private:
     int m_resizeStartAudioPoolWidth = 320;
     int m_resizeStartTimelineHeight = 148;
     int m_resizeStartClipEditorHeight = 224;
+    int m_resizeStartNodeEditorHeight = 260;
     int m_resizeStartMixHeight = 368;
 };

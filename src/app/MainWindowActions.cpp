@@ -63,13 +63,14 @@ void MainWindowActions::buildMenus()
     m_window.m_detachClipEditorAction = new QAction(QStringLiteral("Detach Clip Editor"), &m_window);
     m_window.m_detachMixAction = new QAction(QStringLiteral("Detach Mixer"), &m_window);
     m_window.m_detachAudioPoolAction = new QAction(QStringLiteral("Detach Audio Pool"), &m_window);
-    m_window.m_showClipEditorAction = new QAction(QStringLiteral("Toggle Clip Editor (Ctrl+-)"), &m_window);
-    m_window.m_showTimelineAction = new QAction(QStringLiteral("Toggle Timeline (T)"), &m_window);
-    m_window.m_showMixAction = new QAction(QStringLiteral("Toggle Mix Window (Ctrl++)"), &m_window);
+    m_window.m_showClipEditorAction = new QAction(QStringLiteral("Show Clip Editor"), &m_window);
+    m_window.m_showNodeEditorAction = new QAction(QStringLiteral("Show Node Editor"), &m_window);
+    m_window.m_showTimelineAction = new QAction(QStringLiteral("Hide Timeline"), &m_window);
+    m_window.m_showMixAction = new QAction(QStringLiteral("Show Mixer"), &m_window);
     m_window.m_showTimelineThumbnailsAction = new QAction(QStringLiteral("Hide Thumbnails"), &m_window);
     m_window.m_timelineClickSeeksAction = new QAction(QStringLiteral("Click Seeks Playhead"), &m_window);
     m_window.m_mixSoloModeAction = new QAction(QStringLiteral("Solo Mode: X-OR"), &m_window);
-    m_window.m_audioPoolAction = new QAction(QStringLiteral("Toggle Audio Pool (Ctrl+P)"), &m_window);
+    m_window.m_audioPoolAction = new QAction(QStringLiteral("Show Audio Pool"), &m_window);
     m_window.m_deleteNodeAction = new QAction(QStringLiteral("Delete (Backspace)"), &m_window);
     m_window.m_deleteEmptyNodesAction = new QAction(QStringLiteral("Delete All Empty Nodes"), &m_window);
     m_window.m_clearAllAction = new QAction(QStringLiteral("Clear All (Ctrl+Shift+A, Backspace)"), &m_window);
@@ -86,6 +87,8 @@ void MainWindowActions::buildMenus()
     m_window.m_useProxyVideoAction->setChecked(false);
     m_window.m_showClipEditorAction->setCheckable(true);
     m_window.m_showClipEditorAction->setChecked(false);
+    m_window.m_showNodeEditorAction->setCheckable(true);
+    m_window.m_showNodeEditorAction->setChecked(false);
     m_window.m_showTimelineAction->setCheckable(true);
     m_window.m_showTimelineAction->setChecked(true);
     m_window.m_showMixAction->setCheckable(true);
@@ -98,6 +101,9 @@ void MainWindowActions::buildMenus()
     m_window.m_mixSoloModeAction->setChecked(false);
     m_window.m_audioPoolAction->setCheckable(true);
     m_window.m_audioPoolAction->setChecked(false);
+    m_window.m_showTimelineAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+T")));
+    m_window.m_showClipEditorAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+-")));
+    m_window.m_showMixAction->setShortcut(QKeySequence(QStringLiteral("Ctrl++")));
     m_window.m_audioPoolAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+P")));
     m_window.m_importSoundAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
     m_window.m_toggleDebugAction = new QAction(QStringLiteral("Toggle Debug"), &m_window);
@@ -132,6 +138,7 @@ void MainWindowActions::buildMenus()
     m_window.m_clearAllAction->setEnabled(false);
     m_window.m_saveProjectAction->setEnabled(false);
     m_window.m_saveProjectAsAction->setEnabled(false);
+    m_window.m_showNodeEditorAction->setEnabled(false);
 
 }
 
@@ -155,7 +162,9 @@ void MainWindowActions::updateSelectionState(const bool hasSelection)
     m_window.m_toggleNodeNameAction->setEnabled(hasSelection);
     m_window.m_importSoundAction->setEnabled(hasSelection);
     m_window.m_deleteNodeAction->setEnabled(hasSelection);
+    m_window.m_showNodeEditorAction->setEnabled(hasSelection);
     m_window.refreshClipEditor();
+    m_window.refreshNodeEditor();
     updateEditActionState();
     m_window.updateDebugText();
 }
@@ -164,6 +173,10 @@ void MainWindowActions::updateTrackAvailabilityState(const bool hasTracks)
 {
     m_window.m_selectAllAction->setEnabled(hasTracks);
     m_window.m_clearAllAction->setEnabled(hasTracks);
+    if (m_window.m_showNodeEditorAction && !hasTracks)
+    {
+        m_window.m_showNodeEditorAction->setEnabled(false);
+    }
     if (m_window.m_selectNextNodeAction)
     {
         m_window.m_selectNextNodeAction->setEnabled(hasTracks);
@@ -178,6 +191,10 @@ void MainWindowActions::updateTrackAvailabilityState(const bool hasTracks)
 
 void MainWindowActions::updateEditActionState()
 {
+    if (m_window.m_showNodeEditorAction)
+    {
+        m_window.m_showNodeEditorAction->setEnabled(m_window.m_controller->hasSelection());
+    }
     if (m_window.m_loopSoundAction)
     {
         const auto selectedTrackId = m_window.m_controller->selectedTrackId();

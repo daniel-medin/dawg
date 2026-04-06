@@ -9,6 +9,7 @@
         <file alias="qml/DebugOverlayScene.qml">qml/DebugOverlayScene.qml</file>
         <file alias="qml/MixScene.qml">qml/MixScene.qml</file>
         <file alias="qml/MixStrip.qml">qml/MixStrip.qml</file>
+        <file alias="qml/NodeEditorScene.qml">qml/NodeEditorScene.qml</file>
         <file alias="qml/AppTheme.qml">qml/AppTheme.qml</file>
         <file alias="qml/AudioPoolScene.qml">qml/AudioPoolScene.qml</file>
         <file alias="qml/ContextMenuOverlay.qml">qml/ContextMenuOverlay.qml</file>

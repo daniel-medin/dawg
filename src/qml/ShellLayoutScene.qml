@@ -6,6 +6,7 @@ Item {
     readonly property var handleModel: [
         { key: "timeline", cursor: Qt.SizeVerCursor },
         { key: "clipEditor", cursor: Qt.SizeVerCursor },
+        { key: "nodeEditor", cursor: Qt.SizeVerCursor },
         { key: "mix", cursor: Qt.SizeVerCursor },
         { key: "audioPool", cursor: Qt.SizeHorCursor }
     ]
@@ -28,6 +29,9 @@ Item {
         }
         if (key === "clipEditor") {
             return shellLayoutController.clipEditorHandleRect
+        }
+        if (key === "nodeEditor") {
+            return shellLayoutController.nodeEditorHandleRect
         }
         if (key === "mix") {
             return shellLayoutController.mixHandleRect
@@ -92,6 +96,18 @@ Item {
         visible: rectVisible(shellLayoutController.mixRect)
                  && !root.handlesOnly
         color: "#080b10"
+        border.width: 1
+        border.color: "#151b23"
+    }
+
+    Rectangle {
+        x: rectValue(shellLayoutController.nodeEditorRect, "x")
+        y: rectValue(shellLayoutController.nodeEditorRect, "y")
+        width: rectValue(shellLayoutController.nodeEditorRect, "width")
+        height: rectValue(shellLayoutController.nodeEditorRect, "height")
+        visible: rectVisible(shellLayoutController.nodeEditorRect)
+                 && !root.handlesOnly
+        color: "#0a0e14"
         border.width: 1
         border.color: "#151b23"
     }

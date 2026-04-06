@@ -14,6 +14,7 @@ public:
     void updateAudioPoolVisibility(bool visible);
     void updateTimelineVisibility(bool visible);
     void updateClipEditorVisibility(bool visible);
+    void updateNodeEditorVisibility(bool visible);
     void updateMixVisibility(bool visible);
     void detachVideo();
     void attachVideo();

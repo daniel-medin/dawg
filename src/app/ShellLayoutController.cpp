@@ -34,6 +34,11 @@ QVariantMap ShellLayoutController::clipEditorRect() const
     return rectMap(m_clipEditorRect);
 }
 
+QVariantMap ShellLayoutController::nodeEditorRect() const
+{
+    return rectMap(m_nodeEditorRect);
+}
+
 QVariantMap ShellLayoutController::mixRect() const
 {
     return rectMap(m_mixRect);
@@ -52,6 +57,11 @@ QVariantMap ShellLayoutController::timelineHandleRect() const
 QVariantMap ShellLayoutController::clipEditorHandleRect() const
 {
     return rectMap(m_clipEditorHandleRect);
+}
+
+QVariantMap ShellLayoutController::nodeEditorHandleRect() const
+{
+    return rectMap(m_nodeEditorHandleRect);
 }
 
 QVariantMap ShellLayoutController::mixHandleRect() const
@@ -84,6 +94,11 @@ QRect ShellLayoutController::clipEditorPanelRect() const
     return m_clipEditorRect;
 }
 
+QRect ShellLayoutController::nodeEditorPanelRect() const
+{
+    return m_nodeEditorRect;
+}
+
 QRect ShellLayoutController::mixPanelRect() const
 {
     return m_mixRect;
@@ -102,6 +117,11 @@ bool ShellLayoutController::timelineVisible() const
 bool ShellLayoutController::clipEditorVisible() const
 {
     return m_clipEditorVisible;
+}
+
+bool ShellLayoutController::nodeEditorVisible() const
+{
+    return m_nodeEditorVisible;
 }
 
 bool ShellLayoutController::mixVisible() const
@@ -161,6 +181,17 @@ void ShellLayoutController::setClipEditorVisible(const bool visible)
     recomputeLayout();
 }
 
+void ShellLayoutController::setNodeEditorVisible(const bool visible)
+{
+    if (m_nodeEditorVisible == visible)
+    {
+        return;
+    }
+
+    m_nodeEditorVisible = visible;
+    recomputeLayout();
+}
+
 void ShellLayoutController::setMixVisible(const bool visible)
 {
     if (m_mixVisible == visible)
@@ -187,15 +218,18 @@ void ShellLayoutController::setPreferredSizes(
     const int audioPoolWidth,
     const int timelineHeight,
     const int clipEditorHeight,
+    const int nodeEditorHeight,
     const int mixHeight)
 {
     const auto nextAudioPoolWidth = std::max(kMinimumAudioPoolWidth, audioPoolWidth);
     const auto nextTimelineHeight = std::max(m_timelineMinimumHeight, timelineHeight);
     const auto nextClipEditorHeight = std::max(kMinimumClipEditorHeight, clipEditorHeight);
+    const auto nextNodeEditorHeight = std::max(kMinimumClipEditorHeight, nodeEditorHeight);
     const auto nextMixHeight = std::max(kMinimumMixHeight, mixHeight);
     if (m_audioPoolPreferredWidth == nextAudioPoolWidth
         && m_timelinePreferredHeight == nextTimelineHeight
         && m_clipEditorPreferredHeight == nextClipEditorHeight
+        && m_nodeEditorPreferredHeight == nextNodeEditorHeight
         && m_mixPreferredHeight == nextMixHeight)
     {
         return;
@@ -204,6 +238,7 @@ void ShellLayoutController::setPreferredSizes(
     m_audioPoolPreferredWidth = nextAudioPoolWidth;
     m_timelinePreferredHeight = nextTimelineHeight;
     m_clipEditorPreferredHeight = nextClipEditorHeight;
+    m_nodeEditorPreferredHeight = nextNodeEditorHeight;
     m_mixPreferredHeight = nextMixHeight;
     recomputeLayout();
 }
@@ -235,6 +270,10 @@ void ShellLayoutController::beginResize(const QString& handleKey, const double x
     {
         m_activeHandle = ActiveHandle::ClipEditor;
     }
+    else if (handleKey == QStringLiteral("nodeEditor"))
+    {
+        m_activeHandle = ActiveHandle::NodeEditor;
+    }
     else if (handleKey == QStringLiteral("mix"))
     {
         m_activeHandle = ActiveHandle::Mix;
@@ -249,6 +288,7 @@ void ShellLayoutController::beginResize(const QString& handleKey, const double x
     m_resizeStartAudioPoolWidth = m_audioPoolPreferredWidth;
     m_resizeStartTimelineHeight = m_timelinePreferredHeight;
     m_resizeStartClipEditorHeight = m_clipEditorPreferredHeight;
+    m_resizeStartNodeEditorHeight = m_nodeEditorPreferredHeight;
     m_resizeStartMixHeight = m_mixPreferredHeight;
 }
 
@@ -262,6 +302,7 @@ void ShellLayoutController::updateResize(const double x, const double y)
     const auto previousAudioPoolWidth = m_audioPoolPreferredWidth;
     const auto previousTimelineHeight = m_timelinePreferredHeight;
     const auto previousClipEditorHeight = m_clipEditorPreferredHeight;
+    const auto previousNodeEditorHeight = m_nodeEditorPreferredHeight;
     const auto previousMixHeight = m_mixPreferredHeight;
     const auto currentX = static_cast<int>(std::lround(x));
     const auto currentY = static_cast<int>(std::lround(y));
@@ -283,6 +324,11 @@ void ShellLayoutController::updateResize(const double x, const double y)
             kMinimumClipEditorHeight,
             m_resizeStartClipEditorHeight + (m_resizeAnchorY - currentY));
         break;
+    case ActiveHandle::NodeEditor:
+        m_nodeEditorPreferredHeight = std::max(
+            kMinimumClipEditorHeight,
+            m_resizeStartNodeEditorHeight + (m_resizeAnchorY - currentY));
+        break;
     case ActiveHandle::Mix:
         m_mixPreferredHeight = std::max(
             kMinimumMixHeight,
@@ -297,6 +343,7 @@ void ShellLayoutController::updateResize(const double x, const double y)
         previousAudioPoolWidth,
         previousTimelineHeight,
         previousClipEditorHeight,
+        previousNodeEditorHeight,
         previousMixHeight);
 }
 
@@ -310,20 +357,24 @@ void ShellLayoutController::recomputeLayout()
     const auto previousCanvasRect = m_canvasRect;
     const auto previousTimelineRect = m_timelineRect;
     const auto previousClipEditorRect = m_clipEditorRect;
+    const auto previousNodeEditorRect = m_nodeEditorRect;
     const auto previousMixRect = m_mixRect;
     const auto previousAudioPoolRect = m_audioPoolRect;
     const auto previousTimelineHandleRect = m_timelineHandleRect;
     const auto previousClipEditorHandleRect = m_clipEditorHandleRect;
+    const auto previousNodeEditorHandleRect = m_nodeEditorHandleRect;
     const auto previousMixHandleRect = m_mixHandleRect;
     const auto previousAudioPoolHandleRect = m_audioPoolHandleRect;
 
     m_canvasRect = {};
     m_timelineRect = {};
     m_clipEditorRect = {};
+    m_nodeEditorRect = {};
     m_mixRect = {};
     m_audioPoolRect = {};
     m_timelineHandleRect = {};
     m_clipEditorHandleRect = {};
+    m_nodeEditorHandleRect = {};
     m_mixHandleRect = {};
     m_audioPoolHandleRect = {};
 
@@ -334,10 +385,12 @@ void ShellLayoutController::recomputeLayout()
         if (previousCanvasRect != m_canvasRect
             || previousTimelineRect != m_timelineRect
             || previousClipEditorRect != m_clipEditorRect
+            || previousNodeEditorRect != m_nodeEditorRect
             || previousMixRect != m_mixRect
             || previousAudioPoolRect != m_audioPoolRect
             || previousTimelineHandleRect != m_timelineHandleRect
             || previousClipEditorHandleRect != m_clipEditorHandleRect
+            || previousNodeEditorHandleRect != m_nodeEditorHandleRect
             || previousMixHandleRect != m_mixHandleRect
             || previousAudioPoolHandleRect != m_audioPoolHandleRect)
         {
@@ -371,9 +424,10 @@ void ShellLayoutController::recomputeLayout()
         int assigned = 0;
     };
 
-    std::array<FixedPanel, 3> panels{{
+    std::array<FixedPanel, 4> panels{{
         FixedPanel{m_timelineVisible, m_timelinePreferredHeight, m_timelineMinimumHeight, 0},
         FixedPanel{m_clipEditorVisible, m_clipEditorPreferredHeight, kMinimumClipEditorHeight, 0},
+        FixedPanel{m_nodeEditorVisible, m_nodeEditorPreferredHeight, kMinimumClipEditorHeight, 0},
         FixedPanel{m_mixVisible, m_mixPreferredHeight, kMinimumMixHeight, 0},
     }};
 
@@ -491,15 +545,18 @@ void ShellLayoutController::recomputeLayout()
 
     placePanel(panels[0], m_timelineRect, m_timelineHandleRect);
     placePanel(panels[1], m_clipEditorRect, m_clipEditorHandleRect);
-    placePanel(panels[2], m_mixRect, m_mixHandleRect);
+    placePanel(panels[2], m_nodeEditorRect, m_nodeEditorHandleRect);
+    placePanel(panels[3], m_mixRect, m_mixHandleRect);
 
     if (previousCanvasRect != m_canvasRect
         || previousTimelineRect != m_timelineRect
         || previousClipEditorRect != m_clipEditorRect
+        || previousNodeEditorRect != m_nodeEditorRect
         || previousMixRect != m_mixRect
         || previousAudioPoolRect != m_audioPoolRect
         || previousTimelineHandleRect != m_timelineHandleRect
         || previousClipEditorHandleRect != m_clipEditorHandleRect
+        || previousNodeEditorHandleRect != m_nodeEditorHandleRect
         || previousMixHandleRect != m_mixHandleRect
         || previousAudioPoolHandleRect != m_audioPoolHandleRect)
     {
@@ -522,11 +579,13 @@ void ShellLayoutController::emitPreferredSizesIfNeeded(
     const int previousAudioPoolWidth,
     const int previousTimelineHeight,
     const int previousClipEditorHeight,
+    const int previousNodeEditorHeight,
     const int previousMixHeight)
 {
     if (previousAudioPoolWidth == m_audioPoolPreferredWidth
         && previousTimelineHeight == m_timelinePreferredHeight
         && previousClipEditorHeight == m_clipEditorPreferredHeight
+        && previousNodeEditorHeight == m_nodeEditorPreferredHeight
         && previousMixHeight == m_mixPreferredHeight)
     {
         return;
@@ -536,5 +595,6 @@ void ShellLayoutController::emitPreferredSizesIfNeeded(
         m_audioPoolPreferredWidth,
         m_timelinePreferredHeight,
         m_clipEditorPreferredHeight,
+        m_nodeEditorPreferredHeight,
         m_mixPreferredHeight);
 }

@@ -18,6 +18,17 @@
 
 namespace
 {
+void updatePanelActionText(QAction* action, const bool visible, const QString& label)
+{
+    if (!action)
+    {
+        return;
+    }
+
+    const auto prefix = visible ? QStringLiteral("Hide ") : QStringLiteral("Show ");
+    action->setText(prefix + label);
+}
+
 QByteArray saveWindowGeometry(QWindow* window)
 {
     if (!window)
@@ -63,6 +74,7 @@ dawg::project::UiState PanelLayoutController::snapshotProjectUiState() const
         || m_window.m_timelineDetached;
     const auto clipEditorVisible = (m_window.m_showClipEditorAction && m_window.m_showClipEditorAction->isChecked())
         || m_window.m_clipEditorDetached;
+    const auto nodeEditorVisible = m_window.m_showNodeEditorAction && m_window.m_showNodeEditorAction->isChecked();
     const auto mixVisible = (m_window.m_showMixAction && m_window.m_showMixAction->isChecked())
         || m_window.m_mixDetached;
     const auto audioPoolVisible = (m_window.m_audioPoolAction && m_window.m_audioPoolAction->isChecked())
@@ -91,6 +103,7 @@ dawg::project::UiState PanelLayoutController::snapshotProjectUiState() const
                                                 : m_window.m_detachedAudioPoolWindowGeometry;
     state.timelineVisible = timelineVisible;
     state.clipEditorVisible = clipEditorVisible;
+    state.nodeEditorVisible = nodeEditorVisible;
     state.mixVisible = mixVisible;
     state.audioPoolVisible = audioPoolVisible;
     state.audioPoolShowLength = m_window.m_audioPoolShowLength;
@@ -103,6 +116,7 @@ dawg::project::UiState PanelLayoutController::snapshotProjectUiState() const
     state.audioPoolPreferredWidth = m_window.m_audioPoolPreferredWidth;
     state.timelinePreferredHeight = m_window.m_timelinePreferredHeight;
     state.clipEditorPreferredHeight = m_window.m_clipEditorPreferredHeight;
+    state.nodeEditorPreferredHeight = m_window.m_nodeEditorPreferredHeight;
     state.mixPreferredHeight = m_window.m_mixPreferredHeight;
     state.windowGeometry = m_window.saveGeometry();
     state.windowMaximized = m_window.isMaximized();
@@ -115,6 +129,7 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
         << "Applying UI state:"
         << "timelineVisible=" << state.timelineVisible
         << "clipEditorVisible=" << state.clipEditorVisible
+        << "nodeEditorVisible=" << state.nodeEditorVisible
         << "mixVisible=" << state.mixVisible
         << "audioPoolVisible=" << state.audioPoolVisible;
     m_window.m_projectStateChangeInProgress = true;
@@ -137,6 +152,7 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
     }
     m_window.m_timelinePreferredHeight = std::max(m_window.timelineMinimumHeight(), state.timelinePreferredHeight);
     m_window.m_clipEditorPreferredHeight = std::max(148, state.clipEditorPreferredHeight);
+    m_window.m_nodeEditorPreferredHeight = std::max(148, state.nodeEditorPreferredHeight);
     m_window.m_mixPreferredHeight = std::max(132, state.mixPreferredHeight);
     if (state.mainVerticalSplitterSizes.size() == 4)
     {
@@ -212,6 +228,7 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
 
     updateTimelineVisibility(state.timelineVisible);
     updateClipEditorVisibility(state.clipEditorVisible);
+    updateNodeEditorVisibility(state.nodeEditorVisible);
     updateMixVisibility(state.mixVisible);
     updateAudioPoolVisibility(state.audioPoolVisible);
     m_window.refreshAudioPool();
@@ -281,11 +298,13 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
         << "Applied UI state:"
         << "timelineVisible=" << (m_window.m_shellLayoutController && m_window.m_shellLayoutController->timelineVisible())
         << "clipEditorVisible=" << (m_window.m_shellLayoutController && m_window.m_shellLayoutController->clipEditorVisible())
+        << "nodeEditorVisible=" << (m_window.m_shellLayoutController && m_window.m_shellLayoutController->nodeEditorVisible())
         << "mixVisible=" << (m_window.m_shellLayoutController && m_window.m_shellLayoutController->mixVisible())
         << "audioPoolVisible=" << (m_window.m_shellLayoutController && m_window.m_shellLayoutController->audioPoolVisible())
         << "preferredAudioPoolWidth=" << m_window.m_audioPoolPreferredWidth
         << "preferredTimelineHeight=" << m_window.m_timelinePreferredHeight
         << "preferredClipEditorHeight=" << m_window.m_clipEditorPreferredHeight
+        << "preferredNodeEditorHeight=" << m_window.m_nodeEditorPreferredHeight
         << "preferredMixHeight=" << m_window.m_mixPreferredHeight;
 
     m_window.m_projectStateChangeInProgress = false;
@@ -310,6 +329,7 @@ void PanelLayoutController::updateAudioPoolVisibility(const bool visible)
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
             m_window.m_clipEditorPreferredHeight,
+            m_window.m_nodeEditorPreferredHeight,
             m_window.m_mixPreferredHeight);
     }
     m_window.syncShellPanelGeometry();
@@ -319,6 +339,7 @@ void PanelLayoutController::updateAudioPoolVisibility(const bool visible)
         const QSignalBlocker blocker{m_window.m_audioPoolAction};
         m_window.m_audioPoolAction->setChecked(visible);
     }
+    updatePanelActionText(m_window.m_audioPoolAction, visible, QStringLiteral("Audio Pool"));
     if (!visible && m_window.m_audioPoolDetached)
     {
         attachAudioPool();
@@ -345,6 +366,7 @@ void PanelLayoutController::updateTimelineVisibility(const bool visible)
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
             m_window.m_clipEditorPreferredHeight,
+            m_window.m_nodeEditorPreferredHeight,
             m_window.m_mixPreferredHeight);
     }
     syncMainVerticalPanelSizes();
@@ -354,6 +376,7 @@ void PanelLayoutController::updateTimelineVisibility(const bool visible)
         const QSignalBlocker blocker{m_window.m_showTimelineAction};
         m_window.m_showTimelineAction->setChecked(visible);
     }
+    updatePanelActionText(m_window.m_showTimelineAction, visible, QStringLiteral("Timeline"));
     if (!visible && m_window.m_timelineDetached)
     {
         attachTimeline();
@@ -388,6 +411,7 @@ void PanelLayoutController::updateClipEditorVisibility(const bool visible)
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
             m_window.m_clipEditorPreferredHeight,
+            m_window.m_nodeEditorPreferredHeight,
             m_window.m_mixPreferredHeight);
     }
     syncMainVerticalPanelSizes();
@@ -397,6 +421,7 @@ void PanelLayoutController::updateClipEditorVisibility(const bool visible)
         const QSignalBlocker blocker{m_window.m_showClipEditorAction};
         m_window.m_showClipEditorAction->setChecked(visible);
     }
+    updatePanelActionText(m_window.m_showClipEditorAction, visible, QStringLiteral("Clip Editor"));
     if (!visible && m_window.m_clipEditorDetached)
     {
         attachClipEditor();
@@ -435,6 +460,7 @@ void PanelLayoutController::updateMixVisibility(const bool visible)
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
             m_window.m_clipEditorPreferredHeight,
+            m_window.m_nodeEditorPreferredHeight,
             m_window.m_mixPreferredHeight);
     }
     syncMainVerticalPanelSizes();
@@ -444,10 +470,48 @@ void PanelLayoutController::updateMixVisibility(const bool visible)
         const QSignalBlocker blocker{m_window.m_showMixAction};
         m_window.m_showMixAction->setChecked(visible);
     }
+    updatePanelActionText(m_window.m_showMixAction, visible, QStringLiteral("Mixer"));
     if (!visible && m_window.m_mixDetached)
     {
         attachMix();
     }
+}
+
+void PanelLayoutController::updateNodeEditorVisibility(const bool visible)
+{
+    if (m_window.m_nodeEditorQuickWidget)
+    {
+        if (!visible)
+        {
+            m_window.m_nodeEditorPreferredHeight =
+                std::max(148, static_cast<int>(std::lround(m_window.m_nodeEditorQuickWidget->height())));
+        }
+        m_window.m_nodeEditorQuickWidget->setVisible(visible);
+    }
+
+    if (visible)
+    {
+        m_window.refreshNodeEditor();
+    }
+
+    if (m_window.m_shellLayoutController)
+    {
+        m_window.m_shellLayoutController->setNodeEditorVisible(visible);
+        m_window.m_shellLayoutController->setPreferredSizes(
+            m_window.m_audioPoolPreferredWidth,
+            m_window.m_timelinePreferredHeight,
+            m_window.m_clipEditorPreferredHeight,
+            m_window.m_nodeEditorPreferredHeight,
+            m_window.m_mixPreferredHeight);
+    }
+    syncMainVerticalPanelSizes();
+
+    if (m_window.m_showNodeEditorAction && m_window.m_showNodeEditorAction->isChecked() != visible)
+    {
+        const QSignalBlocker blocker{m_window.m_showNodeEditorAction};
+        m_window.m_showNodeEditorAction->setChecked(visible);
+    }
+    updatePanelActionText(m_window.m_showNodeEditorAction, visible, QStringLiteral("Node Editor"));
 }
 
 void PanelLayoutController::detachVideo()
@@ -900,11 +964,14 @@ void PanelLayoutController::syncMainVerticalPanelSizes()
         m_window.m_audioPoolPreferredWidth,
         m_window.m_timelinePreferredHeight,
         m_window.m_clipEditorPreferredHeight,
+        m_window.m_nodeEditorPreferredHeight,
         m_window.m_mixPreferredHeight);
     m_window.m_shellLayoutController->setTimelineVisible(
         m_window.m_showTimelineAction && m_window.m_showTimelineAction->isChecked() && !m_window.m_timelineDetached);
     m_window.m_shellLayoutController->setClipEditorVisible(
         m_window.m_showClipEditorAction && m_window.m_showClipEditorAction->isChecked() && !m_window.m_clipEditorDetached);
+    m_window.m_shellLayoutController->setNodeEditorVisible(
+        m_window.m_showNodeEditorAction && m_window.m_showNodeEditorAction->isChecked());
     m_window.m_shellLayoutController->setMixVisible(
         m_window.m_showMixAction && m_window.m_showMixAction->isChecked() && !m_window.m_mixDetached);
     m_window.m_shellLayoutController->setAudioPoolVisible(

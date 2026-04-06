@@ -129,6 +129,8 @@ add_executable(dawg WIN32
     src/ui/MixTypes.h
     src/ui/MixQuickController.cpp
     src/ui/MixQuickController.h
+    src/ui/NodeEditorQuickController.cpp
+    src/ui/NodeEditorQuickController.h
     src/ui/QuickEngineSupport.cpp
     src/ui/QuickEngineSupport.h
     src/ui/TimelineQuickController.cpp

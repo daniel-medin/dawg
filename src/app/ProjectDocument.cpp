@@ -433,6 +433,7 @@ QJsonObject uiStateToJson(const UiState& state)
          QString::fromLatin1(state.detachedAudioPoolWindowGeometry.toBase64())},
         {QStringLiteral("timelineVisible"), state.timelineVisible},
         {QStringLiteral("clipEditorVisible"), state.clipEditorVisible},
+        {QStringLiteral("nodeEditorVisible"), state.nodeEditorVisible},
         {QStringLiteral("mixVisible"), state.mixVisible},
         {QStringLiteral("audioPoolVisible"), state.audioPoolVisible},
         {QStringLiteral("audioPoolShowLength"), state.audioPoolShowLength},
@@ -444,6 +445,7 @@ QJsonObject uiStateToJson(const UiState& state)
         {QStringLiteral("audioPoolPreferredWidth"), state.audioPoolPreferredWidth},
         {QStringLiteral("timelinePreferredHeight"), state.timelinePreferredHeight},
         {QStringLiteral("clipEditorPreferredHeight"), state.clipEditorPreferredHeight},
+        {QStringLiteral("nodeEditorPreferredHeight"), state.nodeEditorPreferredHeight},
         {QStringLiteral("mixPreferredHeight"), state.mixPreferredHeight},
         {QStringLiteral("contentSplitterSizes"), intVectorToJson(state.contentSplitterSizes)},
         {QStringLiteral("mainVerticalSplitterSizes"), intVectorToJson(state.mainVerticalSplitterSizes)},
@@ -472,6 +474,7 @@ UiState uiStateFromJson(const QJsonObject& object)
         object.value(QStringLiteral("detachedAudioPoolWindowGeometry")).toString().toLatin1());
     state.timelineVisible = object.value(QStringLiteral("timelineVisible")).toBool(true);
     state.clipEditorVisible = object.value(QStringLiteral("clipEditorVisible")).toBool(false);
+    state.nodeEditorVisible = object.value(QStringLiteral("nodeEditorVisible")).toBool(false);
     state.mixVisible = object.value(QStringLiteral("mixVisible")).toBool(false);
     state.audioPoolVisible = object.value(QStringLiteral("audioPoolVisible")).toBool(false);
     state.audioPoolShowLength = object.value(QStringLiteral("audioPoolShowLength")).toBool(true);
@@ -483,6 +486,7 @@ UiState uiStateFromJson(const QJsonObject& object)
     state.audioPoolPreferredWidth = object.value(QStringLiteral("audioPoolPreferredWidth")).toInt(320);
     state.timelinePreferredHeight = object.value(QStringLiteral("timelinePreferredHeight")).toInt(148);
     state.clipEditorPreferredHeight = object.value(QStringLiteral("clipEditorPreferredHeight")).toInt(224);
+    state.nodeEditorPreferredHeight = object.value(QStringLiteral("nodeEditorPreferredHeight")).toInt(260);
     state.mixPreferredHeight = object.value(QStringLiteral("mixPreferredHeight")).toInt(368);
     state.contentSplitterSizes = intVectorFromJson(object.value(QStringLiteral("contentSplitterSizes")).toArray());
     state.mainVerticalSplitterSizes = intVectorFromJson(object.value(QStringLiteral("mainVerticalSplitterSizes")).toArray());

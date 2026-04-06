@@ -309,6 +309,7 @@ void ActionRegistry::rebuild()
     addSeparator(viewMenu);
     addAction(viewMenu, QStringLiteral("showTimeline"), m_window.m_showTimelineAction);
     addAction(viewMenu, QStringLiteral("showClipEditor"), m_window.m_showClipEditorAction);
+    addAction(viewMenu, QStringLiteral("showNodeEditor"), m_window.m_showNodeEditorAction);
     addAction(viewMenu, QStringLiteral("showMix"), m_window.m_showMixAction);
     addAction(viewMenu, QStringLiteral("showAudioPool"), m_window.m_audioPoolAction);
     addSeparator(viewMenu);

@@ -80,6 +80,17 @@ Item {
             z: 1
         }
 
+        NodeEditorScene {
+            id: nodeEditorScene
+            objectName: "nodeEditorScene"
+            x: rectValue(shellLayoutController.nodeEditorRect, "x")
+            y: rectValue(shellLayoutController.nodeEditorRect, "y")
+            width: rectValue(shellLayoutController.nodeEditorRect, "width")
+            height: rectValue(shellLayoutController.nodeEditorRect, "height")
+            visible: rectVisible(shellLayoutController.nodeEditorRect)
+            z: 1
+        }
+
         MixScene {
             id: mixScene
             objectName: "mixScene"

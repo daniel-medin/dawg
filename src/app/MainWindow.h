@@ -27,6 +27,7 @@ class ClipEditorQuickController;
 class ClipWaveformQuickItem;
 class MixQuickController;
 class NativeVideoViewport;
+class NodeEditorQuickController;
 class MainWindowActions;
 class ProjectWindowController;
 class PanelLayoutController;
@@ -126,6 +127,7 @@ private slots:
     void updateAudioPoolVisibility(bool visible);
     void updateTimelineVisibility(bool visible);
     void updateClipEditorVisibility(bool visible);
+    void updateNodeEditorVisibility(bool visible);
     void updateMixVisibility(bool visible);
     void detachVideo();
     void attachVideo();
@@ -174,6 +176,7 @@ private:
         bool success,
         const QString& errorMessage);
     void refreshClipEditor();
+    void refreshNodeEditor();
     void refreshMixView();
     void updateEditActionState();
     void updateOverlayPositions();
@@ -244,6 +247,7 @@ private:
     void setTimelineCurrentFrame(int frameIndex);
     void setTimelineSeekOnClickEnabled(bool enabled);
     void setTimelineThumbnailsVisible(bool visible);
+    void syncNodeEditorActionAvailability();
     [[nodiscard]] std::optional<int> timelineLoopShortcutFrame() const;
     [[nodiscard]] bool timelineHasSelectedLoopRange() const;
     [[nodiscard]] bool timelineHasFocus() const;
@@ -272,6 +276,8 @@ private:
     TimelineQuickController* m_timelineQuickController = nullptr;
     QQuickItem* m_clipEditorQuickWidget = nullptr;
     ClipEditorQuickController* m_clipEditorQuickController = nullptr;
+    QQuickItem* m_nodeEditorQuickWidget = nullptr;
+    NodeEditorQuickController* m_nodeEditorQuickController = nullptr;
     ClipWaveformQuickItem* m_clipWaveformItem = nullptr;
     QQuickItem* m_mixQuickWidget = nullptr;
     MixQuickController* m_mixQuickController = nullptr;
@@ -344,6 +350,7 @@ private:
     QAction* m_detachMixAction = nullptr;
     QAction* m_detachAudioPoolAction = nullptr;
     QAction* m_showClipEditorAction = nullptr;
+    QAction* m_showNodeEditorAction = nullptr;
     QAction* m_showTimelineAction = nullptr;
     QAction* m_showMixAction = nullptr;
     QAction* m_showTimelineThumbnailsAction = nullptr;
@@ -389,6 +396,7 @@ private:
     bool m_audioPoolShowSize = true;
     int m_timelinePreferredHeight = 148;
     int m_clipEditorPreferredHeight = 224;
+    int m_nodeEditorPreferredHeight = 260;
     int m_mixPreferredHeight = 368;
     QString m_clipName;
     QString m_memoryUsageText;
