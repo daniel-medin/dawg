@@ -14,6 +14,7 @@ Rectangle {
     property bool soloed: false
     property bool playbackActive: false
     property int meterResetToken: 0
+    property real meterTickMs: 0.0
     property bool useStereoMeter: masterStrip
     property real meterLevel: 0.0
     property real meterLeftLevel: meterLevel
@@ -30,7 +31,9 @@ Rectangle {
     readonly property real meterZeroNormalized: 2.0 / 3.0
     readonly property int meterSegmentCount: 96
     readonly property real meterSegmentGap: 0.5
-    readonly property real meterReleasePerSecond: 0.45
+    readonly property real meterDropDurationSeconds: 1.0
+    readonly property real meterReleaseDbPerSecond: Math.abs(meterFloorDb) / meterDropDurationSeconds
+    readonly property real meterSilenceThresholdLevel: Math.pow(10.0, (meterFloorDb + 3.0) / 20.0)
     readonly property real peakReleasePerSecond: 0.18
     readonly property int peakHoldDurationMs: 3000
     readonly property real clipThreshold: 0.988
@@ -116,6 +119,20 @@ Rectangle {
         return ((clampedPosition - meterZeroNormalized) / (1.0 - meterZeroNormalized)) * maxGainDb
     }
 
+    function levelToMeterDb(level) {
+        if (level <= 0.00001) {
+            return meterFloorDb
+        }
+        return Math.max(meterFloorDb, Math.min(maxGainDb, 20.0 * Math.log(level) / Math.LN10))
+    }
+
+    function meterDbToLevel(db) {
+        if (db <= meterFloorDb + 0.001) {
+            return 0.0
+        }
+        return Math.pow(10.0, db / 20.0)
+    }
+
     function levelToDbText(level) {
         if (level <= 0.00001) {
             return "-inf"
@@ -193,28 +210,32 @@ Rectangle {
         var readoutName = "readoutPeak" + channelName + "Level"
         var clipName = "clipLatched" + channelName
         var deadlineName = channelName.toLowerCase() + "PeakHoldDeadlineMs"
+        var effectiveSourceLevel = sourceLevel >= root.meterSilenceThresholdLevel ? sourceLevel : 0.0
 
         var displayedLevel = root[displayedName]
-        if (sourceLevel >= displayedLevel) {
-            displayedLevel = sourceLevel
+        if (effectiveSourceLevel >= displayedLevel) {
+            displayedLevel = effectiveSourceLevel
         } else {
-            displayedLevel = Math.max(sourceLevel, displayedLevel - root.meterReleasePerSecond * deltaSeconds)
+            var displayedDb = root.levelToMeterDb(displayedLevel)
+            var sourceDb = root.levelToMeterDb(effectiveSourceLevel)
+            displayedLevel = root.meterDbToLevel(
+                Math.max(sourceDb, displayedDb - root.meterReleaseDbPerSecond * deltaSeconds))
         }
         root[displayedName] = displayedLevel
 
         var heldPeak = root[heldName]
-        if (sourceLevel >= heldPeak) {
-            heldPeak = sourceLevel
+        if (effectiveSourceLevel >= heldPeak) {
+            heldPeak = effectiveSourceLevel
             root[deadlineName] = nowMs + root.peakHoldDurationMs
         } else if (nowMs >= root[deadlineName]) {
             heldPeak = Math.max(displayedLevel, heldPeak - root.peakReleasePerSecond * deltaSeconds)
         }
         root[heldName] = heldPeak
 
-        if (sourceLevel > root[readoutName]) {
-            root[readoutName] = sourceLevel
+        if (effectiveSourceLevel > root[readoutName]) {
+            root[readoutName] = effectiveSourceLevel
         }
-        if (sourceLevel >= root.clipThreshold) {
+        if (effectiveSourceLevel >= root.clipThreshold) {
             root[clipName] = true
         }
     }
@@ -230,27 +251,22 @@ Rectangle {
     onMeterResetTokenChanged: clearMeterState()
     onUseStereoMeterChanged: clearMeterState()
 
-    Timer {
-        interval: 33
-        running: true
-        repeat: true
-        onTriggered: {
-            var nowMs = Date.now()
-            var deltaSeconds = root.lastMeterTickMs > 0.0
-                ? Math.max(0.001, (nowMs - root.lastMeterTickMs) / 1000.0)
-                : 0.033
-            root.lastMeterTickMs = nowMs
+    onMeterTickMsChanged: {
+        var nowMs = meterTickMs > 0.0 ? meterTickMs : Date.now()
+        var deltaSeconds = root.lastMeterTickMs > 0.0
+            ? Math.max(0.001, (nowMs - root.lastMeterTickMs) / 1000.0)
+            : 0.016
+        root.lastMeterTickMs = nowMs
 
-            root.updateChannelState("Left", root.useStereoMeter ? root.meterLeftLevel : root.meterLevel, nowMs, deltaSeconds)
-            if (root.useStereoMeter) {
-                root.updateChannelState("Right", root.meterRightLevel, nowMs, deltaSeconds)
-            } else {
-                root.displayedRightLevel = root.displayedLeftLevel
-                root.heldPeakRightLevel = root.heldPeakLeftLevel
-                root.readoutPeakRightLevel = root.readoutPeakLeftLevel
-                root.clipLatchedRight = root.clipLatchedLeft
-                root.rightPeakHoldDeadlineMs = root.leftPeakHoldDeadlineMs
-            }
+        root.updateChannelState("Left", root.useStereoMeter ? root.meterLeftLevel : root.meterLevel, nowMs, deltaSeconds)
+        if (root.useStereoMeter) {
+            root.updateChannelState("Right", root.meterRightLevel, nowMs, deltaSeconds)
+        } else {
+            root.displayedRightLevel = root.displayedLeftLevel
+            root.heldPeakRightLevel = root.heldPeakLeftLevel
+            root.readoutPeakRightLevel = root.readoutPeakLeftLevel
+            root.clipLatchedRight = root.clipLatchedLeft
+            root.rightPeakHoldDeadlineMs = root.leftPeakHoldDeadlineMs
         }
     }
 

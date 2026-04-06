@@ -5,6 +5,14 @@ Rectangle {
     id: root
 
     color: "#080b10"
+    property real meterTickMs: 0.0
+
+    Timer {
+        interval: 16
+        running: root.visible
+        repeat: true
+        onTriggered: root.meterTickMs = Date.now()
+    }
 
     Flickable {
         id: flickArea
@@ -46,6 +54,7 @@ Rectangle {
                 soloed: strip ? strip.soloed : false
                 playbackActive: mixController.playbackActive
                 meterResetToken: mixController.meterResetToken
+                meterTickMs: root.meterTickMs
                 useStereoMeter: strip ? strip.useStereoMeter : true
                 meterLevel: strip ? strip.meterLevel : 0.0
                 meterLeftLevel: strip ? strip.meterLeftLevel : meterLevel
@@ -91,6 +100,7 @@ Rectangle {
                     soloed: strip ? strip.soloed : false
                     playbackActive: mixController.playbackActive
                     meterResetToken: mixController.meterResetToken
+                    meterTickMs: root.meterTickMs
                     useStereoMeter: strip ? strip.useStereoMeter : false
                     meterLevel: strip ? strip.meterLevel : 0.0
                     meterLeftLevel: strip ? strip.meterLeftLevel : 0.0
