@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include <QFileInfo>
+#include <QTimer>
 
 NodeEditorQuickController::NodeEditorQuickController(QObject* parent)
     : QObject(parent)
@@ -13,7 +14,9 @@ void NodeEditorQuickController::setState(
     const bool canOpenNode,
     const QString& label,
     const QString& nodeContainerPath,
-    const std::optional<ClipEditorState>& clipState)
+    const bool hasUnsavedChanges,
+    const std::optional<ClipEditorState>& clipState,
+    const QVariantList& nodeTracks)
 {
     const auto sameClipState = [this, &clipState]()
     {
@@ -37,7 +40,9 @@ void NodeEditorQuickController::setState(
     if (m_canOpenNode == canOpenNode
         && m_selectedNodeLabel == label
         && m_nodeContainerPath == nodeContainerPath
-        && sameClipState)
+        && m_hasUnsavedChanges == hasUnsavedChanges
+        && sameClipState
+        && m_nodeTracks == nodeTracks)
     {
         return;
     }
@@ -45,13 +50,30 @@ void NodeEditorQuickController::setState(
     m_canOpenNode = canOpenNode;
     m_selectedNodeLabel = label;
     m_nodeContainerPath = nodeContainerPath;
+    m_hasUnsavedChanges = hasUnsavedChanges;
     m_clipState = clipState;
+    m_nodeTracks = nodeTracks;
     emit stateChanged();
 }
 
 bool NodeEditorQuickController::canOpenNode() const
 {
     return m_canOpenNode;
+}
+
+bool NodeEditorQuickController::canSaveNode() const
+{
+    return hasSelection() && m_hasUnsavedChanges;
+}
+
+bool NodeEditorQuickController::canSaveNodeAs() const
+{
+    return hasSelection();
+}
+
+bool NodeEditorQuickController::canExportNode() const
+{
+    return hasSelection();
 }
 
 bool NodeEditorQuickController::hasSelection() const
@@ -81,6 +103,16 @@ bool NodeEditorQuickController::hasAttachedAudio() const
     return m_clipState.has_value() && m_clipState->hasAttachedAudio;
 }
 
+int NodeEditorQuickController::nodeTrackCount() const
+{
+    return m_nodeTracks.size();
+}
+
+QVariantList NodeEditorQuickController::nodeTracks() const
+{
+    return m_nodeTracks;
+}
+
 QString NodeEditorQuickController::audioSummaryText() const
 {
     if (!hasSelection())
@@ -92,16 +124,20 @@ QString NodeEditorQuickController::audioSummaryText() const
 
     if (!hasAttachedAudio())
     {
-        return QStringLiteral("No audio attached");
+        return nodeTrackCount() > 0
+            ? QStringLiteral("%1 internal track(s), no previewable audio").arg(nodeTrackCount())
+            : QStringLiteral("No internal audio tracks");
     }
 
-    return QFileInfo(m_clipState->assetPath).fileName();
+    return nodeTrackCount() > 0
+        ? QStringLiteral("%1 internal track(s)").arg(nodeTrackCount())
+        : QFileInfo(m_clipState->assetPath).fileName();
 }
 
 QString NodeEditorQuickController::emptyBodyText() const
 {
     return hasSelection()
-        ? QStringLiteral("Import audio to this node and it will appear here with a waveform preview.")
+        ? QStringLiteral("Import audio to this node and each file will become its own internal track.")
         : (canOpenNode()
             ? QStringLiteral("Open a saved node or select a node to work with it here.")
             : QStringLiteral("Open a project and load a video to use the Node Editor."));
@@ -109,10 +145,16 @@ QString NodeEditorQuickController::emptyBodyText() const
 
 void NodeEditorQuickController::triggerFileAction(const QString& actionKey)
 {
-    emit fileActionRequested(actionKey);
+    QTimer::singleShot(0, this, [this, actionKey]()
+    {
+        emit fileActionRequested(actionKey);
+    });
 }
 
 void NodeEditorQuickController::triggerAudioAction(const QString& actionKey)
 {
-    emit audioActionRequested(actionKey);
+    QTimer::singleShot(0, this, [this, actionKey]()
+    {
+        emit audioActionRequested(actionKey);
+    });
 }

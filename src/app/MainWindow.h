@@ -14,6 +14,7 @@
 #include <QQuickItem>
 #include <QQuickView>
 #include <QShortcut>
+#include <QSet>
 #include <QTimer>
 
 #include "app/ProjectDocument.h"
@@ -78,6 +79,8 @@ public:
     Q_INVOKABLE void requestAudioDropped(const QString& assetPath, double imageX, double imageY);
     Q_INVOKABLE void requestSelectNextNode();
     Q_INVOKABLE void requestSelectNextVisibleNode();
+    Q_INVOKABLE void requestNodeEditorFileAction(const QString& actionKey);
+    Q_INVOKABLE void requestNodeEditorAudioAction(const QString& actionKey);
     [[nodiscard]] QPoint mapQuickLocalToGlobal(double localX, double localY) const;
 
 protected:
@@ -260,7 +263,10 @@ private:
     void syncClipWaveformItem();
     void syncNodeWaveformItem();
     [[nodiscard]] QString projectNodesDirectoryPath() const;
-    [[nodiscard]] bool saveSelectedNodeToFile(const QString& nodeFilePath, bool bindToSelectedTrack = true);
+    [[nodiscard]] bool saveSelectedNodeToFile(
+        const QString& nodeFilePath,
+        bool bindToSelectedTrack = true,
+        const QString& nodeLabelOverride = {});
     [[nodiscard]] bool openNodeFileAsNewNode(const QString& nodeFilePath);
 
     PlayerController* m_controller = nullptr;
@@ -315,6 +321,7 @@ private:
     FilePickerController* m_filePickerController = nullptr;
     QQuickItem* m_shellOverlayQuickWidget = nullptr;
     ShellOverlayController* m_shellOverlayController = nullptr;
+    QSet<QUuid> m_nodeTracksWithUnsavedChanges;
     QUuid m_trackGainPopupTrackId;
     QUuid m_contextMenuTrackId;
     QString m_contextMenuNodeLabel;

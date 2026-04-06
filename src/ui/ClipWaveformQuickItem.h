@@ -11,6 +11,7 @@
 class ClipWaveformQuickItem : public QQuickPaintedItem
 {
     Q_OBJECT
+    Q_PROPERTY(bool clipRangeHandlesVisible READ clipRangeHandlesVisible WRITE setClipRangeHandlesVisible NOTIFY clipRangeHandlesVisibleChanged)
     Q_PROPERTY(bool scrollVisible READ scrollVisible NOTIFY scrollMetricsChanged)
     Q_PROPERTY(int scrollValue READ scrollValue NOTIFY scrollMetricsChanged)
     Q_PROPERTY(int scrollMaximum READ scrollMaximum NOTIFY scrollMetricsChanged)
@@ -20,6 +21,8 @@ public:
     explicit ClipWaveformQuickItem(QQuickItem* parent = nullptr);
 
     void setState(const std::optional<ClipEditorState>& state);
+    [[nodiscard]] bool clipRangeHandlesVisible() const;
+    void setClipRangeHandlesVisible(bool visible);
     [[nodiscard]] bool scrollVisible() const;
     [[nodiscard]] int scrollValue() const;
     [[nodiscard]] int scrollMaximum() const;
@@ -32,6 +35,7 @@ public:
 signals:
     void clipRangeChanged(int clipStartMs, int clipEndMs);
     void playheadChanged(int playheadMs);
+    void clipRangeHandlesVisibleChanged();
     void scrollMetricsChanged();
 
 protected:
@@ -70,6 +74,7 @@ private:
     void rebuildWaveformCache();
 
     std::optional<ClipEditorState> m_state;
+    bool m_clipRangeHandlesVisible = true;
     QString m_loadedAssetPath;
     std::vector<float> m_peaks;
     DragMode m_dragMode = DragMode::None;

@@ -21,6 +21,7 @@ QJsonObject audioAttachmentToJson(
     const QByteArray& embeddedAudioData)
 {
     QJsonObject object{
+        {QStringLiteral("assetPath"), attachment.assetPath},
         {QStringLiteral("gainDb"), attachment.gainDb},
         {QStringLiteral("clipStartMs"), attachment.clipStartMs},
         {QStringLiteral("loopEnabled"), attachment.loopEnabled}
@@ -43,6 +44,7 @@ QJsonObject audioAttachmentToJson(
 AudioAttachment audioAttachmentFromJson(const QJsonObject& object)
 {
     AudioAttachment attachment;
+    attachment.assetPath = object.value(QStringLiteral("assetPath")).toString();
     attachment.gainDb = static_cast<float>(object.value(QStringLiteral("gainDb")).toDouble());
     attachment.clipStartMs = object.value(QStringLiteral("clipStartMs")).toInt();
     if (object.contains(QStringLiteral("clipEndMs")) && !object.value(QStringLiteral("clipEndMs")).isNull())

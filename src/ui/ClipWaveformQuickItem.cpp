@@ -112,6 +112,24 @@ void ClipWaveformQuickItem::setState(const std::optional<ClipEditorState>& state
     update();
 }
 
+bool ClipWaveformQuickItem::clipRangeHandlesVisible() const
+{
+    return m_clipRangeHandlesVisible;
+}
+
+void ClipWaveformQuickItem::setClipRangeHandlesVisible(const bool visible)
+{
+    if (m_clipRangeHandlesVisible == visible)
+    {
+        return;
+    }
+
+    m_clipRangeHandlesVisible = visible;
+    invalidateWaveformCache();
+    update();
+    emit clipRangeHandlesVisibleChanged();
+}
+
 bool ClipWaveformQuickItem::scrollVisible() const
 {
     return m_scrollVisible;
@@ -180,7 +198,7 @@ void ClipWaveformQuickItem::mousePressEvent(QMouseEvent* event)
     const auto x = event->position().x();
     constexpr double handleHitRadius = 8.0;
 
-    if (std::abs(x - clipStartX(bounds)) <= handleHitRadius)
+    if (m_clipRangeHandlesVisible && std::abs(x - clipStartX(bounds)) <= handleHitRadius)
     {
         m_dragMode = DragMode::Start;
         applyDragAt(event->position());
@@ -188,7 +206,7 @@ void ClipWaveformQuickItem::mousePressEvent(QMouseEvent* event)
         return;
     }
 
-    if (std::abs(x - clipEndX(bounds)) <= handleHitRadius)
+    if (m_clipRangeHandlesVisible && std::abs(x - clipEndX(bounds)) <= handleHitRadius)
     {
         m_dragMode = DragMode::End;
         applyDragAt(event->position());
@@ -228,8 +246,8 @@ void ClipWaveformQuickItem::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
-    if (std::abs(x - clipStartX(bounds)) <= handleHitRadius
-        || std::abs(x - clipEndX(bounds)) <= handleHitRadius
+    if ((m_clipRangeHandlesVisible && std::abs(x - clipStartX(bounds)) <= handleHitRadius)
+        || (m_clipRangeHandlesVisible && std::abs(x - clipEndX(bounds)) <= handleHitRadius)
         || std::abs(x - playheadX(bounds)) <= handleHitRadius)
     {
         setCursor(Qt::SizeHorCursor);
@@ -674,7 +692,10 @@ void ClipWaveformQuickItem::rebuildWaveformCache()
         painter.drawText(bounds, Qt::AlignCenter, QStringLiteral("Waveform unavailable."));
     }
 
-    paintHandle(painter, bounds, clipStartX(bounds), QColor{224, 230, 236});
-    paintHandle(painter, bounds, clipEndX(bounds), QColor{224, 230, 236});
+    if (m_clipRangeHandlesVisible)
+    {
+        paintHandle(painter, bounds, clipStartX(bounds), QColor{224, 230, 236});
+        paintHandle(painter, bounds, clipEndX(bounds), QColor{224, 230, 236});
+    }
     m_waveformCacheDirty = false;
 }

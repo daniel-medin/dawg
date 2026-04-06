@@ -70,6 +70,7 @@
 #include "app/ProjectTimelineThumbnails.h"
 #include "app/VideoProxyController.h"
 #include "app/WindowChromeController.h"
+#include "core/audio/AudioDurationProbe.h"
 #include "ui/ClipEditorQuickController.h"
 #include "ui/ClipWaveformQuickItem.h"
 #include "ui/DebugOverlayWindow.h"
@@ -807,6 +808,152 @@ QString mixGainDisplayText(const float gainDb)
     }
 
     return QStringLiteral("%1 dB").arg(gainDb, 0, 'f', 1);
+}
+
+dawg::node::TrackData nodeTrackFromClipState(const ClipEditorState& state, const QString& fallbackLabel)
+{
+    dawg::node::TrackData track;
+    track.label = state.label.trimmed().isEmpty() ? fallbackLabel : state.label.trimmed();
+    if (state.hasAttachedAudio)
+    {
+        track.attachedAudio = AudioAttachment{
+            .assetPath = state.assetPath,
+            .gainDb = state.gainDb,
+            .clipStartMs = state.clipStartMs,
+            .clipEndMs = state.clipEndMs,
+            .loopEnabled = state.loopEnabled
+        };
+    }
+    return track;
+}
+
+std::optional<ClipEditorState> clipStateFromNodeTrack(
+    const dawg::node::TrackData& track,
+    const QString& fallbackLabel)
+{
+    if (!track.attachedAudio.has_value() || track.attachedAudio->assetPath.isEmpty())
+    {
+        return std::nullopt;
+    }
+
+    const auto durationMs = dawg::audio::probeAudioDurationMs(track.attachedAudio->assetPath);
+    if (!durationMs.has_value() || *durationMs <= 0)
+    {
+        return std::nullopt;
+    }
+
+    const auto clipStartMs = std::clamp(track.attachedAudio->clipStartMs, 0, *durationMs);
+    const auto clipEndMs = std::clamp(
+        track.attachedAudio->clipEndMs.value_or(*durationMs),
+        clipStartMs + 1,
+        *durationMs);
+    ClipEditorState state;
+    state.label = track.label.trimmed().isEmpty() ? fallbackLabel : track.label.trimmed();
+    state.assetPath = track.attachedAudio->assetPath;
+    state.clipStartMs = clipStartMs;
+    state.clipEndMs = clipEndMs;
+    state.sourceDurationMs = *durationMs;
+    state.playheadMs = clipStartMs;
+    state.gainDb = track.attachedAudio->gainDb;
+    state.hasAttachedAudio = true;
+    state.loopEnabled = track.attachedAudio->loopEnabled;
+    return state;
+}
+
+QVariantList nodeTrackItemsFromDocument(const dawg::node::Document& document)
+{
+    QVariantList items;
+    for (int index = 0; index < static_cast<int>(document.node.tracks.size()); ++index)
+    {
+        const auto& track = document.node.tracks[static_cast<std::size_t>(index)];
+        const auto title = track.label.trimmed().isEmpty()
+            ? QStringLiteral("Track %1").arg(index + 1)
+            : track.label.trimmed();
+        QString subtitle;
+        if (track.attachedAudio.has_value() && !track.attachedAudio->assetPath.isEmpty())
+        {
+            subtitle = QFileInfo(track.attachedAudio->assetPath).fileName();
+            if (subtitle.isEmpty())
+            {
+                subtitle = QStringLiteral("Embedded audio");
+            }
+        }
+        else
+        {
+            subtitle = QStringLiteral("No audio");
+        }
+
+        items.push_back(QVariantMap{
+            {QStringLiteral("title"), title},
+            {QStringLiteral("subtitle"), subtitle},
+            {QStringLiteral("primary"), index == 0}
+        });
+    }
+    return items;
+}
+
+bool materializeNodeTrackAudio(
+    dawg::node::TrackData& track,
+    const QString& audioDirectoryPath,
+    QString* errorMessage)
+{
+    if (!track.attachedAudio.has_value())
+    {
+        return true;
+    }
+
+    if (!QDir().mkpath(audioDirectoryPath))
+    {
+        if (errorMessage)
+        {
+            *errorMessage = QStringLiteral("Failed to create the project audio folder.");
+        }
+        return false;
+    }
+
+    if (!track.embeddedAudioData.isEmpty())
+    {
+        const auto embeddedAudioFileName = track.embeddedAudioFileName.isEmpty()
+            ? QStringLiteral("node-audio.wav")
+            : track.embeddedAudioFileName;
+        const auto targetAudioPath = uniqueTargetFilePath(audioDirectoryPath, embeddedAudioFileName);
+        QFile audioFile(targetAudioPath);
+        if (!audioFile.open(QIODevice::WriteOnly)
+            || audioFile.write(track.embeddedAudioData) != track.embeddedAudioData.size())
+        {
+            if (errorMessage)
+            {
+                *errorMessage = QStringLiteral("Failed to materialize embedded node audio.");
+            }
+            return false;
+        }
+        audioFile.close();
+        track.attachedAudio->assetPath = QDir::cleanPath(targetAudioPath);
+        return true;
+    }
+
+    const auto assetPath = track.attachedAudio->assetPath;
+    if (assetPath.isEmpty() || !QFileInfo::exists(assetPath))
+    {
+        if (errorMessage)
+        {
+            *errorMessage = QStringLiteral("The node contains an audio track that could not be found.");
+        }
+        return false;
+    }
+
+    const auto targetAudioPath = uniqueTargetFilePath(audioDirectoryPath, assetPath);
+    if (!QFile::copy(assetPath, targetAudioPath))
+    {
+        if (errorMessage)
+        {
+            *errorMessage = QStringLiteral("Failed to gather node audio into the project.");
+        }
+        return false;
+    }
+
+    track.attachedAudio->assetPath = QDir::cleanPath(targetAudioPath);
+    return true;
 }
 
 QPoint clampContextMenuPosition(
@@ -2127,6 +2274,16 @@ void MainWindow::requestTracksSelected(const QVariantList& trackIds)
     m_controller->selectTracks(uuids);
 }
 
+void MainWindow::requestNodeEditorFileAction(const QString& actionKey)
+{
+    handleNodeEditorFileAction(actionKey);
+}
+
+void MainWindow::requestNodeEditorAudioAction(const QString& actionKey)
+{
+    handleNodeEditorAudioAction(actionKey);
+}
+
 void MainWindow::requestTrackGainPopup(const QString& trackId, const double localX, const double localY)
 {
     const QUuid uuid(trackId);
@@ -2224,26 +2381,58 @@ void MainWindow::handleNodeEditorFileAction(const QString& actionKey)
             return;
         }
         const auto selectedTrackId = m_controller->selectedTrackId();
+        const auto boundNodeDocumentPath = selectedTrackId.isNull()
+            ? QString{}
+            : m_controller->trackNodeDocumentPath(selectedTrackId).trimmed();
         const auto nodeLabel = selectedTrackId.isNull()
             ? QStringLiteral("Node")
             : m_controller->trackLabel(selectedTrackId).trimmed();
-        const auto nodeFilePath = QDir(nodesDirectoryPath).filePath(
-            dawg::node::nodeFileNameForName(nodeLabel.isEmpty() ? QStringLiteral("Node") : nodeLabel));
+        const auto nodeFilePath = !boundNodeDocumentPath.isEmpty()
+            ? QDir::cleanPath(boundNodeDocumentPath)
+            : QDir(nodesDirectoryPath).filePath(
+                dawg::node::nodeFileNameForName(nodeLabel.isEmpty() ? QStringLiteral("Node") : nodeLabel));
         static_cast<void>(saveSelectedNodeToFile(nodeFilePath));
+        return;
+    }
+
+    if (actionKey == QStringLiteral("saveAs"))
+    {
+        if (!m_controller->hasSelection())
+        {
+            showStatus(QStringLiteral("Select a node before saving it."));
+            return;
+        }
+        const auto selectedTrackId = m_controller->selectedTrackId();
+        const auto nodeLabel = selectedTrackId.isNull()
+            ? QStringLiteral("Node")
+            : m_controller->trackLabel(selectedTrackId).trimmed();
+        const auto selectedNodeFilePath = m_filePickerController
+            ? m_filePickerController->execSaveFile(
+                QStringLiteral("Save Node As"),
+                nodesDirectoryPath,
+                dawg::node::nodeFileNameForName(nodeLabel.isEmpty() ? QStringLiteral("Node") : nodeLabel),
+                QStringLiteral("DAWG Nodes (*%1)").arg(QString::fromLatin1(dawg::node::kNodeFileSuffix)))
+            : QString{};
+        if (!selectedNodeFilePath.isEmpty())
+        {
+            const auto savedNodeLabel = QFileInfo(selectedNodeFilePath).completeBaseName().trimmed();
+            static_cast<void>(saveSelectedNodeToFile(
+                selectedNodeFilePath,
+                true,
+                savedNodeLabel.isEmpty() ? QStringLiteral("Node") : savedNodeLabel));
+        }
         return;
     }
 
     if (actionKey == QStringLiteral("open"))
     {
-        const auto selectedNodeFilePath = m_filePickerController
-            ? m_filePickerController->execOpenFile(
-                QStringLiteral("Open Node"),
-                nodesDirectoryPath,
-                QStringLiteral("DAWG Nodes (*%1 *%2);;All Files (*.*)")
-                    .arg(
-                        QString::fromLatin1(dawg::node::kNodeFileSuffix),
-                        QString::fromLatin1(dawg::node::kLegacyNodeFileSuffix)))
-            : QString{};
+        const auto selectedNodeFilePath = chooseOpenFileName(
+            QStringLiteral("Open Node"),
+            nodesDirectoryPath,
+            QStringLiteral("DAWG Nodes (*%1 *%2);;All Files (*.*)")
+                .arg(
+                    QString::fromLatin1(dawg::node::kNodeFileSuffix),
+                    QString::fromLatin1(dawg::node::kLegacyNodeFileSuffix)));
         if (!selectedNodeFilePath.isEmpty())
         {
             static_cast<void>(openNodeFileAsNewNode(selectedNodeFilePath));
@@ -2278,10 +2467,144 @@ void MainWindow::handleNodeEditorFileAction(const QString& actionKey)
 
 void MainWindow::handleNodeEditorAudioAction(const QString& actionKey)
 {
-    if (actionKey == QStringLiteral("import"))
+    if (actionKey != QStringLiteral("import"))
     {
-        importSound();
+        return;
     }
+
+    if (!ensureProjectForMediaAction(QStringLiteral("import audio")))
+    {
+        return;
+    }
+
+    if (!m_controller || !m_controller->hasSelection())
+    {
+        showStatus(QStringLiteral("Select a node before importing audio."));
+        return;
+    }
+
+    const auto filePath = chooseOpenFileName(
+        QStringLiteral("Import Audio"),
+        QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
+        QStringLiteral("Audio Files (*.wav *.mp3 *.flac *.aif *.aiff *.m4a *.aac *.ogg);;All Files (*.*)"));
+    if (filePath.isEmpty())
+    {
+        return;
+    }
+
+    QString errorMessage;
+    const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("audio"), &errorMessage);
+    if (!copiedFilePath.has_value())
+    {
+        m_dialogController->execMessage(
+            QStringLiteral("Import Audio"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
+        return;
+    }
+
+    static_cast<void>(m_controller->importAudioToPool(*copiedFilePath));
+
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    if (selectedTrackId.isNull())
+    {
+        showStatus(QStringLiteral("Select a node before importing audio."));
+        return;
+    }
+
+    const auto nodesDirectoryPath = projectNodesDirectoryPath();
+    if (nodesDirectoryPath.isEmpty() || !QDir().mkpath(nodesDirectoryPath))
+    {
+        showStatus(QStringLiteral("Failed to create the project nodes folder."));
+        return;
+    }
+
+    auto boundNodeDocumentPath = m_controller->trackNodeDocumentPath(selectedTrackId);
+    dawg::node::Document nodeDocument;
+    if (!boundNodeDocumentPath.isEmpty() && QFileInfo::exists(boundNodeDocumentPath))
+    {
+        const auto loadedDocument = dawg::node::loadDocument(boundNodeDocumentPath, &errorMessage);
+        if (!loadedDocument.has_value())
+        {
+            m_dialogController->execMessage(
+                QStringLiteral("Import Audio"),
+                errorMessage,
+                {},
+                {DialogController::Button::Ok});
+            return;
+        }
+        nodeDocument = *loadedDocument;
+    }
+    else
+    {
+        const auto nodeLabel = m_controller->trackLabel(selectedTrackId).trimmed().isEmpty()
+            ? QStringLiteral("Node")
+            : m_controller->trackLabel(selectedTrackId).trimmed();
+        boundNodeDocumentPath = uniqueTargetFilePath(
+            nodesDirectoryPath,
+            dawg::node::nodeFileNameForName(nodeLabel));
+        nodeDocument.name = nodeLabel;
+        nodeDocument.node.label = nodeLabel;
+        nodeDocument.node.autoPanEnabled = m_controller->selectedTracksAutoPanEnabled();
+        nodeDocument.node.timelineFrameCount = m_controller->totalFrames();
+        nodeDocument.node.timelineFps = m_controller->fps();
+        if (const auto currentState = m_controller->selectedClipEditorState();
+            currentState.has_value() && currentState->hasAttachedAudio)
+        {
+            nodeDocument.node.tracks.push_back(nodeTrackFromClipState(*currentState, nodeLabel));
+        }
+    }
+
+    if (nodeDocument.node.label.trimmed().isEmpty())
+    {
+        nodeDocument.node.label = m_controller->trackLabel(selectedTrackId).trimmed();
+    }
+    nodeDocument.name = nodeDocument.node.label.trimmed().isEmpty()
+        ? QStringLiteral("Node")
+        : nodeDocument.node.label.trimmed();
+    nodeDocument.node.timelineFrameCount = m_controller->totalFrames();
+    nodeDocument.node.timelineFps = m_controller->fps();
+    nodeDocument.node.autoPanEnabled = m_controller->selectedTracksAutoPanEnabled();
+
+    const QFileInfo importedAudioInfo(*copiedFilePath);
+    dawg::node::TrackData importedTrack;
+    importedTrack.label = importedAudioInfo.completeBaseName().isEmpty()
+        ? importedAudioInfo.fileName()
+        : importedAudioInfo.completeBaseName();
+    importedTrack.attachedAudio = AudioAttachment{
+        .assetPath = *copiedFilePath,
+        .gainDb = 0.0F,
+        .clipStartMs = 0,
+        .clipEndMs = std::nullopt,
+        .loopEnabled = false
+    };
+    nodeDocument.node.tracks.push_back(importedTrack);
+
+    if (!dawg::node::saveDocument(boundNodeDocumentPath, nodeDocument, &errorMessage))
+    {
+        m_dialogController->execMessage(
+            QStringLiteral("Import Audio"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
+        return;
+    }
+
+    static_cast<void>(m_controller->setTrackNodeDocument(
+        selectedTrackId,
+        QDir::cleanPath(boundNodeDocumentPath),
+        nodeDocument.node.timelineFrameCount,
+        nodeDocument.node.timelineFps));
+
+    refreshAudioPool();
+    refreshNodeEditor();
+    if (!m_projectStateChangeInProgress && hasOpenProject())
+    {
+        setProjectDirty(true);
+    }
+    showStatus(QStringLiteral("Imported %1 into the node editor as a new internal track.")
+        .arg(importedAudioInfo.fileName()));
 }
 
 void MainWindow::handleLoopStartShortcut()
@@ -3281,12 +3604,70 @@ void MainWindow::refreshNodeEditor()
         return;
     }
 
-    m_nodeEditorState = m_controller->selectedClipEditorState();
+    m_nodeEditorState.reset();
+    QVariantList nodeTrackItems;
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    const auto nodeDocumentPath = m_controller->trackNodeDocumentPath(selectedTrackId);
+    const auto selectedNodeLabel = selectedNodeDisplayLabel(m_controller);
+    auto hasUnsavedNodeChanges =
+        !selectedTrackId.isNull()
+        && (nodeDocumentPath.isEmpty() || m_nodeTracksWithUnsavedChanges.contains(selectedTrackId));
+    if (!nodeDocumentPath.isEmpty() && QFileInfo::exists(nodeDocumentPath))
+    {
+        QString errorMessage;
+        const auto nodeDocument = dawg::node::loadDocument(nodeDocumentPath, &errorMessage);
+        if (nodeDocument.has_value())
+        {
+            const auto savedNodeLabel = nodeDocument->node.label.trimmed().isEmpty()
+                ? nodeDocument->name.trimmed()
+                : nodeDocument->node.label.trimmed();
+            const auto labelDiffers = savedNodeLabel != selectedNodeLabel.trimmed();
+            if (!labelDiffers)
+            {
+                m_nodeTracksWithUnsavedChanges.remove(selectedTrackId);
+            }
+            hasUnsavedNodeChanges =
+                m_nodeTracksWithUnsavedChanges.contains(selectedTrackId)
+                || labelDiffers;
+            nodeTrackItems = nodeTrackItemsFromDocument(*nodeDocument);
+            for (const auto& track : nodeDocument->node.tracks)
+            {
+                if (const auto previewState = clipStateFromNodeTrack(track, nodeDocument->node.label);
+                    previewState.has_value())
+                {
+                    m_nodeEditorState = previewState;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!m_nodeEditorState.has_value())
+    {
+        m_nodeEditorState = m_controller->selectedClipEditorState();
+    }
+    if (nodeTrackItems.isEmpty() && m_nodeEditorState.has_value())
+    {
+        const auto title = m_nodeEditorState->label.trimmed().isEmpty()
+            ? QStringLiteral("Track 1")
+            : m_nodeEditorState->label.trimmed();
+        const auto subtitle = m_nodeEditorState->hasAttachedAudio
+            ? QFileInfo(m_nodeEditorState->assetPath).fileName()
+            : QStringLiteral("No audio");
+        nodeTrackItems.push_back(QVariantMap{
+            {QStringLiteral("title"), title},
+            {QStringLiteral("subtitle"), subtitle},
+            {QStringLiteral("primary"), true}
+        });
+    }
+
     m_nodeEditorQuickController->setState(
         hasOpenProject() && m_controller->hasVideoLoaded(),
-        selectedNodeDisplayLabel(m_controller),
-        m_controller->trackNodeDocumentPath(m_controller->selectedTrackId()),
-        m_nodeEditorState);
+        selectedNodeLabel,
+        nodeDocumentPath,
+        hasUnsavedNodeChanges,
+        m_nodeEditorState,
+        nodeTrackItems);
     syncNodeWaveformItem();
     syncNodeEditorActionAvailability();
 }
@@ -3400,7 +3781,10 @@ QString MainWindow::projectNodesDirectoryPath() const
         : QString{};
 }
 
-bool MainWindow::saveSelectedNodeToFile(const QString& nodeFilePath, const bool bindToSelectedTrack)
+bool MainWindow::saveSelectedNodeToFile(
+    const QString& nodeFilePath,
+    const bool bindToSelectedTrack,
+    const QString& nodeLabelOverride)
 {
     if (!m_controller || !m_controller->hasSelection())
     {
@@ -3416,36 +3800,90 @@ bool MainWindow::saveSelectedNodeToFile(const QString& nodeFilePath, const bool 
     }
 
     const auto currentState = m_controller->selectedClipEditorState();
-    dawg::node::NodeData nodeData;
-    nodeData.label = m_controller->trackLabel(selectedTrackId).trimmed();
-    if (nodeData.label.isEmpty())
+    const auto trackLabel = m_controller->trackLabel(selectedTrackId).trimmed();
+    const auto nodeLabel = !nodeLabelOverride.trimmed().isEmpty()
+        ? nodeLabelOverride.trimmed()
+        : (trackLabel.isEmpty() ? QStringLiteral("Node") : trackLabel);
+    dawg::node::Document nodeDocument;
+    const auto boundNodeDocumentPath = m_controller->trackNodeDocumentPath(selectedTrackId);
+    auto targetNodeFilePath = QDir::cleanPath(nodeFilePath);
+    QString obsoleteNodeFilePath;
+    if (!boundNodeDocumentPath.isEmpty() && QFileInfo::exists(boundNodeDocumentPath))
     {
-        nodeData.label = QStringLiteral("Node");
+        QString loadError;
+        const auto loadedDocument = dawg::node::loadDocument(boundNodeDocumentPath, &loadError);
+        if (!loadedDocument.has_value())
+        {
+            m_dialogController->execMessage(
+                QStringLiteral("Save Node"),
+                loadError,
+                {},
+                {DialogController::Button::Ok});
+            return false;
+        }
+        nodeDocument = *loadedDocument;
     }
-    nodeData.autoPanEnabled = m_controller->selectedTracksAutoPanEnabled();
-    nodeData.timelineFrameCount = m_controller->totalFrames();
-    nodeData.timelineFps = m_controller->fps();
-    dawg::node::TrackData nodeTrackData;
-    nodeTrackData.label = nodeData.label;
-    if (currentState.has_value() && currentState->hasAttachedAudio)
+
+    if (bindToSelectedTrack && !boundNodeDocumentPath.trimmed().isEmpty())
     {
-        nodeTrackData.attachedAudio = AudioAttachment{
-            .assetPath = currentState->assetPath,
-            .gainDb = currentState->gainDb,
-            .clipStartMs = currentState->clipStartMs,
-            .clipEndMs = currentState->clipEndMs,
-            .loopEnabled = currentState->loopEnabled
-        };
+        const auto cleanedBoundPath = QDir::cleanPath(boundNodeDocumentPath);
+        if (QString::compare(targetNodeFilePath, cleanedBoundPath, pathCaseSensitivity()) == 0)
+        {
+            const QFileInfo boundInfo(cleanedBoundPath);
+            const auto renamedNodeFilePath = QDir(boundInfo.absolutePath()).filePath(
+                dawg::node::nodeFileNameForName(nodeLabel));
+            const auto cleanedRenamedNodeFilePath = QDir::cleanPath(renamedNodeFilePath);
+            if (QString::compare(cleanedRenamedNodeFilePath, cleanedBoundPath, pathCaseSensitivity()) != 0)
+            {
+                if (QFileInfo::exists(cleanedRenamedNodeFilePath))
+                {
+                    m_dialogController->execMessage(
+                        QStringLiteral("Save Node"),
+                        QStringLiteral(
+                            "A node file named \"%1\" already exists.\nUse Save Node As... to choose a different file.")
+                            .arg(QFileInfo(cleanedRenamedNodeFilePath).fileName()),
+                        {},
+                        {DialogController::Button::Ok});
+                    return false;
+                }
+                targetNodeFilePath = cleanedRenamedNodeFilePath;
+                obsoleteNodeFilePath = cleanedBoundPath;
+            }
+        }
     }
-    nodeData.tracks.push_back(nodeTrackData);
+
+    nodeDocument.name = nodeLabel;
+    nodeDocument.node.label = nodeLabel;
+    nodeDocument.node.autoPanEnabled = m_controller->selectedTracksAutoPanEnabled();
+    nodeDocument.node.timelineFrameCount = m_controller->totalFrames();
+    nodeDocument.node.timelineFps = m_controller->fps();
+
+    if (nodeDocument.node.tracks.empty())
+    {
+        nodeDocument.node.tracks.push_back(dawg::node::TrackData{.label = nodeLabel});
+    }
+
+    if (currentState.has_value())
+    {
+        auto runtimeTrack = nodeTrackFromClipState(*currentState, nodeLabel);
+        auto runtimeTrackIt = std::find_if(
+            nodeDocument.node.tracks.begin(),
+            nodeDocument.node.tracks.end(),
+            [](const dawg::node::TrackData& track)
+            {
+                return track.attachedAudio.has_value();
+            });
+        if (runtimeTrackIt == nodeDocument.node.tracks.end())
+        {
+            runtimeTrackIt = nodeDocument.node.tracks.begin();
+        }
+        *runtimeTrackIt = runtimeTrack;
+    }
 
     QString errorMessage;
     const auto saved = dawg::node::saveDocument(
-        nodeFilePath,
-        dawg::node::Document{
-            .name = nodeData.label,
-            .node = nodeData
-        },
+        targetNodeFilePath,
+        nodeDocument,
         &errorMessage);
     if (!saved)
     {
@@ -3459,13 +3897,25 @@ bool MainWindow::saveSelectedNodeToFile(const QString& nodeFilePath, const bool 
 
     if (bindToSelectedTrack)
     {
+        if (m_controller->trackLabel(selectedTrackId).trimmed() != nodeLabel)
+        {
+            static_cast<void>(m_controller->renameTrack(selectedTrackId, nodeLabel));
+        }
+        if (!obsoleteNodeFilePath.isEmpty()
+            && QString::compare(obsoleteNodeFilePath, targetNodeFilePath, pathCaseSensitivity()) != 0
+            && QFileInfo::exists(obsoleteNodeFilePath))
+        {
+            QFile::remove(obsoleteNodeFilePath);
+        }
         static_cast<void>(m_controller->setTrackNodeDocument(
             selectedTrackId,
-            QDir::cleanPath(nodeFilePath),
-            nodeData.timelineFrameCount,
-            nodeData.timelineFps));
+            targetNodeFilePath,
+            nodeDocument.node.timelineFrameCount,
+            nodeDocument.node.timelineFps));
+        m_nodeTracksWithUnsavedChanges.remove(selectedTrackId);
+        refreshNodeEditor();
     }
-    showStatus(QStringLiteral("Saved node to %1.").arg(QFileInfo(nodeFilePath).fileName()));
+    showStatus(QStringLiteral("Saved node to %1.").arg(QFileInfo(targetNodeFilePath).fileName()));
     return true;
 }
 
@@ -3501,13 +3951,27 @@ bool MainWindow::openNodeFileAsNewNode(const QString& nodeFilePath)
         return false;
     }
 
-    const auto preferredNodeName = !document->node.label.trimmed().isEmpty()
-        ? document->node.label.trimmed()
+    dawg::node::Document materializedDocument = *document;
+    const auto preferredNodeName = !materializedDocument.node.label.trimmed().isEmpty()
+        ? materializedDocument.node.label.trimmed()
         : QFileInfo(nodeFilePath).completeBaseName();
     const auto targetNodePath = uniqueTargetFilePath(
         nodesDirectoryPath,
         dawg::node::nodeFileNameForName(preferredNodeName.isEmpty() ? QStringLiteral("Node") : preferredNodeName));
-    if (!dawg::node::saveDocument(targetNodePath, *document, &errorMessage))
+    const auto audioDirectoryPath = QDir(m_currentProjectRootPath).filePath(QStringLiteral("audio"));
+    for (auto& track : materializedDocument.node.tracks)
+    {
+        if (!materializeNodeTrackAudio(track, audioDirectoryPath, &errorMessage))
+        {
+            m_dialogController->execMessage(
+                QStringLiteral("Open Node"),
+                errorMessage,
+                {},
+                {DialogController::Button::Ok});
+            return false;
+        }
+    }
+    if (!dawg::node::saveDocument(targetNodePath, materializedDocument, &errorMessage))
     {
         m_dialogController->execMessage(
             QStringLiteral("Open Node"),
@@ -3518,46 +3982,22 @@ bool MainWindow::openNodeFileAsNewNode(const QString& nodeFilePath)
     }
 
     const auto trackIt = std::find_if(
-        document->node.tracks.cbegin(),
-        document->node.tracks.cend(),
+        materializedDocument.node.tracks.cbegin(),
+        materializedDocument.node.tracks.cend(),
         [](const dawg::node::TrackData& track)
         {
-            return track.attachedAudio.has_value();
+            return track.attachedAudio.has_value() && !track.attachedAudio->assetPath.isEmpty();
         });
     const dawg::node::TrackData* primaryTrack =
-        trackIt != document->node.tracks.cend()
+        trackIt != materializedDocument.node.tracks.cend()
         ? &(*trackIt)
-        : (document->node.tracks.empty() ? nullptr : &document->node.tracks.front());
+        : (materializedDocument.node.tracks.empty() ? nullptr : &materializedDocument.node.tracks.front());
 
     if (primaryTrack != nullptr
         && primaryTrack->attachedAudio.has_value()
-        && !primaryTrack->embeddedAudioData.isEmpty())
+        && !primaryTrack->attachedAudio->assetPath.isEmpty())
     {
-        const auto audioDirectoryPath = QDir(m_currentProjectRootPath).filePath(QStringLiteral("audio"));
-        if (!QDir().mkpath(audioDirectoryPath))
-        {
-            showStatus(QStringLiteral("Failed to create the project audio folder."));
-            return false;
-        }
-
-        const auto embeddedAudioFileName = primaryTrack->embeddedAudioFileName.isEmpty()
-            ? QStringLiteral("node-audio.wav")
-            : primaryTrack->embeddedAudioFileName;
-        const auto targetAudioPath = uniqueTargetFilePath(audioDirectoryPath, embeddedAudioFileName);
-        QFile audioFile(targetAudioPath);
-        if (!audioFile.open(QIODevice::WriteOnly)
-            || audioFile.write(primaryTrack->embeddedAudioData) != primaryTrack->embeddedAudioData.size())
-        {
-            m_dialogController->execMessage(
-                QStringLiteral("Open Node"),
-                QStringLiteral("Failed to materialize embedded node audio."),
-                {},
-                {DialogController::Button::Ok});
-            return false;
-        }
-        audioFile.close();
-
-        if (!m_controller->createTrackWithAudioAtCurrentFrame(targetAudioPath, imageCenter))
+        if (!m_controller->createTrackWithAudioAtCurrentFrame(primaryTrack->attachedAudio->assetPath, imageCenter))
         {
             return false;
         }
@@ -3575,8 +4015,8 @@ bool MainWindow::openNodeFileAsNewNode(const QString& nodeFilePath)
     }
 
     const auto selectedTrackId = m_controller->selectedTrackId();
-    const auto preferredLabel = !document->node.label.trimmed().isEmpty()
-        ? document->node.label.trimmed()
+    const auto preferredLabel = !materializedDocument.node.label.trimmed().isEmpty()
+        ? materializedDocument.node.label.trimmed()
         : (primaryTrack != nullptr ? primaryTrack->label.trimmed() : QString{});
     if (!selectedTrackId.isNull() && !preferredLabel.isEmpty())
     {
@@ -3587,11 +4027,12 @@ bool MainWindow::openNodeFileAsNewNode(const QString& nodeFilePath)
         static_cast<void>(m_controller->setTrackNodeDocument(
             selectedTrackId,
             targetNodePath,
-            document->node.timelineFrameCount > 0 ? document->node.timelineFrameCount : m_controller->totalFrames(),
-            document->node.timelineFps > 0.0 ? document->node.timelineFps : m_controller->fps()));
+            materializedDocument.node.timelineFrameCount > 0 ? materializedDocument.node.timelineFrameCount : m_controller->totalFrames(),
+            materializedDocument.node.timelineFps > 0.0 ? materializedDocument.node.timelineFps : m_controller->fps()));
+        m_nodeTracksWithUnsavedChanges.remove(selectedTrackId);
     }
 
-    if (m_controller->selectedTracksAutoPanEnabled() != document->node.autoPanEnabled)
+    if (m_controller->selectedTracksAutoPanEnabled() != materializedDocument.node.autoPanEnabled)
     {
         m_controller->toggleSelectedTrackAutoPan();
     }
@@ -3602,7 +4043,7 @@ bool MainWindow::openNodeFileAsNewNode(const QString& nodeFilePath)
     }
     refreshNodeEditor();
     showStatus(
-        primaryTrack != nullptr && document->node.tracks.size() > 1
+        primaryTrack != nullptr && materializedDocument.node.tracks.size() > 1
             ? QStringLiteral("Opened node %1 using the first internal track for now.")
                 .arg(QFileInfo(nodeFilePath).completeBaseName())
             : QStringLiteral("Opened node %1.").arg(QFileInfo(nodeFilePath).completeBaseName()));
@@ -4211,6 +4652,7 @@ void MainWindow::buildUi()
     rootContext()->setContextProperty(QStringLiteral("thumbnailStripController"), m_thumbnailStripQuickController);
     rootContext()->setContextProperty(QStringLiteral("clipEditorController"), m_clipEditorQuickController);
     rootContext()->setContextProperty(QStringLiteral("nodeEditorController"), m_nodeEditorQuickController);
+    rootContext()->setContextProperty(QStringLiteral("mainWindowBridge"), this);
     rootContext()->setContextProperty(QStringLiteral("mixController"), m_mixQuickController);
     rootContext()->setContextProperty(QStringLiteral("audioPoolController"), m_audioPoolQuickController);
     rootContext()->setContextProperty(QStringLiteral("contextMenuController"), m_contextMenuController);
@@ -4438,6 +4880,7 @@ void MainWindow::buildUi()
                 if (!updatedLabel.isEmpty() && updatedLabel != m_contextMenuNodeLabel && !m_contextMenuTrackId.isNull())
                 {
                     m_controller->renameTrack(m_contextMenuTrackId, updatedLabel);
+                    m_nodeTracksWithUnsavedChanges.insert(m_contextMenuTrackId);
                     refreshNodeEditor();
                 }
             }
