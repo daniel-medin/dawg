@@ -57,6 +57,7 @@ public:
     ~PlayerController() override;
 
     bool openVideo(const QString& filePath);
+    bool refreshPlaybackSource(QString* errorMessage = nullptr);
     bool importAudioToPool(const QString& filePath);
     void goToStart();
     void togglePlayback();
@@ -101,6 +102,8 @@ public:
     void setFastPlaybackEnabled(bool enabled);
     void setInsertionFollowsPlayback(bool enabled);
     void setMotionTrackingEnabled(bool enabled);
+    void setUseProxyVideo(bool enabled);
+    void setProxyVideoPath(const QString& filePath);
     void setPreferredD3D11Device(void* device);
     void setNativeVideoPresentationEnabled(bool enabled);
     bool addLoopRange(int startFrame, int endFrame);
@@ -146,6 +149,9 @@ public:
     [[nodiscard]] int totalFrames() const;
     [[nodiscard]] double fps() const;
     [[nodiscard]] QString loadedPath() const;
+    [[nodiscard]] QString projectVideoPath() const;
+    [[nodiscard]] QString proxyVideoPath() const;
+    [[nodiscard]] QString preferredPlaybackPath() const;
     [[nodiscard]] QUuid selectedTrackId() const;
     [[nodiscard]] QString decoderBackendName() const;
     [[nodiscard]] bool videoHardwareAccelerated() const;
@@ -158,6 +164,7 @@ public:
     [[nodiscard]] bool isEmbeddedVideoAudioMuted() const;
     [[nodiscard]] bool isFastPlaybackEnabled() const;
     [[nodiscard]] bool isFastPlaybackActive() const;
+    [[nodiscard]] bool useProxyVideo() const;
     [[nodiscard]] std::vector<TimelineLoopRange> loopRanges() const;
     [[nodiscard]] float masterMixGainDb() const;
     [[nodiscard]] bool masterMixMuted() const;
@@ -206,6 +213,8 @@ private:
     friend class NodeController;
 
     [[nodiscard]] bool advanceOneFrame(bool presentFrame, bool syncAudio);
+    [[nodiscard]] bool openPlaybackVideo(const QString& filePath);
+    [[nodiscard]] QString resolvedPlaybackPath(const QString& projectVideoPath, const QString& proxyVideoPath) const;
     bool loadFrameAt(int frameIndex);
     [[nodiscard]] double frameTimestampSeconds(int frameIndex) const;
     [[nodiscard]] std::optional<int> trimmedEndFrameForTrack(const TrackPoint& track) const;
@@ -236,7 +245,10 @@ private:
     std::unique_ptr<TrackEditService> m_trackEditService;
     std::unique_ptr<ClipEditorSession> m_clipEditorSession;
     std::unique_ptr<MixStateStore> m_mixStateStore;
+    QString m_projectVideoPath;
+    QString m_proxyVideoPath;
     bool m_embeddedVideoAudioMuted = true;
+    bool m_useProxyVideo = false;
     std::vector<TrackOverlay> m_currentOverlays;
     bool m_motionTrackingEnabled = false;
     std::vector<TimelineLoopRange> m_loopRanges;

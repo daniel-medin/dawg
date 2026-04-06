@@ -7,6 +7,26 @@ Item {
     visible: shellOverlay.visible
 
     Rectangle {
+        visible: shellOverlay.topProgressVisible
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 2
+        color: "#15271d"
+        z: 20
+    }
+
+    Rectangle {
+        visible: shellOverlay.topProgressVisible
+        anchors.top: parent.top
+        anchors.left: parent.left
+        height: 2
+        width: Math.max(2, parent.width * shellOverlay.topProgress)
+        color: "#2ecf72"
+        z: 21
+    }
+
+    Rectangle {
         id: tipsBubble
 
         visible: shellOverlay.canvasTipsVisible

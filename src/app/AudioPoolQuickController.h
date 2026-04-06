@@ -17,6 +17,7 @@ class AudioPoolQuickController final : public QAbstractListModel
     Q_PROPERTY(bool showSize READ showSize WRITE setShowSize NOTIFY showSizeChanged)
     Q_PROPERTY(bool hasVideoAudio READ hasVideoAudio NOTIFY videoAudioStateChanged)
     Q_PROPERTY(QString videoAudioLabel READ videoAudioLabel NOTIFY videoAudioStateChanged)
+    Q_PROPERTY(QString videoAudioDetail READ videoAudioDetail NOTIFY videoAudioStateChanged)
     Q_PROPERTY(QString videoAudioTooltip READ videoAudioTooltip NOTIFY videoAudioStateChanged)
     Q_PROPERTY(bool videoAudioMuted READ videoAudioMuted NOTIFY videoAudioStateChanged)
     Q_PROPERTY(bool fastPlaybackEnabled READ fastPlaybackEnabled NOTIFY videoAudioStateChanged)
@@ -49,6 +50,7 @@ public:
     void syncVideoAudioState(
         bool hasVideoAudio,
         const QString& videoAudioLabel,
+        const QString& videoAudioDetail,
         const QString& videoAudioTooltip,
         bool videoAudioMuted,
         bool fastPlaybackEnabled);
@@ -61,6 +63,7 @@ public:
 
     [[nodiscard]] bool hasVideoAudio() const;
     [[nodiscard]] QString videoAudioLabel() const;
+    [[nodiscard]] QString videoAudioDetail() const;
     [[nodiscard]] QString videoAudioTooltip() const;
     [[nodiscard]] bool videoAudioMuted() const;
     [[nodiscard]] bool fastPlaybackEnabled() const;
@@ -94,6 +97,7 @@ private:
     bool m_showSize = true;
     bool m_hasVideoAudio = false;
     QString m_videoAudioLabel;
+    QString m_videoAudioDetail;
     QString m_videoAudioTooltip;
     bool m_videoAudioMuted = true;
     bool m_fastPlaybackEnabled = false;

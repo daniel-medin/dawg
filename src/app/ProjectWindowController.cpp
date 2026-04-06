@@ -643,6 +643,21 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
         controllerState.videoPath = *relativeVideoPath;
     }
 
+    if (!controllerState.proxyVideoPath.isEmpty())
+    {
+        const auto relativeProxyVideoPath = makeRelativePath(controllerState.proxyVideoPath, &errorMessage);
+        if (!relativeProxyVideoPath.has_value())
+        {
+            m_window.m_dialogController->execMessage(
+                QStringLiteral("Save Project"),
+                errorMessage,
+                {},
+                {DialogController::Button::Ok});
+            return false;
+        }
+        controllerState.proxyVideoPath = *relativeProxyVideoPath;
+    }
+
     for (auto& assetPath : controllerState.audioPoolAssetPaths)
     {
         const auto relativeAssetPath = makeRelativePath(assetPath, &errorMessage);
@@ -815,6 +830,26 @@ bool ProjectWindowController::saveProjectAsNewCopy()
         controllerState.videoPath = *copiedVideoPath;
     }
 
+    if (!controllerState.proxyVideoPath.isEmpty() && QFileInfo::exists(controllerState.proxyVideoPath))
+    {
+        const auto copiedProxyVideoPath =
+            copyIntoTargetProject(controllerState.proxyVideoPath, QStringLiteral("video"), &errorMessage);
+        if (!copiedProxyVideoPath.has_value())
+        {
+            m_window.m_dialogController->execMessage(
+                QStringLiteral("Save Project As"),
+                errorMessage,
+                {},
+                {DialogController::Button::Ok});
+            return false;
+        }
+        controllerState.proxyVideoPath = *copiedProxyVideoPath;
+    }
+    else
+    {
+        controllerState.proxyVideoPath.clear();
+    }
+
     for (auto& assetPath : controllerState.audioPoolAssetPaths)
     {
         const auto existingIt = copiedAudioPaths.constFind(assetPath);
@@ -876,6 +911,9 @@ bool ProjectWindowController::saveProjectAsNewCopy()
     relativeControllerState.videoPath = controllerState.videoPath.isEmpty()
         ? QString{}
         : QDir::cleanPath(relativeRoot.relativeFilePath(controllerState.videoPath));
+    relativeControllerState.proxyVideoPath = controllerState.proxyVideoPath.isEmpty()
+        ? QString{}
+        : QDir::cleanPath(relativeRoot.relativeFilePath(controllerState.proxyVideoPath));
     for (auto& assetPath : relativeControllerState.audioPoolAssetPaths)
     {
         assetPath = QDir::cleanPath(relativeRoot.relativeFilePath(assetPath));
@@ -955,6 +993,7 @@ bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
     };
 
     absoluteControllerState.videoPath = makeAbsolutePath(absoluteControllerState.videoPath);
+    absoluteControllerState.proxyVideoPath = makeAbsolutePath(absoluteControllerState.proxyVideoPath);
     for (auto& assetPath : absoluteControllerState.audioPoolAssetPaths)
     {
         assetPath = makeAbsolutePath(assetPath);
@@ -975,8 +1014,10 @@ bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
         << "loadProjectFile restoring controller state:"
         << "project=" << projectFilePath
         << "videoPath=" << absoluteControllerState.videoPath
+        << "proxyVideoPath=" << absoluteControllerState.proxyVideoPath
         << "audioPoolCount=" << absoluteControllerState.audioPoolAssetPaths.size()
         << "trackCount=" << absoluteControllerState.trackerState.tracks.size();
+    m_window.m_controller->setUseProxyVideo(document->ui.useProxyVideo);
     m_window.m_projectStateChangeInProgress = true;
     const auto restored = m_window.m_controller->restoreProjectState(absoluteControllerState, &errorMessage);
     if (restored)

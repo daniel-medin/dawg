@@ -356,6 +356,7 @@ QJsonObject controllerStateToJson(const ControllerState& state)
 {
     QJsonObject object{
         {QStringLiteral("videoPath"), state.videoPath},
+        {QStringLiteral("proxyVideoPath"), state.proxyVideoPath},
         {QStringLiteral("audioPoolAssetPaths"), stringVectorToJson(state.audioPoolAssetPaths)},
         {QStringLiteral("trackerState"), motionTrackerStateToJson(state.trackerState)},
         {QStringLiteral("selectedTrackIds"), uuidVectorToJson(state.selectedTrackIds)},
@@ -378,6 +379,7 @@ ControllerState controllerStateFromJson(const QJsonObject& object)
 {
     ControllerState state;
     state.videoPath = object.value(QStringLiteral("videoPath")).toString();
+    state.proxyVideoPath = object.value(QStringLiteral("proxyVideoPath")).toString();
     state.audioPoolAssetPaths = stringVectorFromJson(object.value(QStringLiteral("audioPoolAssetPaths")).toArray());
     state.trackerState = motionTrackerStateFromJson(object.value(QStringLiteral("trackerState")).toObject());
     state.selectedTrackIds = uuidVectorFromJson(object.value(QStringLiteral("selectedTrackIds")).toArray());
@@ -438,6 +440,7 @@ QJsonObject uiStateToJson(const UiState& state)
         {QStringLiteral("showAllNodeNames"), state.showAllNodeNames},
         {QStringLiteral("timelineClickSeeks"), state.timelineClickSeeks},
         {QStringLiteral("timelineThumbnailsVisible"), state.timelineThumbnailsVisible},
+        {QStringLiteral("useProxyVideo"), state.useProxyVideo},
         {QStringLiteral("audioPoolPreferredWidth"), state.audioPoolPreferredWidth},
         {QStringLiteral("timelinePreferredHeight"), state.timelinePreferredHeight},
         {QStringLiteral("clipEditorPreferredHeight"), state.clipEditorPreferredHeight},
@@ -476,6 +479,7 @@ UiState uiStateFromJson(const QJsonObject& object)
     state.showAllNodeNames = object.value(QStringLiteral("showAllNodeNames")).toBool(true);
     state.timelineClickSeeks = object.value(QStringLiteral("timelineClickSeeks")).toBool(true);
     state.timelineThumbnailsVisible = object.value(QStringLiteral("timelineThumbnailsVisible")).toBool(true);
+    state.useProxyVideo = object.value(QStringLiteral("useProxyVideo")).toBool(false);
     state.audioPoolPreferredWidth = object.value(QStringLiteral("audioPoolPreferredWidth")).toInt(320);
     state.timelinePreferredHeight = object.value(QStringLiteral("timelinePreferredHeight")).toInt(148);
     state.clipEditorPreferredHeight = object.value(QStringLiteral("clipEditorPreferredHeight")).toInt(224);
@@ -554,7 +558,11 @@ std::optional<Document> loadDocument(const QString& projectFilePath, QString* er
 
     const auto root = document.object();
     const auto schemaVersion = root.value(QStringLiteral("schemaVersion")).toInt(-1);
-    if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3 && schemaVersion != kSchemaVersion)
+    if (schemaVersion != 1
+        && schemaVersion != 2
+        && schemaVersion != 3
+        && schemaVersion != 4
+        && schemaVersion != kSchemaVersion)
     {
         if (errorMessage)
         {

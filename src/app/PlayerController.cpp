@@ -13,11 +13,37 @@
 #include "app/TrackEditService.h"
 #include "app/VideoPlaybackCoordinator.h"
 #include <QHash>
+#include <QDir>
+#include <QFileInfo>
 
 #include "core/audio/VideoAudioExtractor.h"
 
 namespace
 {
+Qt::CaseSensitivity pathCaseSensitivity()
+{
+#ifdef Q_OS_WIN
+    return Qt::CaseInsensitive;
+#else
+    return Qt::CaseSensitive;
+#endif
+}
+
+QString normalizedAbsolutePath(const QString& path)
+{
+    if (path.isEmpty())
+    {
+        return {};
+    }
+
+    return QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath()));
+}
+
+bool pathsMatch(const QString& left, const QString& right)
+{
+    return QString::compare(normalizedAbsolutePath(left), normalizedAbsolutePath(right), pathCaseSensitivity()) == 0;
+}
+
 int audioClipStartMs(const AudioAttachment& attachment)
 {
     return std::max(0, attachment.clipStartMs);
@@ -148,8 +174,11 @@ void PlayerController::resetProjectState()
     stopSelectedTrackClipPreview();
     pause(false);
     m_audioEngine->stopAll();
+    m_videoPlaybackCoordinator->setProxyPresentationEnabled(false);
     m_videoPlaybackCoordinator->close();
     clearProjectStateAfterMediaStop(true);
+    m_projectVideoPath.clear();
+    m_proxyVideoPath.clear();
     m_videoPlaybackCoordinator->renderService().setFastPlaybackEnabled(false);
     m_transport.setInsertionFollowsPlayback(false);
     m_motionTrackingEnabled = false;
@@ -168,10 +197,34 @@ void PlayerController::resetProjectState()
 
 bool PlayerController::openVideo(const QString& filePath)
 {
+    m_projectVideoPath = filePath;
+    m_proxyVideoPath.clear();
+    return openPlaybackVideo(filePath);
+}
+
+bool PlayerController::refreshPlaybackSource(QString* errorMessage)
+{
+    if (m_projectVideoPath.isEmpty())
+    {
+        return true;
+    }
+
+    const auto playbackPath = preferredPlaybackPath();
+    if (playbackPath.isEmpty() || playbackPath == m_videoPlaybackCoordinator->loadedPath())
+    {
+        return true;
+    }
+
+    return restoreProjectState(snapshotProjectState(), errorMessage);
+}
+
+bool PlayerController::openPlaybackVideo(const QString& filePath)
+{
     stopAudioPoolPreview();
     stopSelectedTrackClipPreview();
     pause(false);
     m_audioEngine->stopTrack(m_embeddedVideoAudioTrackId);
+    m_videoPlaybackCoordinator->setProxyPresentationEnabled(pathsMatch(filePath, m_proxyVideoPath));
     const auto openResult = m_videoPlaybackCoordinator->openVideo(filePath);
     if (!openResult.success)
     {
@@ -192,7 +245,7 @@ bool PlayerController::openVideo(const QString& filePath)
     emit mixSoloModeChanged(isMixSoloXorMode());
     emit statusChanged(
         QStringLiteral("Loaded %1 via %2 decode and %3 render.")
-            .arg(filePath)
+            .arg(m_projectVideoPath.isEmpty() ? filePath : m_projectVideoPath)
             .arg(m_videoPlaybackCoordinator->decoderBackendName())
             .arg(m_videoPlaybackCoordinator->renderBackendName()));
 
@@ -201,8 +254,8 @@ bool PlayerController::openVideo(const QString& filePath)
 
 dawg::project::ControllerState PlayerController::snapshotProjectState() const
 {
-    return ProjectSessionAdapter::snapshot(ProjectSessionAdapter::SnapshotInput{
-        .videoPath = m_videoPlaybackCoordinator->loadedPath(),
+    auto state = ProjectSessionAdapter::snapshot(ProjectSessionAdapter::SnapshotInput{
+        .videoPath = m_projectVideoPath,
         .audioPool = m_audioPool,
         .tracker = m_tracker,
         .selectedTrackIds = m_selectionController->selectedTrackIds(),
@@ -220,6 +273,9 @@ dawg::project::ControllerState PlayerController::snapshotProjectState() const
         .mixLaneSoloByLane = m_mixStateStore->soloByLane(),
         .clipEditorPlayheads = m_clipEditorSession->playheads()
     });
+    state.videoPath = m_projectVideoPath;
+    state.proxyVideoPath = m_proxyVideoPath;
+    return state;
 }
 
 bool PlayerController::restoreProjectState(const dawg::project::ControllerState& state, QString* errorMessage)
@@ -233,13 +289,18 @@ bool PlayerController::restoreProjectState(const dawg::project::ControllerState&
     {
         resetProjectState();
     }
-    else if (!openVideo(state.videoPath))
+    else
     {
-        if (errorMessage)
+        m_projectVideoPath = state.videoPath;
+        m_proxyVideoPath = state.proxyVideoPath;
+        if (!openPlaybackVideo(resolvedPlaybackPath(m_projectVideoPath, m_proxyVideoPath)))
         {
-            *errorMessage = QStringLiteral("Failed to open project video: %1").arg(state.videoPath);
+            if (errorMessage)
+            {
+                *errorMessage = QStringLiteral("Failed to open project video: %1").arg(state.videoPath);
+            }
+            return false;
         }
-        return false;
     }
 
     const auto payload = ProjectSessionAdapter::buildRestorePayload(
@@ -824,6 +885,25 @@ bool PlayerController::advanceOneFrame(const bool presentFrame, const bool syncA
         });
 }
 
+QString PlayerController::resolvedPlaybackPath(
+    const QString& projectVideoPath,
+    const QString& proxyVideoPath) const
+{
+    if (projectVideoPath.isEmpty())
+    {
+        return {};
+    }
+
+    if (m_useProxyVideo
+        && !proxyVideoPath.isEmpty()
+        && QFileInfo::exists(proxyVideoPath))
+    {
+        return proxyVideoPath;
+    }
+
+    return projectVideoPath;
+}
+
 void PlayerController::stepBackward()
 {
     if (!hasVideoLoaded())
@@ -951,8 +1031,8 @@ void PlayerController::setFastPlaybackEnabled(const bool enabled)
     emitCurrentFrame();
     emit statusChanged(
         enabled
-            ? QStringLiteral("Fast playback enabled.")
-            : QStringLiteral("Fast playback disabled."));
+            ? QStringLiteral("Low-Res Playback enabled.")
+            : QStringLiteral("Low-Res Playback disabled."));
 }
 
 void PlayerController::setMotionTrackingEnabled(const bool enabled)
@@ -982,6 +1062,16 @@ void PlayerController::setInsertionFollowsPlayback(const bool enabled)
         enabled
             ? QStringLiteral("Insertion follows playback enabled.")
             : QStringLiteral("Insertion follows playback disabled."));
+}
+
+void PlayerController::setUseProxyVideo(const bool enabled)
+{
+    m_useProxyVideo = enabled;
+}
+
+void PlayerController::setProxyVideoPath(const QString& filePath)
+{
+    m_proxyVideoPath = filePath;
 }
 
 void PlayerController::setPreferredD3D11Device(void* device)
@@ -1084,6 +1174,21 @@ QString PlayerController::loadedPath() const
     return m_videoPlaybackCoordinator->loadedPath();
 }
 
+QString PlayerController::projectVideoPath() const
+{
+    return m_projectVideoPath;
+}
+
+QString PlayerController::proxyVideoPath() const
+{
+    return m_proxyVideoPath;
+}
+
+QString PlayerController::preferredPlaybackPath() const
+{
+    return resolvedPlaybackPath(m_projectVideoPath, m_proxyVideoPath);
+}
+
 QUuid PlayerController::selectedTrackId() const
 {
     return m_selectionController->selectedTrackId();
@@ -1142,6 +1247,11 @@ bool PlayerController::isFastPlaybackEnabled() const
 bool PlayerController::isFastPlaybackActive() const
 {
     return m_videoPlaybackCoordinator->renderService().fastPlaybackEnabled() && m_transport.isPlaying();
+}
+
+bool PlayerController::useProxyVideo() const
+{
+    return m_useProxyVideo;
 }
 
 std::vector<TimelineLoopRange> PlayerController::loopRanges() const

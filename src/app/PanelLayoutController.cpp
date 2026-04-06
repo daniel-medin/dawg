@@ -99,6 +99,7 @@ dawg::project::UiState PanelLayoutController::snapshotProjectUiState() const
     state.timelineClickSeeks = m_window.m_timelineClickSeeksAction && m_window.m_timelineClickSeeksAction->isChecked();
     state.timelineThumbnailsVisible =
         !m_window.m_showTimelineThumbnailsAction || m_window.m_showTimelineThumbnailsAction->isChecked();
+    state.useProxyVideo = m_window.m_useProxyVideoAction && m_window.m_useProxyVideoAction->isChecked();
     state.audioPoolPreferredWidth = m_window.m_audioPoolPreferredWidth;
     state.timelinePreferredHeight = m_window.m_timelinePreferredHeight;
     state.clipEditorPreferredHeight = m_window.m_clipEditorPreferredHeight;
@@ -198,6 +199,16 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
         m_window.m_showTimelineThumbnailsAction->setChecked(state.timelineThumbnailsVisible);
     }
     m_window.setTimelineThumbnailsVisible(state.timelineThumbnailsVisible);
+
+    if (m_window.m_useProxyVideoAction)
+    {
+        const QSignalBlocker blocker{m_window.m_useProxyVideoAction};
+        m_window.m_useProxyVideoAction->setChecked(state.useProxyVideo);
+    }
+    if (m_window.m_controller)
+    {
+        m_window.m_controller->setUseProxyVideo(state.useProxyVideo);
+    }
 
     updateTimelineVisibility(state.timelineVisible);
     updateClipEditorVisibility(state.clipEditorVisible);

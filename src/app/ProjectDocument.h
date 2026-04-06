@@ -13,7 +13,7 @@
 
 namespace dawg::project
 {
-constexpr int kSchemaVersion = 4;
+constexpr int kSchemaVersion = 5;
 constexpr auto kProjectFileSuffix = ".dawg";
 
 struct MixLaneState
@@ -27,6 +27,7 @@ struct MixLaneState
 struct ControllerState
 {
     QString videoPath;
+    QString proxyVideoPath;
     std::vector<QString> audioPoolAssetPaths;
     MotionTrackerState trackerState;
     std::vector<QUuid> selectedTrackIds;
@@ -64,6 +65,7 @@ struct UiState
     bool showAllNodeNames = true;
     bool timelineClickSeeks = true;
     bool timelineThumbnailsVisible = true;
+    bool useProxyVideo = false;
     int audioPoolPreferredWidth = 320;
     int timelinePreferredHeight = 148;
     int clipEditorPreferredHeight = 224;

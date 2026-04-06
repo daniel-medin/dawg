@@ -127,7 +127,7 @@ Rectangle {
                         { key: "importAudio", text: "Import Audio... (Ctrl+Shift+I)" },
                         { key: "showLength", text: "Show Length", checkable: true, checked: audioPoolController.showLength },
                         { key: "showSize", text: "Show Size", checkable: true, checked: audioPoolController.showSize },
-                        { key: "closePanel", text: "Close (P)" }
+                        { key: "closePanel", text: "Close (Ctrl+P)" }
                     ], headerMenuButton)
                 }
 
@@ -154,7 +154,7 @@ Rectangle {
             Layout.rightMargin: 8
             Layout.bottomMargin: 8
             visible: audioPoolController.hasVideoAudio
-            implicitHeight: 32
+            implicitHeight: 44
             radius: 6
             color: "#10151c"
             border.width: 1
@@ -167,30 +167,45 @@ Rectangle {
                 spacing: 6
 
                 Label {
+                    Layout.alignment: Qt.AlignVCenter
                     text: "\u266B"
                     color: "#c7d0da"
                     font.pixelSize: 13
                 }
 
-                Label {
+                ColumnLayout {
                     Layout.fillWidth: true
-                    text: audioPoolController.videoAudioLabel
-                    color: "#c7d0da"
-                    font.pixelSize: 12
-                    elide: Text.ElideRight
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: audioPoolController.videoAudioLabel
+                        color: "#c7d0da"
+                        font.pixelSize: 12
+                        elide: Text.ElideRight
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: audioPoolController.videoAudioDetail.length > 0
+                        text: audioPoolController.videoAudioDetail
+                        color: "#7f91a6"
+                        font.pixelSize: 10
+                        elide: Text.ElideRight
+                    }
                 }
 
                 ToolButton {
                     id: videoMenuButton
 
                     text: "\u2630"
+                    Layout.alignment: Qt.AlignVCenter
                     hoverEnabled: true
                     ToolTip.visible: hovered
                     ToolTip.text: audioPoolController.videoAudioTooltip
                     onClicked: {
                         root.openMenu("video", -1, [
                             { key: "toggleMute", text: audioPoolController.videoAudioMuted ? "Unmute" : "Mute" },
-                            { key: "toggleFastPlayback", text: "Fast Playback", checkable: true, checked: audioPoolController.fastPlaybackEnabled }
+                            { key: "toggleFastPlayback", text: "Low-Res Playback", checkable: true, checked: audioPoolController.fastPlaybackEnabled }
                         ], videoMenuButton)
                     }
 

@@ -15,7 +15,7 @@ ShellOverlayController::ShellOverlayController(QObject* parent)
 
 bool ShellOverlayController::visible() const
 {
-    return m_statusVisible || m_canvasTipsVisible || m_trackGainPopupVisible;
+    return m_statusVisible || m_topProgressVisible || m_canvasTipsVisible || m_trackGainPopupVisible;
 }
 
 bool ShellOverlayController::statusVisible() const
@@ -31,6 +31,16 @@ QString ShellOverlayController::statusMessage() const
 int ShellOverlayController::statusMaxWidth() const
 {
     return m_statusMaxWidth;
+}
+
+bool ShellOverlayController::topProgressVisible() const
+{
+    return m_topProgressVisible;
+}
+
+double ShellOverlayController::topProgress() const
+{
+    return m_topProgress;
 }
 
 bool ShellOverlayController::canvasTipsVisible() const
@@ -114,6 +124,34 @@ void ShellOverlayController::setStatusMaxWidth(const int width)
     const bool changed = m_statusMaxWidth != clampedWidth;
     m_statusMaxWidth = clampedWidth;
     emitIfChanged(changed);
+}
+
+void ShellOverlayController::showTopProgress(const double progress)
+{
+    const auto clampedProgress = qBound(0.0, progress, 1.0);
+    const bool changed = !m_topProgressVisible
+        || !qFuzzyCompare(1.0 + m_topProgress, 1.0 + clampedProgress);
+    m_topProgressVisible = true;
+    m_topProgress = clampedProgress;
+    emitIfChanged(changed);
+}
+
+void ShellOverlayController::hideTopProgress()
+{
+    const bool changed = m_topProgressVisible || !qFuzzyIsNull(m_topProgress);
+    m_topProgressVisible = false;
+    m_topProgress = 0.0;
+    emitIfChanged(changed);
+}
+
+void ShellOverlayController::showVideoProxyProgress(const double progress)
+{
+    showTopProgress(progress);
+}
+
+void ShellOverlayController::hideVideoProxyProgress()
+{
+    hideTopProgress();
 }
 
 void ShellOverlayController::showCanvasTips(const QString& message)

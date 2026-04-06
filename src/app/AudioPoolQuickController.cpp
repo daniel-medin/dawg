@@ -190,6 +190,7 @@ void AudioPoolQuickController::updatePlaybackState(const std::vector<AudioPoolIt
 void AudioPoolQuickController::syncVideoAudioState(
     const bool hasVideoAudio,
     const QString& videoAudioLabel,
+    const QString& videoAudioDetail,
     const QString& videoAudioTooltip,
     const bool videoAudioMuted,
     const bool fastPlaybackEnabled)
@@ -197,12 +198,14 @@ void AudioPoolQuickController::syncVideoAudioState(
     const bool changed =
         m_hasVideoAudio != hasVideoAudio
         || m_videoAudioLabel != videoAudioLabel
+        || m_videoAudioDetail != videoAudioDetail
         || m_videoAudioTooltip != videoAudioTooltip
         || m_videoAudioMuted != videoAudioMuted
         || m_fastPlaybackEnabled != fastPlaybackEnabled;
 
     m_hasVideoAudio = hasVideoAudio;
     m_videoAudioLabel = videoAudioLabel;
+    m_videoAudioDetail = videoAudioDetail;
     m_videoAudioTooltip = videoAudioTooltip;
     m_videoAudioMuted = videoAudioMuted;
     m_fastPlaybackEnabled = fastPlaybackEnabled;
@@ -255,6 +258,11 @@ bool AudioPoolQuickController::hasVideoAudio() const
 QString AudioPoolQuickController::videoAudioLabel() const
 {
     return m_videoAudioLabel;
+}
+
+QString AudioPoolQuickController::videoAudioDetail() const
+{
+    return m_videoAudioDetail;
 }
 
 QString AudioPoolQuickController::videoAudioTooltip() const

@@ -176,6 +176,11 @@ void VideoPlaybackCoordinator::setNativePresentationEnabled(const bool enabled)
     }
 }
 
+void VideoPlaybackCoordinator::setProxyPresentationEnabled(const bool enabled)
+{
+    m_proxyPresentationEnabled = enabled;
+}
+
 double VideoPlaybackCoordinator::frameTimestampSeconds(const int frameIndex) const
 {
     return m_videoPlayback.frameTimestampSeconds(frameIndex);
@@ -395,7 +400,8 @@ bool VideoPlaybackCoordinator::applyPresentationScaleForPlaybackState(
     const bool playbackActive,
     const std::function<void()>& onFrameChanged)
 {
-    const auto targetScale = (m_renderService.fastPlaybackEnabled() && playbackActive) ? 0.5 : 1.0;
+    const auto targetScale =
+        (m_proxyPresentationEnabled || (m_renderService.fastPlaybackEnabled() && playbackActive)) ? 0.5 : 1.0;
     if (!m_videoPlayback.setPresentationScale(targetScale))
     {
         return false;

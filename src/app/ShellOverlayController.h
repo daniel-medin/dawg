@@ -9,6 +9,8 @@ class ShellOverlayController final : public QObject
     Q_PROPERTY(bool statusVisible READ statusVisible NOTIFY changed)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY changed)
     Q_PROPERTY(int statusMaxWidth READ statusMaxWidth NOTIFY changed)
+    Q_PROPERTY(bool topProgressVisible READ topProgressVisible NOTIFY changed)
+    Q_PROPERTY(double topProgress READ topProgress NOTIFY changed)
     Q_PROPERTY(bool canvasTipsVisible READ canvasTipsVisible NOTIFY changed)
     Q_PROPERTY(QString canvasTipsMessage READ canvasTipsMessage NOTIFY changed)
     Q_PROPERTY(int canvasTipsX READ canvasTipsX NOTIFY changed)
@@ -29,6 +31,8 @@ public:
     [[nodiscard]] bool statusVisible() const;
     [[nodiscard]] QString statusMessage() const;
     [[nodiscard]] int statusMaxWidth() const;
+    [[nodiscard]] bool topProgressVisible() const;
+    [[nodiscard]] double topProgress() const;
     [[nodiscard]] bool canvasTipsVisible() const;
     [[nodiscard]] QString canvasTipsMessage() const;
     [[nodiscard]] int canvasTipsX() const;
@@ -45,6 +49,10 @@ public:
     void showStatus(const QString& message);
     void hideStatus();
     void setStatusMaxWidth(int width);
+    void showTopProgress(double progress);
+    void hideTopProgress();
+    void showVideoProxyProgress(double progress);
+    void hideVideoProxyProgress();
 
     void showCanvasTips(const QString& message);
     void hideCanvasTips();
@@ -68,6 +76,8 @@ private:
     bool m_statusVisible = false;
     QString m_statusMessage;
     int m_statusMaxWidth = 360;
+    bool m_topProgressVisible = false;
+    double m_topProgress = 0.0;
 
     bool m_canvasTipsVisible = false;
     QString m_canvasTipsMessage;

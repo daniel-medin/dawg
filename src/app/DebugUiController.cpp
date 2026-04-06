@@ -534,7 +534,10 @@ void DebugUiController::handleVideoLoaded(const QString& filePath, const int tot
 {
     resetOutputFpsTracking();
     m_window.m_debugTextTimer.invalidate();
-    const QFileInfo fileInfo{filePath};
+    const QFileInfo fileInfo{
+        m_window.m_controller && !m_window.m_controller->projectVideoPath().isEmpty()
+            ? m_window.m_controller->projectVideoPath()
+            : filePath};
     m_window.m_clipName = fileInfo.fileName();
     if (filePath.isEmpty())
     {
@@ -542,7 +545,10 @@ void DebugUiController::handleVideoLoaded(const QString& filePath, const int tot
     }
     else
     {
-        m_window.setTimelineVideoPath(filePath);
+        m_window.setTimelineVideoPath(
+            m_window.m_controller && !m_window.m_controller->projectVideoPath().isEmpty()
+                ? m_window.m_controller->projectVideoPath()
+                : filePath);
         m_window.setTimelineState(totalFrames, fps);
     }
     if (m_window.m_nativeViewportWindow)

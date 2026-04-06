@@ -75,6 +75,8 @@ add_executable(dawg WIN32
     src/app/ShellLayoutController.h
     src/app/ShellOverlayController.cpp
     src/app/ShellOverlayController.h
+    src/app/VideoProxyController.cpp
+    src/app/VideoProxyController.h
     src/app/TrackEditService.cpp
     src/app/TrackEditService.h
     src/app/TransportController.cpp

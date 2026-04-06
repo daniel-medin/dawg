@@ -330,6 +330,7 @@ bool ensureProjectTimelineThumbnails(
     const QString& absoluteVideoPath,
     const int totalFrames,
     const double fps,
+    const std::function<void(double)>& onProgress,
     QString* errorMessage)
 {
     if (projectRootPath.isEmpty())
@@ -358,6 +359,10 @@ bool ensureProjectTimelineThumbnails(
 
     if (absoluteVideoPath.isEmpty() || totalFrames <= 0)
     {
+        if (onProgress)
+        {
+            onProgress(1.0);
+        }
         return true;
     }
 
@@ -376,6 +381,10 @@ bool ensureProjectTimelineThumbnails(
         && manifestMatchesVideo(projectRootPath, *existingManifest, absoluteVideoPath, totalFrames)
         && manifestFilesExist(projectRootPath, *existingManifest))
     {
+        if (onProgress)
+        {
+            onProgress(1.0);
+        }
         return true;
     }
 
@@ -411,6 +420,16 @@ bool ensureProjectTimelineThumbnails(
     manifest.fps = fps;
 
     const auto sampleCounts = thumbnailLevelSampleCounts(totalFrames);
+    int totalThumbnailCount = 0;
+    for (const int sampleCount : sampleCounts)
+    {
+        totalThumbnailCount += buildFrameSet(totalFrames, sampleCount).size();
+    }
+    int completedThumbnailCount = 0;
+    if (onProgress)
+    {
+        onProgress(totalThumbnailCount > 0 ? 0.0 : 1.0);
+    }
     manifest.levels.reserve(sampleCounts.size());
     for (int levelIndex = 0; levelIndex < sampleCounts.size(); ++levelIndex)
     {
@@ -461,6 +480,12 @@ bool ensureProjectTimelineThumbnails(
                 }
                 return false;
             }
+
+            ++completedThumbnailCount;
+            if (onProgress && totalThumbnailCount > 0)
+            {
+                onProgress(static_cast<double>(completedThumbnailCount) / static_cast<double>(totalThumbnailCount));
+            }
         }
 
         manifest.levels.push_back(level);
@@ -486,6 +511,10 @@ bool ensureProjectTimelineThumbnails(
         return false;
     }
 
+    if (onProgress)
+    {
+        onProgress(1.0);
+    }
     return true;
 }
 }

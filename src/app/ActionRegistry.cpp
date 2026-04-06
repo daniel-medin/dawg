@@ -314,6 +314,8 @@ void ActionRegistry::rebuild()
     addSeparator(viewMenu);
     addAction(viewMenu, QStringLiteral("toggleNodeName"), m_window.m_toggleNodeNameAction);
     addAction(viewMenu, QStringLiteral("showAllNodeNames"), m_window.m_showAllNodeNamesAction);
+    addSeparator(viewMenu);
+    addAction(viewMenu, QStringLiteral("useProxyVideo"), m_window.m_useProxyVideoAction);
 
     auto* motionMenu = addMenu(QStringLiteral("Motion"));
     addAction(motionMenu, QStringLiteral("motionTracking"), m_window.m_motionTrackingAction);

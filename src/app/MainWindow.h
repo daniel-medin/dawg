@@ -32,6 +32,7 @@ class ProjectWindowController;
 class PanelLayoutController;
 class DebugUiController;
 class MediaImportController;
+class VideoProxyController;
 class ActionRegistry;
 class AudioPoolQuickController;
 class ContextMenuController;
@@ -156,6 +157,7 @@ private:
     friend class PanelLayoutController;
     friend class DebugUiController;
     friend class MediaImportController;
+    friend class VideoProxyController;
     friend class ActionRegistry;
     friend class AudioPoolQuickController;
 
@@ -255,6 +257,7 @@ private:
     std::unique_ptr<PanelLayoutController> m_panelLayoutController;
     std::unique_ptr<DebugUiController> m_debugUiController;
     std::unique_ptr<MediaImportController> m_mediaImportController;
+    std::unique_ptr<VideoProxyController> m_videoProxyController;
     ActionRegistry* m_actionRegistry = nullptr;
     WindowChromeController* m_windowChromeController = nullptr;
     QQuickItem* m_shellRootItem = nullptr;
@@ -333,6 +336,7 @@ private:
     QAction* m_loopSoundAction = nullptr;
     QAction* m_toggleNodeNameAction = nullptr;
     QAction* m_showAllNodeNamesAction = nullptr;
+    QAction* m_useProxyVideoAction = nullptr;
     QAction* m_importSoundAction = nullptr;
     QAction* m_detachVideoAction = nullptr;
     QAction* m_detachTimelineAction = nullptr;

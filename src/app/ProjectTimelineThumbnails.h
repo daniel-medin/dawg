@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 
 #include <QString>
@@ -35,5 +36,6 @@ bool ensureProjectTimelineThumbnails(
     const QString& absoluteVideoPath,
     int totalFrames,
     double fps,
+    const std::function<void(double)>& onProgress = {},
     QString* errorMessage = nullptr);
 }

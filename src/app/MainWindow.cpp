@@ -67,6 +67,7 @@
 #include "app/MediaImportController.h"
 #include "app/ProjectDocument.h"
 #include "app/ProjectTimelineThumbnails.h"
+#include "app/VideoProxyController.h"
 #include "app/WindowChromeController.h"
 #include "ui/ClipEditorQuickController.h"
 #include "ui/ClipWaveformQuickItem.h"
@@ -83,6 +84,30 @@
 
 namespace
 {
+Qt::CaseSensitivity pathCaseSensitivity()
+{
+#ifdef Q_OS_WIN
+    return Qt::CaseInsensitive;
+#else
+    return Qt::CaseSensitive;
+#endif
+}
+
+QString normalizedAbsolutePath(const QString& path)
+{
+    if (path.isEmpty())
+    {
+        return {};
+    }
+
+    return QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath()));
+}
+
+bool pathsMatch(const QString& left, const QString& right)
+{
+    return QString::compare(normalizedAbsolutePath(left), normalizedAbsolutePath(right), pathCaseSensitivity()) == 0;
+}
+
 #ifdef Q_OS_WIN
 void enableD3D11MultithreadProtection(ID3D11Device* device)
 {
@@ -827,6 +852,7 @@ MainWindow::MainWindow(QWindow* parent)
     m_panelLayoutController = std::make_unique<PanelLayoutController>(*this);
     m_debugUiController = std::make_unique<DebugUiController>(*this);
     m_mediaImportController = std::make_unique<MediaImportController>(*this);
+    m_videoProxyController = std::make_unique<VideoProxyController>(*this);
     clearStuckWaitCursor(this);
     buildMenus();
     if (m_actionRegistry)
@@ -1077,6 +1103,17 @@ MainWindow::MainWindow(QWindow* parent)
             enabled
                 ? QStringLiteral("Node names always visible.")
                 : QStringLiteral("Node names only show when relevant."));
+    });
+    connect(m_useProxyVideoAction, &QAction::toggled, this, [this](const bool enabled)
+    {
+        if (m_videoProxyController)
+        {
+            m_videoProxyController->setProxyEnabled(enabled);
+        }
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
     });
     connect(m_deleteNodeAction, &QAction::triggered, m_controller, &PlayerController::deleteSelectedTrack);
     connect(m_deleteEmptyNodesAction, &QAction::triggered, this, &MainWindow::deleteAllEmptyNodes);
@@ -2561,15 +2598,30 @@ void MainWindow::updateVideoAudioRow()
 
     const auto hasVideoAudio = m_controller->hasEmbeddedVideoAudio();
     const auto displayName = hasVideoAudio ? m_controller->embeddedVideoAudioDisplayName() : QString{};
+    const auto activePlaybackPath = m_controller->loadedPath();
+    const auto proxyPath = m_controller->proxyVideoPath();
+    const auto usingProxy =
+        !activePlaybackPath.isEmpty()
+        && !proxyPath.isEmpty()
+        && pathsMatch(activePlaybackPath, proxyPath);
+    const auto decodeBackend = m_controller->decoderBackendName();
+    const auto decodeDetail =
+        decodeBackend.isEmpty()
+            ? QString{}
+            : QStringLiteral("%1 | %2")
+                  .arg(usingProxy ? QStringLiteral("Proxy") : QStringLiteral("Original"))
+                  .arg(decodeBackend);
     const auto tooltip =
         hasVideoAudio
-            ? QStringLiteral("Embedded audio from %1%2")
+            ? QStringLiteral("Embedded audio from %1%2%3")
                 .arg(displayName)
-                .arg(m_controller->isFastPlaybackEnabled() ? QStringLiteral("\nFast Playback enabled") : QString{})
+                .arg(decodeDetail.isEmpty() ? QString{} : QStringLiteral("\nDecode: %1").arg(decodeDetail))
+                .arg(m_controller->isFastPlaybackEnabled() ? QStringLiteral("\nLow-Res Playback enabled") : QString{})
             : QString{};
     m_audioPoolQuickController->syncVideoAudioState(
         hasVideoAudio,
         displayName,
+        decodeDetail,
         tooltip,
         m_controller->isEmbeddedVideoAudioMuted(),
         m_controller->isFastPlaybackEnabled());
@@ -2828,10 +2880,21 @@ void MainWindow::refreshTimeline()
     m_timelineTrackSpans = trackSpans;
     if (m_timelineQuickController)
     {
+        const auto timelineVideoPath =
+            !m_controller->projectVideoPath().isEmpty()
+                ? m_controller->projectVideoPath()
+                : m_controller->loadedPath();
         m_timelineQuickController->setProjectRootPath(m_currentProjectRootPath);
-        m_timelineQuickController->setVideoPath(m_controller->loadedPath());
+        m_timelineQuickController->setVideoPath(timelineVideoPath);
         m_timelineQuickController->setTrackSpans(trackSpans);
         m_timelineQuickController->setLoopRanges(m_controller->loopRanges());
+        if (!timelineVideoPath.isEmpty()
+            && m_currentProjectRootPath.size() > 0
+            && !m_timelineQuickController->hasThumbnailManifest()
+            && !m_timelineThumbnailGenerationThread)
+        {
+            requestProjectTimelineThumbnailsGeneration();
+        }
     }
     updateTimelineMinimumHeight();
     if (m_clearLoopRangeAction)
@@ -2850,7 +2913,9 @@ void MainWindow::requestProjectTimelineThumbnailsGeneration()
 
     TimelineThumbnailGenerationRequest request;
     request.projectRootPath = m_currentProjectRootPath;
-    request.videoPath = m_controller ? m_controller->loadedPath() : QString{};
+    request.videoPath = m_controller
+        ? (!m_controller->projectVideoPath().isEmpty() ? m_controller->projectVideoPath() : m_controller->loadedPath())
+        : QString{};
     request.totalFrames = m_controller ? m_controller->totalFrames() : 0;
     request.fps = m_controller ? m_controller->fps() : 0.0;
 
@@ -2867,6 +2932,10 @@ void MainWindow::requestProjectTimelineThumbnailsGeneration()
 void MainWindow::startProjectTimelineThumbnailsGeneration(const TimelineThumbnailGenerationRequest& request)
 {
     const auto generationId = ++m_timelineThumbnailGenerationId;
+    if (m_shellOverlayController)
+    {
+        m_shellOverlayController->showTopProgress(0.0);
+    }
     QPointer<MainWindow> window(this);
     auto* thread = QThread::create([window, generationId, request]()
     {
@@ -2876,6 +2945,28 @@ void MainWindow::startProjectTimelineThumbnailsGeneration(const TimelineThumbnai
             request.videoPath,
             request.totalFrames,
             request.fps,
+            [window, generationId](const double progress)
+            {
+                if (!window)
+                {
+                    return;
+                }
+
+                QMetaObject::invokeMethod(
+                    window,
+                    [window, generationId, progress]()
+                    {
+                        if (!window
+                            || generationId != window->m_timelineThumbnailGenerationId
+                            || !window->m_shellOverlayController)
+                        {
+                            return;
+                        }
+
+                        window->m_shellOverlayController->showTopProgress(progress);
+                    },
+                    Qt::QueuedConnection);
+            },
             &errorMessage);
         if (!window)
         {
@@ -2918,6 +3009,11 @@ void MainWindow::handleProjectTimelineThumbnailsGenerationFinished(
         return;
     }
 
+    if (m_shellOverlayController)
+    {
+        m_shellOverlayController->hideTopProgress();
+    }
+
     if (m_timelineThumbnailGenerationThread)
     {
         m_timelineThumbnailGenerationThread = nullptr;
@@ -2927,7 +3023,12 @@ void MainWindow::handleProjectTimelineThumbnailsGenerationFinished(
         QDir::cleanPath(QDir::fromNativeSeparators(request.projectRootPath))
             == QDir::cleanPath(QDir::fromNativeSeparators(m_currentProjectRootPath))
         && QDir::cleanPath(QDir::fromNativeSeparators(request.videoPath))
-            == QDir::cleanPath(QDir::fromNativeSeparators(m_controller ? m_controller->loadedPath() : QString{}));
+            == QDir::cleanPath(QDir::fromNativeSeparators(
+                m_controller
+                    ? (!m_controller->projectVideoPath().isEmpty()
+                           ? m_controller->projectVideoPath()
+                           : m_controller->loadedPath())
+                    : QString{}));
 
     if (!success)
     {
@@ -3458,7 +3559,7 @@ void MainWindow::buildUi()
     m_showMixShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl++")), this);
     m_trimNodeShortcut = new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_T), this);
     m_autoPanShortcut = new QShortcut(QKeySequence(Qt::Key_R), this);
-    m_audioPoolShortcut = new QShortcut(QKeySequence(Qt::Key_P), this);
+    m_audioPoolShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+P")), this);
     m_toggleNodeNameShortcut = new QShortcut(QKeySequence(Qt::Key_E), this);
     m_deleteShortcut = new QShortcut(QKeySequence(Qt::Key_Backspace), this);
     m_unselectAllShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);

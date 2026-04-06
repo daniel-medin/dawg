@@ -37,6 +37,7 @@ This is not intended to feel like a traditional DAW with lots of horizontal audi
 - open a video and play, seek, step, and scrub it
 - create, save, load, and reopen `.dawg` projects
 - keep imported project media inside project-local `audio/` and `video/` folders
+- optionally build and use a project-local MXF proxy video from `View > Use Proxy Video`
 - store prebuilt project-local timeline thumbnails under `thumbnails/` so reopening a project reuses them
 - restore project UI state, panel layout, and detached-video state with the project
 - create and select nodes in the viewer

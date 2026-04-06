@@ -56,6 +56,7 @@ void MainWindowActions::buildMenus()
     m_window.m_loopSoundAction = new QAction(QStringLiteral("Loop Sound"), &m_window);
     m_window.m_toggleNodeNameAction = new QAction(QStringLiteral("Toggle Node Name (E)"), &m_window);
     m_window.m_showAllNodeNamesAction = new QAction(QStringLiteral("Node Name Always On"), &m_window);
+    m_window.m_useProxyVideoAction = new QAction(QStringLiteral("Use Proxy Video"), &m_window);
     m_window.m_importSoundAction = new QAction(QStringLiteral("Import Audio..."), &m_window);
     m_window.m_detachVideoAction = new QAction(QStringLiteral("Detach Video"), &m_window);
     m_window.m_detachTimelineAction = new QAction(QStringLiteral("Detach Timeline"), &m_window);
@@ -63,12 +64,12 @@ void MainWindowActions::buildMenus()
     m_window.m_detachMixAction = new QAction(QStringLiteral("Detach Mixer"), &m_window);
     m_window.m_detachAudioPoolAction = new QAction(QStringLiteral("Detach Audio Pool"), &m_window);
     m_window.m_showClipEditorAction = new QAction(QStringLiteral("Toggle Clip Editor (Ctrl+-)"), &m_window);
-    m_window.m_showTimelineAction = new QAction(QStringLiteral("Show Timeline (T)"), &m_window);
+    m_window.m_showTimelineAction = new QAction(QStringLiteral("Toggle Timeline (T)"), &m_window);
     m_window.m_showMixAction = new QAction(QStringLiteral("Toggle Mix Window (Ctrl++)"), &m_window);
     m_window.m_showTimelineThumbnailsAction = new QAction(QStringLiteral("Hide Thumbnails"), &m_window);
     m_window.m_timelineClickSeeksAction = new QAction(QStringLiteral("Click Seeks Playhead"), &m_window);
     m_window.m_mixSoloModeAction = new QAction(QStringLiteral("Solo Mode: X-OR"), &m_window);
-    m_window.m_audioPoolAction = new QAction(QStringLiteral("Audio Pool (P)"), &m_window);
+    m_window.m_audioPoolAction = new QAction(QStringLiteral("Toggle Audio Pool (Ctrl+P)"), &m_window);
     m_window.m_deleteNodeAction = new QAction(QStringLiteral("Delete (Backspace)"), &m_window);
     m_window.m_deleteEmptyNodesAction = new QAction(QStringLiteral("Delete All Empty Nodes"), &m_window);
     m_window.m_clearAllAction = new QAction(QStringLiteral("Clear All (Ctrl+Shift+A, Backspace)"), &m_window);
@@ -81,6 +82,8 @@ void MainWindowActions::buildMenus()
     m_window.m_insertionFollowsPlaybackAction->setChecked(false);
     m_window.m_showAllNodeNamesAction->setCheckable(true);
     m_window.m_showAllNodeNamesAction->setChecked(true);
+    m_window.m_useProxyVideoAction->setCheckable(true);
+    m_window.m_useProxyVideoAction->setChecked(false);
     m_window.m_showClipEditorAction->setCheckable(true);
     m_window.m_showClipEditorAction->setChecked(false);
     m_window.m_showTimelineAction->setCheckable(true);
@@ -95,6 +98,7 @@ void MainWindowActions::buildMenus()
     m_window.m_mixSoloModeAction->setChecked(false);
     m_window.m_audioPoolAction->setCheckable(true);
     m_window.m_audioPoolAction->setChecked(false);
+    m_window.m_audioPoolAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+P")));
     m_window.m_importSoundAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
     m_window.m_toggleDebugAction = new QAction(QStringLiteral("Toggle Debug"), &m_window);
     m_window.m_toggleDebugAction->setCheckable(true);
