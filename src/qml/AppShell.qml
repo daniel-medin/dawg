@@ -117,6 +117,18 @@ Item {
             z: 20
         }
 
+        MouseArea {
+            anchors.fill: parent
+            visible: titleBar.menusOpen
+            z: 39
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+
+            onPressed: function(mouse) {
+                titleBar.closeAllMenus()
+                mouse.accepted = true
+            }
+        }
+
         Item {
             id: contextMenuHost
             objectName: "contextMenuHost"

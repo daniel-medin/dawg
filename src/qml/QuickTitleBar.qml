@@ -6,6 +6,7 @@ import QtQuick.Window 2.15
 Rectangle {
     id: root
     property bool windowActive: root.Window.window ? root.Window.window.active : windowChrome.active
+    property bool menusOpen: false
     property real inactiveTitleOpacity: 0.56
     property real titleTextOpacity: root.windowActive ? 1.0 : inactiveTitleOpacity
     property color activeTitleColor: "#ffffff"
@@ -54,6 +55,10 @@ Rectangle {
         return false
     }
 
+    function updateMenusOpen() {
+        menusOpen = hasOpenMenu()
+    }
+
     function globalPoint(localX, localY) {
         var mapped = root.mapToGlobal(Qt.point(localX, localY))
         return mapped ? mapped : Qt.point(0, 0)
@@ -83,6 +88,17 @@ Rectangle {
         horizontalAlignment: Text.AlignHCenter
         elide: Text.ElideRight
         z: 1
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        enabled: root.menusOpen
+
+        onPressed: function(mouse) {
+            root.closeAllMenus()
+            mouse.accepted = true
+        }
     }
 
     RowLayout {
@@ -222,10 +238,14 @@ Rectangle {
                     modal: false
                     focus: true
                     padding: 6
-                    closePolicy: Popup.CloseOnEscape
+                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside | Popup.CloseOnPressOutsideParent
                     implicitWidth: Math.max(240, menuColumn.implicitWidth + leftPadding + rightPadding)
                     implicitHeight: menuColumn.implicitHeight + topPadding + bottomPadding
-                    onClosed: closeSubmenu()
+                    onOpened: root.updateMenusOpen()
+                    onClosed: {
+                        closeSubmenu()
+                        root.updateMenusOpen()
+                    }
 
                     background: Rectangle {
                         color: theme.menuBackground
@@ -351,7 +371,7 @@ Rectangle {
                         modal: false
                         focus: true
                         padding: 6
-                        closePolicy: Popup.CloseOnEscape
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside | Popup.CloseOnPressOutsideParent
                         implicitWidth: Math.max(240, submenuColumn.implicitWidth + leftPadding + rightPadding)
                         implicitHeight: submenuColumn.implicitHeight + topPadding + bottomPadding
 
@@ -450,29 +470,6 @@ Rectangle {
                     }
                 }
 
-                MouseArea {
-                    visible: menuPopup.opened && !menuRoot.actionTriggerInProgress
-                    parent: root.Window.window ? root.Window.window.contentItem : root
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    y: root.y + root.height
-                    height: Math.max(0, parent.height - y)
-                    z: 1000
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    hoverEnabled: false
-
-                    onPressed: function(mouse) {
-                        if (root.pointInsideItem(menuPopup, parent, mouse.x, mouse.y)
-                                || root.pointInsideItem(submenuPopup, parent, mouse.x, mouse.y)) {
-                            mouse.accepted = false
-                            return
-                        }
-
-                        root.closeAllMenus()
-                        mouse.accepted = false
-                    }
-                }
             }
         }
 
