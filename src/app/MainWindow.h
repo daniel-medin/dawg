@@ -43,6 +43,7 @@ class ShellLayoutController;
 class ShellOverlayController;
 class QWidget;
 class TimelineQuickController;
+class ThumbnailStripQuickController;
 class VideoViewportQuickController;
 class WindowChromeController;
 class QThread;
@@ -177,6 +178,8 @@ private:
         const QString& errorMessage);
     void refreshClipEditor();
     void refreshNodeEditor();
+    void handleNodeEditorFileAction(const QString& actionKey);
+    void handleNodeEditorAudioAction(const QString& actionKey);
     void refreshMixView();
     void updateEditActionState();
     void updateOverlayPositions();
@@ -247,6 +250,7 @@ private:
     void setTimelineCurrentFrame(int frameIndex);
     void setTimelineSeekOnClickEnabled(bool enabled);
     void setTimelineThumbnailsVisible(bool visible);
+    void syncThumbnailStripViewWindow();
     void syncNodeEditorActionAvailability();
     [[nodiscard]] std::optional<int> timelineLoopShortcutFrame() const;
     [[nodiscard]] bool timelineHasSelectedLoopRange() const;
@@ -254,6 +258,10 @@ private:
     [[nodiscard]] int timelineMinimumHeight() const;
     void updateTimelineMinimumHeight();
     void syncClipWaveformItem();
+    void syncNodeWaveformItem();
+    [[nodiscard]] QString projectNodesDirectoryPath() const;
+    [[nodiscard]] bool saveSelectedNodeToFile(const QString& nodeFilePath, bool bindToSelectedTrack = true);
+    [[nodiscard]] bool openNodeFileAsNewNode(const QString& nodeFilePath);
 
     PlayerController* m_controller = nullptr;
     std::unique_ptr<MainWindowActions> m_actionsController;
@@ -274,11 +282,14 @@ private:
     bool m_nativeVideoPresentationAllowed = false;
     QQuickItem* m_timelineQuickWidget = nullptr;
     TimelineQuickController* m_timelineQuickController = nullptr;
+    QQuickItem* m_thumbnailStripQuickWidget = nullptr;
+    ThumbnailStripQuickController* m_thumbnailStripQuickController = nullptr;
     QQuickItem* m_clipEditorQuickWidget = nullptr;
     ClipEditorQuickController* m_clipEditorQuickController = nullptr;
     QQuickItem* m_nodeEditorQuickWidget = nullptr;
     NodeEditorQuickController* m_nodeEditorQuickController = nullptr;
     ClipWaveformQuickItem* m_clipWaveformItem = nullptr;
+    ClipWaveformQuickItem* m_nodeEditorWaveformItem = nullptr;
     QQuickItem* m_mixQuickWidget = nullptr;
     MixQuickController* m_mixQuickController = nullptr;
     DebugOverlayWindow* m_debugOverlay = nullptr;
@@ -406,6 +417,7 @@ private:
     QString m_qtQuickLoadText;
     QString m_qtQuickGraphicsApiText;
     std::optional<ClipEditorState> m_clipEditorState;
+    std::optional<ClipEditorState> m_nodeEditorState;
     std::optional<int> m_pendingLoopShortcutStartFrame;
     std::optional<int> m_pendingLoopShortcutEndFrame;
     float m_masterMixGainDb = 0.0F;

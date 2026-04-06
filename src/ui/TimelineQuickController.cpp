@@ -436,6 +436,16 @@ bool TimelineQuickController::lastCurrentFrameAutoScrolled() const
     return m_lastCurrentFrameAutoScrolled;
 }
 
+double TimelineQuickController::viewStartFrameValue() const
+{
+    return m_viewStartFrame;
+}
+
+double TimelineQuickController::visibleFrameSpanValue() const
+{
+    return visibleFrameSpan();
+}
+
 void TimelineQuickController::setViewportSize(const double width, const double height)
 {
     if (std::abs(m_viewportWidth - width) < 0.5 && std::abs(m_viewportHeight - height) < 0.5)

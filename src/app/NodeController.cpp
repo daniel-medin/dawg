@@ -1084,6 +1084,15 @@ bool PlayerController::renameTrack(const QUuid& trackId, const QString& label)
     return m_nodeController->renameTrack(trackId, label);
 }
 
+bool PlayerController::setTrackNodeDocument(
+    const QUuid& trackId,
+    const QString& nodeDocumentPath,
+    const int timelineFrameCount,
+    const double timelineFps)
+{
+    return m_tracker.setTrackNodeDocument(trackId, nodeDocumentPath, timelineFrameCount, timelineFps);
+}
+
 void PlayerController::setTrackStartFrame(const QUuid& trackId, const int frameIndex)
 {
     m_nodeController->setTrackStartFrame(trackId, frameIndex);

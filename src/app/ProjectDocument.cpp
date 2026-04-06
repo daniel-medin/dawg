@@ -95,12 +95,15 @@ QJsonObject trackPointToJson(const TrackPoint& track)
     QJsonObject object{
         {QStringLiteral("id"), track.id.toString(QUuid::WithoutBraces)},
         {QStringLiteral("label"), track.label},
+        {QStringLiteral("nodeDocumentPath"), track.nodeDocumentPath},
         {QStringLiteral("color"), colorToJson(track.color)},
         {QStringLiteral("seedFrameIndex"), track.seedFrameIndex},
         {QStringLiteral("startFrame"), track.startFrame},
         {QStringLiteral("motionTracked"), track.motionTracked},
         {QStringLiteral("showLabel"), track.showLabel},
         {QStringLiteral("autoPanEnabled"), track.autoPanEnabled},
+        {QStringLiteral("nodeTimelineFrameCount"), track.nodeTimelineFrameCount},
+        {QStringLiteral("nodeTimelineFps"), track.nodeTimelineFps},
         {QStringLiteral("samples"), samples}
     };
     if (track.endFrame.has_value())
@@ -123,6 +126,7 @@ TrackPoint trackPointFromJson(const QJsonObject& object)
         track.id = QUuid::createUuid();
     }
     track.label = object.value(QStringLiteral("label")).toString();
+    track.nodeDocumentPath = object.value(QStringLiteral("nodeDocumentPath")).toString();
     track.color = colorFromJson(object.value(QStringLiteral("color")).toObject());
     track.seedFrameIndex = object.value(QStringLiteral("seedFrameIndex")).toInt(-1);
     track.startFrame = object.value(QStringLiteral("startFrame")).toInt(-1);
@@ -133,6 +137,8 @@ TrackPoint trackPointFromJson(const QJsonObject& object)
     track.motionTracked = object.value(QStringLiteral("motionTracked")).toBool(false);
     track.showLabel = object.value(QStringLiteral("showLabel")).toBool(false);
     track.autoPanEnabled = object.value(QStringLiteral("autoPanEnabled")).toBool(true);
+    track.nodeTimelineFrameCount = object.value(QStringLiteral("nodeTimelineFrameCount")).toInt(0);
+    track.nodeTimelineFps = object.value(QStringLiteral("nodeTimelineFps")).toDouble(0.0);
 
     const auto samples = object.value(QStringLiteral("samples")).toArray();
     for (const auto& sampleValue : samples)
@@ -566,6 +572,7 @@ std::optional<Document> loadDocument(const QString& projectFilePath, QString* er
         && schemaVersion != 2
         && schemaVersion != 3
         && schemaVersion != 4
+        && schemaVersion != 5
         && schemaVersion != kSchemaVersion)
     {
         if (errorMessage)

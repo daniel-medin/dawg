@@ -99,6 +99,15 @@ bool ProjectSessionAdapter::validate(const dawg::project::ControllerState& state
 
     for (const auto& track : state.trackerState.tracks)
     {
+        if (!track.nodeDocumentPath.isEmpty() && !QFileInfo::exists(track.nodeDocumentPath))
+        {
+            if (errorMessage)
+            {
+                *errorMessage = QStringLiteral("Node container file is missing: %1").arg(track.nodeDocumentPath);
+            }
+            return false;
+        }
+
         if (track.attachedAudio.has_value()
             && !track.attachedAudio->assetPath.isEmpty()
             && !QFileInfo::exists(track.attachedAudio->assetPath))

@@ -13,7 +13,7 @@
 
 namespace dawg::project
 {
-constexpr int kSchemaVersion = 5;
+constexpr int kSchemaVersion = 6;
 constexpr auto kProjectFileSuffix = ".dawg";
 
 struct MixLaneState

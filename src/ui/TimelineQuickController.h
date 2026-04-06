@@ -79,6 +79,8 @@ public:
     [[nodiscard]] int thumbnailTileCount() const;
     [[nodiscard]] int thumbnailFrameCount() const;
     [[nodiscard]] bool lastCurrentFrameAutoScrolled() const;
+    [[nodiscard]] double viewStartFrameValue() const;
+    [[nodiscard]] double visibleFrameSpanValue() const;
 
     Q_INVOKABLE void setViewportSize(double width, double height);
     Q_INVOKABLE void handleMousePress(int button, double x, double y, int modifiers, int globalX, int globalY);

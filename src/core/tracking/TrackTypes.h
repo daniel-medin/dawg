@@ -22,6 +22,7 @@ struct TrackPoint
 {
     QUuid id = QUuid::createUuid();
     QString label;
+    QString nodeDocumentPath;
     QColor color;
     int seedFrameIndex = -1;
     int startFrame = -1;
@@ -29,6 +30,8 @@ struct TrackPoint
     bool motionTracked = false;
     bool showLabel = false;
     bool autoPanEnabled = true;
+    int nodeTimelineFrameCount = 0;
+    double nodeTimelineFps = 0.0;
     std::map<int, QPointF> samples;
     std::optional<AudioAttachment> attachedAudio;
 

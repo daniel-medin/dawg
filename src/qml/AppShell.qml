@@ -69,6 +69,17 @@ Item {
             z: 1
         }
 
+        ThumbnailStripScene {
+            id: thumbnailStripScene
+            objectName: "thumbnailStripScene"
+            x: rectValue(shellLayoutController.thumbnailRect, "x")
+            y: rectValue(shellLayoutController.thumbnailRect, "y")
+            width: rectValue(shellLayoutController.thumbnailRect, "width")
+            height: rectValue(shellLayoutController.thumbnailRect, "height")
+            visible: rectVisible(shellLayoutController.thumbnailRect)
+            z: 1
+        }
+
         ClipEditorScene {
             id: clipEditorScene
             objectName: "clipEditorScene"

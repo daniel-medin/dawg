@@ -10,6 +10,7 @@ constexpr int kHandleThickness = 3;
 constexpr int kMinimumMainWidth = 400;
 constexpr int kMinimumAudioPoolWidth = 240;
 constexpr int kMinimumCanvasHeight = 200;
+constexpr int kThumbnailStripHeight = 60;
 constexpr int kMinimumClipEditorHeight = 148;
 constexpr int kMinimumMixHeight = 132;
 }
@@ -27,6 +28,11 @@ QVariantMap ShellLayoutController::canvasRect() const
 QVariantMap ShellLayoutController::timelineRect() const
 {
     return rectMap(m_timelineRect);
+}
+
+QVariantMap ShellLayoutController::thumbnailRect() const
+{
+    return rectMap(m_thumbnailRect);
 }
 
 QVariantMap ShellLayoutController::clipEditorRect() const
@@ -89,6 +95,11 @@ QRect ShellLayoutController::timelinePanelRect() const
     return m_timelineRect;
 }
 
+QRect ShellLayoutController::thumbnailPanelRect() const
+{
+    return m_thumbnailRect;
+}
+
 QRect ShellLayoutController::clipEditorPanelRect() const
 {
     return m_clipEditorRect;
@@ -112,6 +123,11 @@ QRect ShellLayoutController::audioPoolPanelRect() const
 bool ShellLayoutController::timelineVisible() const
 {
     return m_timelineVisible;
+}
+
+bool ShellLayoutController::thumbnailsVisible() const
+{
+    return m_thumbnailsVisible;
 }
 
 bool ShellLayoutController::clipEditorVisible() const
@@ -156,6 +172,17 @@ void ShellLayoutController::setVideoDetached(const bool detached)
     }
 
     m_videoDetached = detached;
+    recomputeLayout();
+}
+
+void ShellLayoutController::setThumbnailsVisible(const bool visible)
+{
+    if (m_thumbnailsVisible == visible)
+    {
+        return;
+    }
+
+    m_thumbnailsVisible = visible;
     recomputeLayout();
 }
 
@@ -355,6 +382,7 @@ void ShellLayoutController::endResize()
 void ShellLayoutController::recomputeLayout()
 {
     const auto previousCanvasRect = m_canvasRect;
+    const auto previousThumbnailRect = m_thumbnailRect;
     const auto previousTimelineRect = m_timelineRect;
     const auto previousClipEditorRect = m_clipEditorRect;
     const auto previousNodeEditorRect = m_nodeEditorRect;
@@ -367,6 +395,7 @@ void ShellLayoutController::recomputeLayout()
     const auto previousAudioPoolHandleRect = m_audioPoolHandleRect;
 
     m_canvasRect = {};
+    m_thumbnailRect = {};
     m_timelineRect = {};
     m_clipEditorRect = {};
     m_nodeEditorRect = {};
@@ -383,6 +412,7 @@ void ShellLayoutController::recomputeLayout()
     if (viewportWidth <= 0 || viewportHeight <= 0)
     {
         if (previousCanvasRect != m_canvasRect
+            || previousThumbnailRect != m_thumbnailRect
             || previousTimelineRect != m_timelineRect
             || previousClipEditorRect != m_clipEditorRect
             || previousNodeEditorRect != m_nodeEditorRect
@@ -424,7 +454,8 @@ void ShellLayoutController::recomputeLayout()
         int assigned = 0;
     };
 
-    std::array<FixedPanel, 4> panels{{
+    std::array<FixedPanel, 5> panels{{
+        FixedPanel{m_thumbnailsVisible, kThumbnailStripHeight, kThumbnailStripHeight, 0},
         FixedPanel{m_timelineVisible, m_timelinePreferredHeight, m_timelineMinimumHeight, 0},
         FixedPanel{m_clipEditorVisible, m_clipEditorPreferredHeight, kMinimumClipEditorHeight, 0},
         FixedPanel{m_nodeEditorVisible, m_nodeEditorPreferredHeight, kMinimumClipEditorHeight, 0},
@@ -543,12 +574,23 @@ void ShellLayoutController::recomputeLayout()
         hasPreviousItem = true;
     };
 
-    placePanel(panels[0], m_timelineRect, m_timelineHandleRect);
-    placePanel(panels[1], m_clipEditorRect, m_clipEditorHandleRect);
-    placePanel(panels[2], m_nodeEditorRect, m_nodeEditorHandleRect);
-    placePanel(panels[3], m_mixRect, m_mixHandleRect);
+    if (panels[0].visible)
+    {
+        if (hasPreviousItem)
+        {
+            currentY += kHandleThickness;
+        }
+        m_thumbnailRect = QRect(0, currentY, mainAreaWidth, panels[0].assigned);
+        currentY += panels[0].assigned;
+        hasPreviousItem = true;
+    }
+    placePanel(panels[1], m_timelineRect, m_timelineHandleRect);
+    placePanel(panels[2], m_clipEditorRect, m_clipEditorHandleRect);
+    placePanel(panels[3], m_nodeEditorRect, m_nodeEditorHandleRect);
+    placePanel(panels[4], m_mixRect, m_mixHandleRect);
 
     if (previousCanvasRect != m_canvasRect
+        || previousThumbnailRect != m_thumbnailRect
         || previousTimelineRect != m_timelineRect
         || previousClipEditorRect != m_clipEditorRect
         || previousNodeEditorRect != m_nodeEditorRect

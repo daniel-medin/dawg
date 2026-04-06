@@ -15,6 +15,7 @@ public:
     bool hasTrack(const QUuid& trackId) const;
     bool updateTrackSample(const QUuid& trackId, int frameIndex, const QPointF& imagePoint);
     bool setTrackLabel(const QUuid& trackId, const QString& label);
+    bool setTrackNodeDocument(const QUuid& trackId, const QString& nodeDocumentPath, int timelineFrameCount, double timelineFps);
     bool isTrackAutoPanEnabled(const QUuid& trackId) const;
     bool setTrackAutoPanEnabled(const QUuid& trackId, bool enabled);
     bool setTrackStartFrame(const QUuid& trackId, int startFrame);
@@ -37,6 +38,7 @@ public:
     int removeTracks(const std::vector<QUuid>& trackIds);
 
     [[nodiscard]] const std::vector<TrackPoint>& tracks() const;
+    [[nodiscard]] QString trackNodeDocumentPath(const QUuid& trackId) const;
     [[nodiscard]] MotionTrackerState snapshotState() const;
     [[nodiscard]] bool hasMotionTrackedTracks() const;
     [[nodiscard]] std::vector<TrackOverlay> overlaysForFrame(

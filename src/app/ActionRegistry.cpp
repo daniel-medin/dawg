@@ -294,7 +294,6 @@ void ActionRegistry::rebuild()
     addAction(timelineMenu, QStringLiteral("setLoopEnd"), m_window.m_setLoopEndAction);
     addAction(timelineMenu, QStringLiteral("clearLoop"), m_window.m_clearLoopRangeAction);
     addSeparator(timelineMenu);
-    addAction(timelineMenu, QStringLiteral("timelineThumbnails"), m_window.m_showTimelineThumbnailsAction);
     addAction(timelineMenu, QStringLiteral("timelineClickSeeks"), m_window.m_timelineClickSeeksAction);
 
     auto* mixerMenu = addMenu(QStringLiteral("Mixer"));
@@ -312,6 +311,7 @@ void ActionRegistry::rebuild()
     addAction(viewMenu, QStringLiteral("showNodeEditor"), m_window.m_showNodeEditorAction);
     addAction(viewMenu, QStringLiteral("showMix"), m_window.m_showMixAction);
     addAction(viewMenu, QStringLiteral("showAudioPool"), m_window.m_audioPoolAction);
+    addAction(viewMenu, QStringLiteral("showThumbnails"), m_window.m_showTimelineThumbnailsAction);
     addSeparator(viewMenu);
     addAction(viewMenu, QStringLiteral("toggleNodeName"), m_window.m_toggleNodeNameAction);
     addAction(viewMenu, QStringLiteral("showAllNodeNames"), m_window.m_showAllNodeNamesAction);

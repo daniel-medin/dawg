@@ -65,6 +65,18 @@ Item {
     }
 
     Rectangle {
+        x: rectValue(shellLayoutController.thumbnailRect, "x")
+        y: rectValue(shellLayoutController.thumbnailRect, "y")
+        width: rectValue(shellLayoutController.thumbnailRect, "width")
+        height: rectValue(shellLayoutController.thumbnailRect, "height")
+        visible: rectVisible(shellLayoutController.thumbnailRect)
+                 && !root.handlesOnly
+        color: "#050608"
+        border.width: 1
+        border.color: "#151b23"
+    }
+
+    Rectangle {
         x: rectValue(shellLayoutController.timelineRect, "x")
         y: rectValue(shellLayoutController.timelineRect, "y")
         width: rectValue(shellLayoutController.timelineRect, "width")

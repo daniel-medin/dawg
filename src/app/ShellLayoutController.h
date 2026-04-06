@@ -9,6 +9,7 @@ class ShellLayoutController final : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QVariantMap canvasRect READ canvasRect NOTIFY layoutChanged)
+    Q_PROPERTY(QVariantMap thumbnailRect READ thumbnailRect NOTIFY layoutChanged)
     Q_PROPERTY(QVariantMap timelineRect READ timelineRect NOTIFY layoutChanged)
     Q_PROPERTY(QVariantMap clipEditorRect READ clipEditorRect NOTIFY layoutChanged)
     Q_PROPERTY(QVariantMap nodeEditorRect READ nodeEditorRect NOTIFY layoutChanged)
@@ -25,6 +26,7 @@ public:
     explicit ShellLayoutController(QObject* parent = nullptr);
 
     [[nodiscard]] QVariantMap canvasRect() const;
+    [[nodiscard]] QVariantMap thumbnailRect() const;
     [[nodiscard]] QVariantMap timelineRect() const;
     [[nodiscard]] QVariantMap clipEditorRect() const;
     [[nodiscard]] QVariantMap nodeEditorRect() const;
@@ -38,11 +40,13 @@ public:
     [[nodiscard]] int handleThickness() const;
 
     [[nodiscard]] QRect canvasPanelRect() const;
+    [[nodiscard]] QRect thumbnailPanelRect() const;
     [[nodiscard]] QRect timelinePanelRect() const;
     [[nodiscard]] QRect clipEditorPanelRect() const;
     [[nodiscard]] QRect nodeEditorPanelRect() const;
     [[nodiscard]] QRect mixPanelRect() const;
     [[nodiscard]] QRect audioPoolPanelRect() const;
+    [[nodiscard]] bool thumbnailsVisible() const;
     [[nodiscard]] bool timelineVisible() const;
     [[nodiscard]] bool clipEditorVisible() const;
     [[nodiscard]] bool nodeEditorVisible() const;
@@ -51,6 +55,7 @@ public:
 
     Q_INVOKABLE void setViewportSize(int width, int height);
     void setVideoDetached(bool detached);
+    void setThumbnailsVisible(bool visible);
     void setTimelineVisible(bool visible);
     void setClipEditorVisible(bool visible);
     void setNodeEditorVisible(bool visible);
@@ -90,6 +95,7 @@ private:
     int m_viewportWidth = 0;
     int m_viewportHeight = 0;
     bool m_videoDetached = false;
+    bool m_thumbnailsVisible = true;
     bool m_timelineVisible = true;
     bool m_clipEditorVisible = false;
     bool m_nodeEditorVisible = false;
@@ -103,6 +109,7 @@ private:
     int m_timelineMinimumHeight = 154;
 
     QRect m_canvasRect;
+    QRect m_thumbnailRect;
     QRect m_timelineRect;
     QRect m_clipEditorRect;
     QRect m_nodeEditorRect;

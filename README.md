@@ -44,6 +44,7 @@ This is not intended to feel like a traditional DAW with lots of horizontal audi
 - show nodes as spans in the timeline
 - drag node starts, ends, and full spans in the timeline
 - attach audio to nodes and trim a node to the sound length
+- save portable `.node` files with embedded node audio for reuse in other projects
 - auto-pan nodes from left to right screen position
 - drag audio from the Audio Pool onto the video to create a node
 - import audio directly onto selected nodes

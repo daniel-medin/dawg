@@ -966,6 +966,8 @@ void PanelLayoutController::syncMainVerticalPanelSizes()
         m_window.m_clipEditorPreferredHeight,
         m_window.m_nodeEditorPreferredHeight,
         m_window.m_mixPreferredHeight);
+    m_window.m_shellLayoutController->setThumbnailsVisible(
+        !m_window.m_showTimelineThumbnailsAction || m_window.m_showTimelineThumbnailsAction->isChecked());
     m_window.m_shellLayoutController->setTimelineVisible(
         m_window.m_showTimelineAction && m_window.m_showTimelineAction->isChecked() && !m_window.m_timelineDetached);
     m_window.m_shellLayoutController->setClipEditorVisible(

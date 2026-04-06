@@ -82,6 +82,7 @@ public:
     bool undoLastTrackEdit();
     bool redoLastTrackEdit();
     bool renameTrack(const QUuid& trackId, const QString& label);
+    bool setTrackNodeDocument(const QUuid& trackId, const QString& nodeDocumentPath, int timelineFrameCount, double timelineFps);
     void setTrackStartFrame(const QUuid& trackId, int frameIndex);
     void setTrackEndFrame(const QUuid& trackId, int frameIndex);
     void moveTrackFrameSpan(const QUuid& trackId, int deltaFrames);
@@ -173,6 +174,7 @@ public:
     [[nodiscard]] AudioEngine::StereoLevels masterMixStereoLevels() const;
     [[nodiscard]] QSize videoFrameSize() const;
     [[nodiscard]] QString trackLabel(const QUuid& trackId) const;
+    [[nodiscard]] QString trackNodeDocumentPath(const QUuid& trackId) const;
     [[nodiscard]] bool trackHasAttachedAudio(const QUuid& trackId) const;
     [[nodiscard]] bool selectedTrackLoopEnabled() const;
     [[nodiscard]] bool trackAutoPanEnabled(const QUuid& trackId) const;

@@ -51,6 +51,8 @@ add_executable(dawg WIN32
     src/app/MediaImportController.h
     src/app/MixStateStore.cpp
     src/app/MixStateStore.h
+    src/app/NodeDocument.cpp
+    src/app/NodeDocument.h
     src/app/NodeController.cpp
     src/app/NodeController.h
     src/app/PanelLayoutController.cpp
@@ -133,6 +135,8 @@ add_executable(dawg WIN32
     src/ui/NodeEditorQuickController.h
     src/ui/QuickEngineSupport.cpp
     src/ui/QuickEngineSupport.h
+    src/ui/ThumbnailStripQuickController.cpp
+    src/ui/ThumbnailStripQuickController.h
     src/ui/TimelineQuickController.cpp
     src/ui/TimelineQuickController.h
     src/ui/TimelineThumbnailCache.cpp

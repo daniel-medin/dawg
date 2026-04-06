@@ -137,6 +137,28 @@ bool MotionTracker::setTrackLabel(const QUuid& trackId, const QString& label)
     return false;
 }
 
+bool MotionTracker::setTrackNodeDocument(
+    const QUuid& trackId,
+    const QString& nodeDocumentPath,
+    const int timelineFrameCount,
+    const double timelineFps)
+{
+    for (auto& track : m_tracks)
+    {
+        if (track.id != trackId)
+        {
+            continue;
+        }
+
+        track.nodeDocumentPath = nodeDocumentPath;
+        track.nodeTimelineFrameCount = std::max(0, timelineFrameCount);
+        track.nodeTimelineFps = timelineFps > 0.0 ? timelineFps : 0.0;
+        return true;
+    }
+
+    return false;
+}
+
 bool MotionTracker::isTrackAutoPanEnabled(const QUuid& trackId) const
 {
     for (const auto& track : m_tracks)
@@ -508,6 +530,19 @@ int MotionTracker::removeTracks(const std::vector<QUuid>& trackIds)
 const std::vector<TrackPoint>& MotionTracker::tracks() const
 {
     return m_tracks;
+}
+
+QString MotionTracker::trackNodeDocumentPath(const QUuid& trackId) const
+{
+    for (const auto& track : m_tracks)
+    {
+        if (track.id == trackId)
+        {
+            return track.nodeDocumentPath;
+        }
+    }
+
+    return {};
 }
 
 MotionTrackerState MotionTracker::snapshotState() const

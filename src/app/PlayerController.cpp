@@ -1304,6 +1304,11 @@ QString PlayerController::trackLabel(const QUuid& trackId) const
     return trackIt != m_tracker.tracks().end() ? trackIt->label : QString{};
 }
 
+QString PlayerController::trackNodeDocumentPath(const QUuid& trackId) const
+{
+    return m_tracker.trackNodeDocumentPath(trackId);
+}
+
 bool PlayerController::trackHasAttachedAudio(const QUuid& trackId) const
 {
     const auto trackIt = std::find_if(

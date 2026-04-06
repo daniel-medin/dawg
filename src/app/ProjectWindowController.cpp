@@ -598,6 +598,7 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
     auto controllerState = m_window.m_controller->snapshotProjectState();
     const auto projectRootPath = QFileInfo(projectFilePath).absolutePath();
     const QDir projectRoot(projectRootPath);
+    static_cast<void>(QDir().mkpath(projectRoot.filePath(QStringLiteral("nodes"))));
 
     const auto makeRelativePath = [&projectRoot](const QString& path, QString* errorMessage) -> std::optional<QString>
     {
@@ -675,6 +676,21 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
 
     for (auto& track : controllerState.trackerState.tracks)
     {
+        if (!track.nodeDocumentPath.isEmpty())
+        {
+            const auto relativeNodePath = makeRelativePath(track.nodeDocumentPath, &errorMessage);
+            if (!relativeNodePath.has_value())
+            {
+                m_window.m_dialogController->execMessage(
+                    QStringLiteral("Save Project"),
+                    errorMessage,
+                    {},
+                    {DialogController::Button::Ok});
+                return false;
+            }
+            track.nodeDocumentPath = *relativeNodePath;
+        }
+
         if (!track.attachedAudio.has_value())
         {
             continue;
@@ -766,6 +782,7 @@ bool ProjectWindowController::saveProjectAsNewCopy()
 
     if (!QDir().mkpath(targetRoot.filePath(QStringLiteral("audio")))
         || !QDir().mkpath(targetRoot.filePath(QStringLiteral("video")))
+        || !QDir().mkpath(targetRoot.filePath(QStringLiteral("nodes")))
         || !QDir().mkpath(targetRoot.filePath(QStringLiteral("settings")))
         || !QDir().mkpath(targetRoot.filePath(QStringLiteral("thumbnails/timeline"))))
     {
@@ -779,6 +796,7 @@ bool ProjectWindowController::saveProjectAsNewCopy()
 
     auto controllerState = m_window.m_controller->snapshotProjectState();
     QHash<QString, QString> copiedAudioPaths;
+    QHash<QString, QString> copiedNodePaths;
     QString errorMessage;
 
     const auto copyIntoTargetProject = [&targetRootPath](
@@ -876,6 +894,31 @@ bool ProjectWindowController::saveProjectAsNewCopy()
 
     for (auto& track : controllerState.trackerState.tracks)
     {
+        if (!track.nodeDocumentPath.isEmpty())
+        {
+            const auto existingNodeIt = copiedNodePaths.constFind(track.nodeDocumentPath);
+            if (existingNodeIt != copiedNodePaths.cend())
+            {
+                track.nodeDocumentPath = existingNodeIt.value();
+            }
+            else
+            {
+                const auto copiedNodePath =
+                    copyIntoTargetProject(track.nodeDocumentPath, QStringLiteral("nodes"), &errorMessage);
+                if (!copiedNodePath.has_value())
+                {
+                    m_window.m_dialogController->execMessage(
+                        QStringLiteral("Save Project As"),
+                        errorMessage,
+                        {},
+                        {DialogController::Button::Ok});
+                    return false;
+                }
+                copiedNodePaths.insert(track.nodeDocumentPath, *copiedNodePath);
+                track.nodeDocumentPath = *copiedNodePath;
+            }
+        }
+
         if (!track.attachedAudio.has_value())
         {
             continue;
@@ -903,6 +946,31 @@ bool ProjectWindowController::saveProjectAsNewCopy()
         track.attachedAudio->assetPath = *copiedAudioPath;
     }
 
+    const auto sourceNodesPath = QDir(m_window.m_currentProjectRootPath).filePath(QStringLiteral("nodes"));
+    const auto targetNodesPath = targetRoot.filePath(QStringLiteral("nodes"));
+    const QDir sourceNodes(sourceNodesPath);
+    if (sourceNodes.exists())
+    {
+        const auto nodeFiles = sourceNodes.entryInfoList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
+        for (const auto& nodeFileInfo : nodeFiles)
+        {
+            const auto targetNodePath = QDir(targetNodesPath).filePath(nodeFileInfo.fileName());
+            if (QFileInfo::exists(targetNodePath))
+            {
+                continue;
+            }
+            if (!QFile::copy(nodeFileInfo.absoluteFilePath(), targetNodePath))
+            {
+                m_window.m_dialogController->execMessage(
+                    QStringLiteral("Save Project As"),
+                    QStringLiteral("Failed to copy saved node %1 to the new project.").arg(nodeFileInfo.fileName()),
+                    {},
+                    {DialogController::Button::Ok});
+                return false;
+            }
+        }
+    }
+
     const auto targetProjectFilePath =
         targetRoot.filePath(dawg::project::projectFileNameForName(sanitizedProjectName));
     const auto currentUiState = m_window.snapshotProjectUiState();
@@ -920,6 +988,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
     }
     for (auto& track : relativeControllerState.trackerState.tracks)
     {
+        if (!track.nodeDocumentPath.isEmpty())
+        {
+            track.nodeDocumentPath =
+                QDir::cleanPath(relativeRoot.relativeFilePath(track.nodeDocumentPath));
+        }
         if (track.attachedAudio.has_value())
         {
             track.attachedAudio->assetPath =
@@ -1000,6 +1073,10 @@ bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
     }
     for (auto& track : absoluteControllerState.trackerState.tracks)
     {
+        if (!track.nodeDocumentPath.isEmpty())
+        {
+            track.nodeDocumentPath = makeAbsolutePath(track.nodeDocumentPath);
+        }
         if (track.attachedAudio.has_value())
         {
             track.attachedAudio->assetPath = makeAbsolutePath(track.attachedAudio->assetPath);
@@ -1108,6 +1185,7 @@ bool ProjectWindowController::createProjectAt(const QString& projectName, const 
 
     if (!QDir().mkpath(projectRoot.filePath(QStringLiteral("audio")))
         || !QDir().mkpath(projectRoot.filePath(QStringLiteral("video")))
+        || !QDir().mkpath(projectRoot.filePath(QStringLiteral("nodes")))
         || !QDir().mkpath(projectRoot.filePath(QStringLiteral("settings")))
         || !QDir().mkpath(projectRoot.filePath(QStringLiteral("thumbnails/timeline"))))
     {

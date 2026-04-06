@@ -42,52 +42,6 @@ Item {
         border.color: "#20242a"
     }
 
-    Item {
-        x: rectValue(timelineController.filmstripRect, "x")
-        y: rectValue(timelineController.filmstripRect, "y")
-        width: rectValue(timelineController.filmstripRect, "width")
-        height: rectValue(timelineController.filmstripRect, "height")
-        visible: height > 0
-        clip: true
-
-        Rectangle {
-            anchors.fill: parent
-            radius: 4
-            color: "#10151b"
-            border.width: 1
-            border.color: "#242a31"
-        }
-
-        Repeater {
-            model: timelineController.thumbnailTiles
-
-            Item {
-                property var tileData: modelData
-                x: tileData.x - parent.x
-                y: 0
-                width: Math.max(1, tileData.width)
-                height: parent.height
-
-                Rectangle {
-                    anchors.fill: parent
-                    color: "#141a21"
-                    border.width: 1
-                    border.color: "#0c1015"
-                }
-
-                Image {
-                    anchors.fill: parent
-                    anchors.margins: 1
-                    source: tileData.source
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    cache: true
-                    smooth: false
-                }
-            }
-        }
-    }
-
     Rectangle {
         x: rectValue(timelineController.loopBarRect, "x")
         y: rectValue(timelineController.loopBarRect, "y")

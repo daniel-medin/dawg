@@ -65,6 +65,7 @@
 #include "app/PanelLayoutController.h"
 #include "app/DebugUiController.h"
 #include "app/MediaImportController.h"
+#include "app/NodeDocument.h"
 #include "app/ProjectDocument.h"
 #include "app/ProjectTimelineThumbnails.h"
 #include "app/VideoProxyController.h"
@@ -76,6 +77,7 @@
 #include "ui/NodeEditorQuickController.h"
 #include "ui/NativeVideoViewport.h"
 #include "ui/QuickEngineSupport.h"
+#include "ui/ThumbnailStripQuickController.h"
 #include "ui/TimelineQuickController.h"
 #include "ui/TimelineThumbnailCache.h"
 #include "ui/VideoOverlayQuickItem.h"
@@ -232,6 +234,11 @@ QUrl shellLayoutSceneUrl()
 QUrl timelineSceneUrl()
 {
     return QUrl(QStringLiteral("qrc:/qml/TimelineScene.qml"));
+}
+
+QUrl thumbnailStripSceneUrl()
+{
+    return QUrl(QStringLiteral("qrc:/qml/ThumbnailStripScene.qml"));
 }
 
 QUrl audioPoolSceneUrl()
@@ -1054,7 +1061,11 @@ MainWindow::MainWindow(QWindow* parent)
         setTimelineThumbnailsVisible(visible);
         m_showTimelineThumbnailsAction->setText(
             visible ? QStringLiteral("Hide Thumbnails") : QStringLiteral("Show Thumbnails"));
-        showStatus(visible ? QStringLiteral("Timeline thumbnails shown.") : QStringLiteral("Timeline thumbnails hidden."));
+        if (!m_projectStateChangeInProgress && hasOpenProject())
+        {
+            setProjectDirty(true);
+        }
+        showStatus(visible ? QStringLiteral("Thumbnails shown.") : QStringLiteral("Thumbnails hidden."));
     });
     connect(m_timelineClickSeeksAction, &QAction::toggled, this, [this](const bool enabled)
     {
@@ -1189,6 +1200,7 @@ MainWindow::MainWindow(QWindow* parent)
     connect(m_deleteEmptyNodesAction, &QAction::triggered, this, &MainWindow::deleteAllEmptyNodes);
     connect(m_clearAllAction, &QAction::triggered, m_controller, &PlayerController::clearAllTracks);
     connect(m_timelineQuickController, &TimelineQuickController::frameRequested, m_controller, &PlayerController::seekToFrame);
+    connect(m_thumbnailStripQuickController, &ThumbnailStripQuickController::frameRequested, m_controller, &PlayerController::seekToFrame);
     connect(
         m_timelineQuickController,
         &TimelineQuickController::addLoopRangeRequested,
@@ -1261,6 +1273,7 @@ MainWindow::MainWindow(QWindow* parent)
     });
     connect(m_timelineQuickController, &TimelineQuickController::visualsChanged, this, [this]()
     {
+        syncThumbnailStripViewWindow();
         if (m_clearLoopRangeAction)
         {
             m_clearLoopRangeAction->setEnabled(timelineHasSelectedLoopRange());
@@ -2189,6 +2202,88 @@ void MainWindow::importAudioToPool()
     m_mediaImportController->importAudioToPool();
 }
 
+void MainWindow::handleNodeEditorFileAction(const QString& actionKey)
+{
+    if (!hasOpenProject() || !m_controller)
+    {
+        return;
+    }
+
+    const auto nodesDirectoryPath = projectNodesDirectoryPath();
+    if (nodesDirectoryPath.isEmpty())
+    {
+        return;
+    }
+    static_cast<void>(QDir().mkpath(nodesDirectoryPath));
+
+    if (actionKey == QStringLiteral("save"))
+    {
+        if (!m_controller->hasSelection())
+        {
+            showStatus(QStringLiteral("Select a node before saving it."));
+            return;
+        }
+        const auto selectedTrackId = m_controller->selectedTrackId();
+        const auto nodeLabel = selectedTrackId.isNull()
+            ? QStringLiteral("Node")
+            : m_controller->trackLabel(selectedTrackId).trimmed();
+        const auto nodeFilePath = QDir(nodesDirectoryPath).filePath(
+            dawg::node::nodeFileNameForName(nodeLabel.isEmpty() ? QStringLiteral("Node") : nodeLabel));
+        static_cast<void>(saveSelectedNodeToFile(nodeFilePath));
+        return;
+    }
+
+    if (actionKey == QStringLiteral("open"))
+    {
+        const auto selectedNodeFilePath = m_filePickerController
+            ? m_filePickerController->execOpenFile(
+                QStringLiteral("Open Node"),
+                nodesDirectoryPath,
+                QStringLiteral("DAWG Nodes (*%1 *%2);;All Files (*.*)")
+                    .arg(
+                        QString::fromLatin1(dawg::node::kNodeFileSuffix),
+                        QString::fromLatin1(dawg::node::kLegacyNodeFileSuffix)))
+            : QString{};
+        if (!selectedNodeFilePath.isEmpty())
+        {
+            static_cast<void>(openNodeFileAsNewNode(selectedNodeFilePath));
+        }
+        return;
+    }
+
+    if (actionKey == QStringLiteral("export"))
+    {
+        if (!m_controller->hasSelection())
+        {
+            showStatus(QStringLiteral("Select a node before exporting it."));
+            return;
+        }
+        const auto selectedTrackId = m_controller->selectedTrackId();
+        const auto nodeLabel = selectedTrackId.isNull()
+            ? QStringLiteral("Node")
+            : m_controller->trackLabel(selectedTrackId).trimmed();
+        const auto selectedNodeFilePath = m_filePickerController
+            ? m_filePickerController->execSaveFile(
+                QStringLiteral("Export Node"),
+                nodesDirectoryPath,
+                dawg::node::nodeFileNameForName(nodeLabel.isEmpty() ? QStringLiteral("Node") : nodeLabel),
+                QStringLiteral("DAWG Nodes (*%1)").arg(QString::fromLatin1(dawg::node::kNodeFileSuffix)))
+            : QString{};
+        if (!selectedNodeFilePath.isEmpty())
+        {
+            static_cast<void>(saveSelectedNodeToFile(selectedNodeFilePath, false));
+        }
+    }
+}
+
+void MainWindow::handleNodeEditorAudioAction(const QString& actionKey)
+{
+    if (actionKey == QStringLiteral("import"))
+    {
+        importSound();
+    }
+}
+
 void MainWindow::handleLoopStartShortcut()
 {
     if (!m_timelineQuickController)
@@ -2471,6 +2566,7 @@ void MainWindow::refreshOverlays()
 
     refreshTimeline();
     refreshClipEditor();
+    refreshNodeEditor();
 }
 
 void MainWindow::updateInsertionFollowsPlaybackState(const bool enabled)
@@ -2492,6 +2588,10 @@ void MainWindow::updatePlaybackState(const bool playing)
     if (m_timelineQuickController)
     {
         m_timelineQuickController->setPlaybackActive(playing);
+    }
+    if (m_thumbnailStripQuickController)
+    {
+        m_thumbnailStripQuickController->setPlaybackActive(playing);
     }
     const auto label = playing ? QStringLiteral("Pause (Space)") : QStringLiteral("Play (Space)");
     m_playAction->setText(label);
@@ -2969,23 +3069,32 @@ void MainWindow::refreshTimeline()
 
     const auto trackSpans = m_controller->timelineTrackSpans();
     m_timelineTrackSpans = trackSpans;
+    const auto timelineVideoPath =
+        !m_controller->projectVideoPath().isEmpty()
+            ? m_controller->projectVideoPath()
+            : m_controller->loadedPath();
     if (m_timelineQuickController)
     {
-        const auto timelineVideoPath =
-            !m_controller->projectVideoPath().isEmpty()
-                ? m_controller->projectVideoPath()
-                : m_controller->loadedPath();
         m_timelineQuickController->setProjectRootPath(m_currentProjectRootPath);
         m_timelineQuickController->setVideoPath(timelineVideoPath);
         m_timelineQuickController->setTrackSpans(trackSpans);
         m_timelineQuickController->setLoopRanges(m_controller->loopRanges());
-        if (!timelineVideoPath.isEmpty()
-            && m_currentProjectRootPath.size() > 0
-            && !m_timelineQuickController->hasThumbnailManifest()
-            && !m_timelineThumbnailGenerationThread)
-        {
-            requestProjectTimelineThumbnailsGeneration();
-        }
+    }
+    if (m_thumbnailStripQuickController)
+    {
+        m_thumbnailStripQuickController->setProjectRootPath(m_currentProjectRootPath);
+        m_thumbnailStripQuickController->setVideoPath(timelineVideoPath);
+        syncThumbnailStripViewWindow();
+    }
+    const auto needsThumbnailManifest =
+        !timelineVideoPath.isEmpty()
+        && m_currentProjectRootPath.size() > 0
+        && !m_timelineThumbnailGenerationThread
+        && ((m_timelineQuickController && !m_timelineQuickController->hasThumbnailManifest())
+            || (m_thumbnailStripQuickController && !m_thumbnailStripQuickController->hasThumbnailManifest()));
+    if (needsThumbnailManifest)
+    {
+        requestProjectTimelineThumbnailsGeneration();
     }
     updateTimelineMinimumHeight();
     if (m_clearLoopRangeAction)
@@ -3172,7 +3281,13 @@ void MainWindow::refreshNodeEditor()
         return;
     }
 
-    m_nodeEditorQuickController->setSelectedNodeLabel(selectedNodeDisplayLabel(m_controller));
+    m_nodeEditorState = m_controller->selectedClipEditorState();
+    m_nodeEditorQuickController->setState(
+        hasOpenProject() && m_controller->hasVideoLoaded(),
+        selectedNodeDisplayLabel(m_controller),
+        m_controller->trackNodeDocumentPath(m_controller->selectedTrackId()),
+        m_nodeEditorState);
+    syncNodeWaveformItem();
     syncNodeEditorActionAvailability();
 }
 
@@ -3243,6 +3358,255 @@ void MainWindow::syncClipWaveformItem()
     }
 
     m_clipWaveformItem->setState(m_clipEditorState);
+}
+
+void MainWindow::syncNodeWaveformItem()
+{
+    if (!m_shellRootItem)
+    {
+        return;
+    }
+
+    if (!m_nodeEditorWaveformItem)
+    {
+        m_nodeEditorWaveformItem = m_shellRootItem->findChild<ClipWaveformQuickItem*>(QStringLiteral("nodeEditorWaveform"));
+        if (m_nodeEditorWaveformItem)
+        {
+            connect(m_nodeEditorWaveformItem, &ClipWaveformQuickItem::clipRangeChanged, m_controller, &PlayerController::setSelectedTrackClipRangeMs);
+            connect(m_nodeEditorWaveformItem, &ClipWaveformQuickItem::playheadChanged, this, [this](const int playheadMs)
+            {
+                if (m_controller->setSelectedTrackClipPlayheadMs(playheadMs))
+                {
+                    if (!m_projectStateChangeInProgress && hasOpenProject())
+                    {
+                        setProjectDirty(true);
+                    }
+                    refreshNodeEditor();
+                }
+            });
+        }
+    }
+
+    if (m_nodeEditorWaveformItem)
+    {
+        m_nodeEditorWaveformItem->setState(m_nodeEditorState);
+    }
+}
+
+QString MainWindow::projectNodesDirectoryPath() const
+{
+    return hasOpenProject()
+        ? QDir(m_currentProjectRootPath).filePath(QStringLiteral("nodes"))
+        : QString{};
+}
+
+bool MainWindow::saveSelectedNodeToFile(const QString& nodeFilePath, const bool bindToSelectedTrack)
+{
+    if (!m_controller || !m_controller->hasSelection())
+    {
+        showStatus(QStringLiteral("Select a node before saving it."));
+        return false;
+    }
+
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    if (selectedTrackId.isNull())
+    {
+        showStatus(QStringLiteral("Select a node before saving it."));
+        return false;
+    }
+
+    const auto currentState = m_controller->selectedClipEditorState();
+    dawg::node::NodeData nodeData;
+    nodeData.label = m_controller->trackLabel(selectedTrackId).trimmed();
+    if (nodeData.label.isEmpty())
+    {
+        nodeData.label = QStringLiteral("Node");
+    }
+    nodeData.autoPanEnabled = m_controller->selectedTracksAutoPanEnabled();
+    nodeData.timelineFrameCount = m_controller->totalFrames();
+    nodeData.timelineFps = m_controller->fps();
+    dawg::node::TrackData nodeTrackData;
+    nodeTrackData.label = nodeData.label;
+    if (currentState.has_value() && currentState->hasAttachedAudio)
+    {
+        nodeTrackData.attachedAudio = AudioAttachment{
+            .assetPath = currentState->assetPath,
+            .gainDb = currentState->gainDb,
+            .clipStartMs = currentState->clipStartMs,
+            .clipEndMs = currentState->clipEndMs,
+            .loopEnabled = currentState->loopEnabled
+        };
+    }
+    nodeData.tracks.push_back(nodeTrackData);
+
+    QString errorMessage;
+    const auto saved = dawg::node::saveDocument(
+        nodeFilePath,
+        dawg::node::Document{
+            .name = nodeData.label,
+            .node = nodeData
+        },
+        &errorMessage);
+    if (!saved)
+    {
+        m_dialogController->execMessage(
+            QStringLiteral("Save Node"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
+        return false;
+    }
+
+    if (bindToSelectedTrack)
+    {
+        static_cast<void>(m_controller->setTrackNodeDocument(
+            selectedTrackId,
+            QDir::cleanPath(nodeFilePath),
+            nodeData.timelineFrameCount,
+            nodeData.timelineFps));
+    }
+    showStatus(QStringLiteral("Saved node to %1.").arg(QFileInfo(nodeFilePath).fileName()));
+    return true;
+}
+
+bool MainWindow::openNodeFileAsNewNode(const QString& nodeFilePath)
+{
+    if (!m_controller || !m_controller->hasVideoLoaded())
+    {
+        showStatus(QStringLiteral("Open a video before opening a saved node."));
+        return false;
+    }
+
+    QString errorMessage;
+    const auto document = dawg::node::loadDocument(nodeFilePath, &errorMessage);
+    if (!document.has_value())
+    {
+        m_dialogController->execMessage(
+            QStringLiteral("Open Node"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
+        return false;
+    }
+
+    const auto frameSize = m_controller->videoFrameSize();
+    const auto imageCenter = QPointF{
+        std::max(1, frameSize.width()) * 0.5,
+        std::max(1, frameSize.height()) * 0.5
+    };
+    const auto nodesDirectoryPath = projectNodesDirectoryPath();
+    if (nodesDirectoryPath.isEmpty() || !QDir().mkpath(nodesDirectoryPath))
+    {
+        showStatus(QStringLiteral("Failed to create the project nodes folder."));
+        return false;
+    }
+
+    const auto preferredNodeName = !document->node.label.trimmed().isEmpty()
+        ? document->node.label.trimmed()
+        : QFileInfo(nodeFilePath).completeBaseName();
+    const auto targetNodePath = uniqueTargetFilePath(
+        nodesDirectoryPath,
+        dawg::node::nodeFileNameForName(preferredNodeName.isEmpty() ? QStringLiteral("Node") : preferredNodeName));
+    if (!dawg::node::saveDocument(targetNodePath, *document, &errorMessage))
+    {
+        m_dialogController->execMessage(
+            QStringLiteral("Open Node"),
+            errorMessage,
+            {},
+            {DialogController::Button::Ok});
+        return false;
+    }
+
+    const auto trackIt = std::find_if(
+        document->node.tracks.cbegin(),
+        document->node.tracks.cend(),
+        [](const dawg::node::TrackData& track)
+        {
+            return track.attachedAudio.has_value();
+        });
+    const dawg::node::TrackData* primaryTrack =
+        trackIt != document->node.tracks.cend()
+        ? &(*trackIt)
+        : (document->node.tracks.empty() ? nullptr : &document->node.tracks.front());
+
+    if (primaryTrack != nullptr
+        && primaryTrack->attachedAudio.has_value()
+        && !primaryTrack->embeddedAudioData.isEmpty())
+    {
+        const auto audioDirectoryPath = QDir(m_currentProjectRootPath).filePath(QStringLiteral("audio"));
+        if (!QDir().mkpath(audioDirectoryPath))
+        {
+            showStatus(QStringLiteral("Failed to create the project audio folder."));
+            return false;
+        }
+
+        const auto embeddedAudioFileName = primaryTrack->embeddedAudioFileName.isEmpty()
+            ? QStringLiteral("node-audio.wav")
+            : primaryTrack->embeddedAudioFileName;
+        const auto targetAudioPath = uniqueTargetFilePath(audioDirectoryPath, embeddedAudioFileName);
+        QFile audioFile(targetAudioPath);
+        if (!audioFile.open(QIODevice::WriteOnly)
+            || audioFile.write(primaryTrack->embeddedAudioData) != primaryTrack->embeddedAudioData.size())
+        {
+            m_dialogController->execMessage(
+                QStringLiteral("Open Node"),
+                QStringLiteral("Failed to materialize embedded node audio."),
+                {},
+                {DialogController::Button::Ok});
+            return false;
+        }
+        audioFile.close();
+
+        if (!m_controller->createTrackWithAudioAtCurrentFrame(targetAudioPath, imageCenter))
+        {
+            return false;
+        }
+        const auto importedState = m_controller->selectedClipEditorState();
+        static_cast<void>(m_controller->setSelectedTrackClipRangeMs(
+            primaryTrack->attachedAudio->clipStartMs,
+            primaryTrack->attachedAudio->clipEndMs.value_or(
+                importedState.has_value() ? importedState->clipEndMs : primaryTrack->attachedAudio->clipStartMs)));
+        static_cast<void>(m_controller->setSelectedTrackAudioGainDb(primaryTrack->attachedAudio->gainDb));
+        static_cast<void>(m_controller->setSelectedTrackLoopEnabled(primaryTrack->attachedAudio->loopEnabled));
+    }
+    else
+    {
+        m_controller->seedTrack(imageCenter);
+    }
+
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    const auto preferredLabel = !document->node.label.trimmed().isEmpty()
+        ? document->node.label.trimmed()
+        : (primaryTrack != nullptr ? primaryTrack->label.trimmed() : QString{});
+    if (!selectedTrackId.isNull() && !preferredLabel.isEmpty())
+    {
+        m_controller->renameTrack(selectedTrackId, preferredLabel);
+    }
+    if (!selectedTrackId.isNull())
+    {
+        static_cast<void>(m_controller->setTrackNodeDocument(
+            selectedTrackId,
+            targetNodePath,
+            document->node.timelineFrameCount > 0 ? document->node.timelineFrameCount : m_controller->totalFrames(),
+            document->node.timelineFps > 0.0 ? document->node.timelineFps : m_controller->fps()));
+    }
+
+    if (m_controller->selectedTracksAutoPanEnabled() != document->node.autoPanEnabled)
+    {
+        m_controller->toggleSelectedTrackAutoPan();
+    }
+
+    if (!m_projectStateChangeInProgress && hasOpenProject())
+    {
+        setProjectDirty(true);
+    }
+    refreshNodeEditor();
+    showStatus(
+        primaryTrack != nullptr && document->node.tracks.size() > 1
+            ? QStringLiteral("Opened node %1 using the first internal track for now.")
+                .arg(QFileInfo(nodeFilePath).completeBaseName())
+            : QStringLiteral("Opened node %1.").arg(QFileInfo(nodeFilePath).completeBaseName()));
+    return true;
 }
 
 void MainWindow::refreshMixView()
@@ -3450,6 +3814,11 @@ void MainWindow::clearTimeline()
         m_timelineQuickController->setProjectRootPath({});
         m_timelineQuickController->clear();
     }
+    if (m_thumbnailStripQuickController)
+    {
+        m_thumbnailStripQuickController->setProjectRootPath({});
+        m_thumbnailStripQuickController->clear();
+    }
     updateTimelineMinimumHeight();
 }
 
@@ -3459,6 +3828,10 @@ void MainWindow::setTimelineVideoPath(const QString& videoPath)
     {
         m_timelineQuickController->setVideoPath(videoPath);
     }
+    if (m_thumbnailStripQuickController)
+    {
+        m_thumbnailStripQuickController->setVideoPath(videoPath);
+    }
 }
 
 void MainWindow::setTimelineState(const int totalFrames, const double fps)
@@ -3467,6 +3840,11 @@ void MainWindow::setTimelineState(const int totalFrames, const double fps)
     {
         m_timelineQuickController->setTimeline(totalFrames, fps);
     }
+    if (m_thumbnailStripQuickController)
+    {
+        m_thumbnailStripQuickController->setTimeline(totalFrames, fps);
+        syncThumbnailStripViewWindow();
+    }
 }
 
 void MainWindow::setTimelineCurrentFrame(const int frameIndex)
@@ -3474,6 +3852,10 @@ void MainWindow::setTimelineCurrentFrame(const int frameIndex)
     if (m_timelineQuickController && m_timelineQuickWidget && m_timelineQuickWidget->isVisible())
     {
         m_timelineQuickController->setCurrentFrame(frameIndex);
+    }
+    if (m_thumbnailStripQuickController)
+    {
+        m_thumbnailStripQuickController->setCurrentFrame(frameIndex);
     }
 }
 
@@ -3487,10 +3869,23 @@ void MainWindow::setTimelineSeekOnClickEnabled(const bool enabled)
 
 void MainWindow::setTimelineThumbnailsVisible(const bool visible)
 {
-    if (m_timelineQuickController)
+    if (m_shellLayoutController)
     {
-        m_timelineQuickController->setThumbnailsVisible(visible);
+        m_shellLayoutController->setThumbnailsVisible(visible);
     }
+    syncShellPanelGeometry();
+}
+
+void MainWindow::syncThumbnailStripViewWindow()
+{
+    if (!m_thumbnailStripQuickController || !m_timelineQuickController)
+    {
+        return;
+    }
+
+    m_thumbnailStripQuickController->setViewWindow(
+        m_timelineQuickController->viewStartFrameValue(),
+        m_timelineQuickController->visibleFrameSpanValue());
 }
 
 std::optional<int> MainWindow::timelineLoopShortcutFrame() const
@@ -3768,6 +4163,8 @@ void MainWindow::buildUi()
     m_detachedVideoViewportQuickController = new VideoViewportQuickController(this);
     m_detachedVideoViewportQuickController->setNativePresentationEnabled(false);
     m_timelineQuickController = new TimelineQuickController(this);
+    m_timelineQuickController->setThumbnailsVisible(false);
+    m_thumbnailStripQuickController = new ThumbnailStripQuickController(this);
     ensureQuickTypesRegistered();
     m_clipEditorQuickController = new ClipEditorQuickController(this);
     m_nodeEditorQuickController = new NodeEditorQuickController(this);
@@ -3779,6 +4176,16 @@ void MainWindow::buildUi()
     m_dialogController = new DialogController(this);
     m_filePickerController = new FilePickerController(this);
     m_shellOverlayController = new ShellOverlayController(this);
+    connect(
+        m_nodeEditorQuickController,
+        &NodeEditorQuickController::fileActionRequested,
+        this,
+        &MainWindow::handleNodeEditorFileAction);
+    connect(
+        m_nodeEditorQuickController,
+        &NodeEditorQuickController::audioActionRequested,
+        this,
+        &MainWindow::handleNodeEditorAudioAction);
 
     m_shellLayoutController->setPreferredSizes(
         m_audioPoolPreferredWidth,
@@ -3801,6 +4208,7 @@ void MainWindow::buildUi()
     rootContext()->setContextProperty(QStringLiteral("videoViewportBridge"), this);
     rootContext()->setContextProperty(QStringLiteral("videoViewportAllowNativePresentation"), false);
     rootContext()->setContextProperty(QStringLiteral("timelineController"), m_timelineQuickController);
+    rootContext()->setContextProperty(QStringLiteral("thumbnailStripController"), m_thumbnailStripQuickController);
     rootContext()->setContextProperty(QStringLiteral("clipEditorController"), m_clipEditorQuickController);
     rootContext()->setContextProperty(QStringLiteral("nodeEditorController"), m_nodeEditorQuickController);
     rootContext()->setContextProperty(QStringLiteral("mixController"), m_mixQuickController);
@@ -3825,6 +4233,8 @@ void MainWindow::buildUi()
         m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("videoViewportScene")) : nullptr;
     m_timelineQuickWidget =
         m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("timelineScene")) : nullptr;
+    m_thumbnailStripQuickWidget =
+        m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("thumbnailStripScene")) : nullptr;
     m_clipEditorQuickWidget =
         m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("clipEditorScene")) : nullptr;
     m_nodeEditorQuickWidget =
@@ -3979,6 +4389,7 @@ void MainWindow::buildUi()
     if (m_shellLayoutController)
     {
         m_shellLayoutController->setTimelineMinimumHeight(timelineMinimumHeight());
+        m_shellLayoutController->setThumbnailsVisible(true);
         m_shellLayoutController->setTimelineVisible(true);
         m_shellLayoutController->setClipEditorVisible(false);
         m_shellLayoutController->setNodeEditorVisible(false);
