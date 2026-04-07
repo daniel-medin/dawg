@@ -1202,7 +1202,8 @@ MainWindow::MainWindow(QWindow* parent)
     m_clearAllShortcutTimer.setInterval(1500);
     m_memoryUsageTimer.setInterval(1000);
     m_mixMeterTimer.setInterval(33);
-    m_nodeEditorPreviewMeterTimer.setInterval(66);
+    m_nodeEditorPreviewMeterTimer.setTimerType(Qt::PreciseTimer);
+    m_nodeEditorPreviewMeterTimer.setInterval(16);
     connect(&m_clearAllShortcutTimer, &QTimer::timeout, this, &MainWindow::clearPendingClearAllShortcut);
     connect(&m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsage);
     connect(&m_mixMeterTimer, &QTimer::timeout, this, &MainWindow::updateMixMeterLevels);
@@ -5041,8 +5042,10 @@ bool MainWindow::startNodeEditorPreview()
     m_lastNodeEditorPreviewAudioSyncMs = playheadMs;
     m_nodeEditorQuickController->setInsertionMarkerMs(playheadMs);
     m_nodeEditorPreviewActive = true;
-    m_nodeEditorPreviewMeterTimer.start();
     m_nodeEditorQuickController->setPlaybackActive(true);
+    m_nodeEditorPreviewMixMeterTimer.invalidate();
+    updateNodeEditorPreviewMeters();
+    m_nodeEditorPreviewMeterTimer.start();
     if (m_transportUiSyncController)
     {
         m_transportUiSyncController->syncThumbnailStripMarkerToNodeEditor(playheadMs);
@@ -5059,6 +5062,7 @@ void MainWindow::stopNodeEditorPreview(const bool restorePlaybackAnchor)
     {
         m_nodeEditorPreviewMeterTimer.stop();
     }
+    m_nodeEditorPreviewMixMeterTimer.invalidate();
     if (m_controller)
     {
         m_controller->stopNodeEditorPreview();
@@ -5109,6 +5113,8 @@ void MainWindow::toggleNodeEditorPreview()
 
 void MainWindow::updateNodeEditorPreviewMeters()
 {
+    constexpr qint64 kNodePreviewMixMeterIntervalMs = 66;
+
     if (!m_nodeEditorQuickController)
     {
         return;
@@ -5136,7 +5142,12 @@ void MainWindow::updateNodeEditorPreviewMeters()
     {
         return;
     }
-    updateMixMeterLevels();
+    if (!m_nodeEditorPreviewMixMeterTimer.isValid()
+        || m_nodeEditorPreviewMixMeterTimer.elapsed() >= kNodePreviewMixMeterIntervalMs)
+    {
+        updateMixMeterLevels();
+        m_nodeEditorPreviewMixMeterTimer.restart();
+    }
 }
 
 QString MainWindow::nodeEditorPreviewActiveAudioSignature(const int playheadMs) const

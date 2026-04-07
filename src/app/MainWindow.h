@@ -445,6 +445,7 @@ private:
     QElapsedTimer m_debugTextTimer;
     QElapsedTimer m_audioPoolPlaybackRefreshTimer;
     QElapsedTimer m_timelinePlaybackUiTimer;
+    QElapsedTimer m_nodeEditorPreviewMixMeterTimer;
     int m_nodeEditorPreviewAnchorMs = 0;
     int m_nodeEditorPreviewStartMs = 0;
     int m_nodeEditorPreviewNodeDurationMs = 0;
