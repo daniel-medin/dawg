@@ -5097,13 +5097,6 @@ bool MainWindow::startNodeEditorPreview()
     m_nodeEditorPreviewTimer.start();
     m_nodeEditorQuickController->setPlaybackActive(true);
     syncThumbnailStripMarkerToNodeEditor(playheadMs);
-    QTimer::singleShot(50, this, [this]()
-    {
-        if (m_nodeEditorPreviewTimer.isActive())
-        {
-            refreshMixView();
-        }
-    });
     showStatus(QStringLiteral("Playing node preview."));
     return true;
 }

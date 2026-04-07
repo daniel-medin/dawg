@@ -1584,15 +1584,10 @@ std::vector<MixLaneStrip> PlayerController::mixLaneStrips() const
         if (spanIt != spans.end())
         {
             const auto previewStereoLevels = m_audioPlaybackCoordinator->nodePreviewStereoLevels();
-            const auto selectedNodeLabel = trackLabel(selectedTrackId).trimmed();
             for (auto& strip : strips)
             {
                 if (strip.laneIndex == spanIt->laneIndex)
                 {
-                    if (!selectedNodeLabel.isEmpty())
-                    {
-                        strip.label = selectedNodeLabel;
-                    }
                     strip.meterLeftLevel = std::max(strip.meterLeftLevel, previewStereoLevels.left);
                     strip.meterRightLevel = std::max(strip.meterRightLevel, previewStereoLevels.right);
                     strip.meterLevel = std::max(
