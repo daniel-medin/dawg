@@ -198,11 +198,11 @@ void MediaImportController::openVideo()
     const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("video"), &errorMessage);
     if (!copiedFilePath.has_value())
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Import Video"),
             errorMessage,
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return;
     }
 
@@ -243,11 +243,11 @@ void MediaImportController::importSound()
     const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("audio"), &errorMessage);
     if (!copiedFilePath.has_value())
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Import Audio"),
             errorMessage,
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return;
     }
 
@@ -274,11 +274,11 @@ void MediaImportController::importAudioToPool()
     const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("audio"), &errorMessage);
     if (!copiedFilePath.has_value())
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Import Audio"),
             errorMessage,
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return;
     }
 

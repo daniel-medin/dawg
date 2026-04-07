@@ -96,10 +96,14 @@ void ClipWaveformQuickItem::setState(const std::optional<AudioClipPreviewState>&
         m_state.reset();
         m_loadedAssetPath.clear();
         m_peaks.clear();
+        m_waveformChannelCount = 0;
         m_dragMode = DragMode::None;
         m_horizontalZoom = 1.0;
-        m_verticalZoom = 1.0;
         m_viewStartMs = 0.0;
+        m_previewWaveformState.clear();
+        m_previewClipRangeActive = false;
+        m_previewClipStartMs = 0;
+        m_previewClipEndMs = 0;
         invalidateWaveformCache();
         updateScrollMetrics();
         update();
@@ -122,7 +126,6 @@ void ClipWaveformQuickItem::setState(const std::optional<AudioClipPreviewState>&
         m_loadedAssetPath = state->assetPath;
         loadWaveform(state->assetPath);
         m_horizontalZoom = 1.0;
-        m_verticalZoom = 1.0;
         m_viewStartMs = 0.0;
         invalidateWaveformCache();
     }
@@ -160,6 +163,49 @@ void ClipWaveformQuickItem::setWaveformState(const QVariantMap& state)
     emit waveformStateChanged();
 }
 
+QVariantMap ClipWaveformQuickItem::previewWaveformState() const
+{
+    return m_previewWaveformState;
+}
+
+void ClipWaveformQuickItem::setPreviewWaveformState(const QVariantMap& state)
+{
+    const auto active = state.value(QStringLiteral("active"), false).toBool();
+    auto startMs = state.value(QStringLiteral("clipStartMs"), 0).toInt();
+    auto endMs = state.value(QStringLiteral("clipEndMs"), startMs + 1).toInt();
+    if (m_state.has_value() && m_state->sourceDurationMs > 0)
+    {
+        startMs = std::clamp(startMs, 0, std::max(0, m_state->sourceDurationMs - 1));
+        endMs = std::clamp(endMs, startMs + 1, m_state->sourceDurationMs);
+    }
+    else
+    {
+        startMs = std::max(0, startMs);
+        endMs = std::max(startMs + 1, endMs);
+    }
+
+    if (m_previewClipRangeActive == active
+        && m_previewClipStartMs == startMs
+        && m_previewClipEndMs == endMs)
+    {
+        return;
+    }
+
+    m_previewClipRangeActive = active;
+    m_previewClipStartMs = startMs;
+    m_previewClipEndMs = endMs;
+    m_previewWaveformState = QVariantMap{
+        {QStringLiteral("active"), m_previewClipRangeActive},
+        {QStringLiteral("clipStartMs"), m_previewClipStartMs},
+        {QStringLiteral("clipEndMs"), m_previewClipEndMs}};
+    if (m_clipRangeOnly)
+    {
+        invalidateWaveformCache();
+        update();
+    }
+    emit previewWaveformStateChanged();
+}
+
 bool ClipWaveformQuickItem::clipRangeHandlesVisible() const
 {
     return m_clipRangeHandlesVisible;
@@ -176,6 +222,27 @@ void ClipWaveformQuickItem::setClipRangeHandlesVisible(const bool visible)
     invalidateWaveformCache();
     update();
     emit clipRangeHandlesVisibleChanged();
+}
+
+bool ClipWaveformQuickItem::clipRangeOnly() const
+{
+    return m_clipRangeOnly;
+}
+
+void ClipWaveformQuickItem::setClipRangeOnly(const bool clipRangeOnly)
+{
+    if (m_clipRangeOnly == clipRangeOnly)
+    {
+        return;
+    }
+
+    m_clipRangeOnly = clipRangeOnly;
+    m_viewStartMs = 0.0;
+    clampViewWindow();
+    invalidateWaveformCache();
+    updateScrollMetrics();
+    update();
+    emit clipRangeOnlyChanged();
 }
 
 bool ClipWaveformQuickItem::playheadVisible() const
@@ -212,6 +279,25 @@ void ClipWaveformQuickItem::setContentMargin(const qreal margin)
     invalidateWaveformCache();
     update();
     emit contentMarginChanged();
+}
+
+qreal ClipWaveformQuickItem::verticalZoom() const
+{
+    return m_verticalZoom;
+}
+
+void ClipWaveformQuickItem::setVerticalZoom(const qreal zoom)
+{
+    const auto nextZoom = std::clamp(zoom, 0.5, 8.0);
+    if (qFuzzyCompare(m_verticalZoom + 1.0, nextZoom + 1.0))
+    {
+        return;
+    }
+
+    m_verticalZoom = nextZoom;
+    invalidateWaveformCache();
+    update();
+    emit verticalZoomChanged();
 }
 
 bool ClipWaveformQuickItem::scrollVisible() const
@@ -375,10 +461,14 @@ void ClipWaveformQuickItem::wheelEvent(QWheelEvent* event)
     const auto steps = static_cast<double>(deltaY) / 120.0;
     if (event->modifiers().testFlag(Qt::ShiftModifier))
     {
-        m_verticalZoom = std::clamp(m_verticalZoom * std::pow(zoomStepFactor, steps), 0.5, 8.0);
-        invalidateWaveformCache();
-        update();
+        setVerticalZoom(m_verticalZoom * std::pow(zoomStepFactor, steps));
         event->accept();
+        return;
+    }
+
+    if (m_clipRangeOnly)
+    {
+        event->ignore();
         return;
     }
 
@@ -416,6 +506,7 @@ void ClipWaveformQuickItem::wheelEvent(QWheelEvent* event)
 void ClipWaveformQuickItem::loadWaveform(const QString& filePath)
 {
     m_peaks.clear();
+    m_waveformChannelCount = 0;
 
     auto reader = std::unique_ptr<juce::AudioFormatReader>(
         waveformFormatManager().createReaderFor(toJuceFile(filePath)));
@@ -424,39 +515,51 @@ void ClipWaveformQuickItem::loadWaveform(const QString& filePath)
         return;
     }
 
-    constexpr int kPeakBucketCount = 1400;
+    constexpr int kPeakBucketCount = 32768;
+    constexpr int kReadChunkSamples = 65536;
     const auto totalSamples = reader->lengthInSamples;
-    const auto bucketCount = std::max(64, std::min<int>(kPeakBucketCount, static_cast<int>(totalSamples)));
-    const auto bucketSamples = std::max<juce::int64>(
+    const auto bucketCount = static_cast<int>(std::clamp<juce::int64>(
+        totalSamples,
         1,
-        static_cast<juce::int64>(std::ceil(static_cast<double>(totalSamples) / bucketCount)));
+        kPeakBucketCount));
+    const auto channelCount = std::max(1, static_cast<int>(reader->numChannels));
+    m_waveformChannelCount = std::clamp(channelCount, 1, 2);
+    m_peaks.assign(static_cast<std::size_t>(bucketCount), WaveformPeak{});
 
-    m_peaks.reserve(static_cast<std::size_t>(bucketCount));
-
-    for (int bucketIndex = 0; bucketIndex < bucketCount; ++bucketIndex)
+    juce::AudioBuffer<float> buffer(channelCount, kReadChunkSamples);
+    for (juce::int64 readStartSample = 0; readStartSample < totalSamples; readStartSample += kReadChunkSamples)
     {
-        const auto startSample = static_cast<juce::int64>(bucketIndex) * bucketSamples;
-        if (startSample >= totalSamples)
+        const auto samplesToRead =
+            static_cast<int>(std::min<juce::int64>(kReadChunkSamples, totalSamples - readStartSample));
+        buffer.clear();
+        if (!reader->read(&buffer, 0, samplesToRead, readStartSample, true, true))
         {
-            break;
+            continue;
         }
 
-        const auto samplesToRead =
-            static_cast<int>(std::min<juce::int64>(bucketSamples, totalSamples - startSample));
-        juce::AudioBuffer<float> buffer(reader->numChannels, samplesToRead);
-        reader->read(&buffer, 0, samplesToRead, startSample, true, true);
-
-        float peak = 0.0F;
-        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        std::array<const float*, 2> channelData{};
+        for (int channel = 0; channel < m_waveformChannelCount; ++channel)
         {
-            const auto* channelData = buffer.getReadPointer(channel);
-            for (int sampleIndex = 0; sampleIndex < samplesToRead; ++sampleIndex)
+            channelData[static_cast<std::size_t>(channel)] = buffer.getReadPointer(channel);
+        }
+
+        for (int sampleIndex = 0; sampleIndex < samplesToRead; ++sampleIndex)
+        {
+            const auto absoluteSample = readStartSample + sampleIndex;
+            const auto bucketIndex = static_cast<int>(std::clamp<juce::int64>(
+                (absoluteSample * bucketCount) / std::max<juce::int64>(1, totalSamples),
+                0,
+                bucketCount - 1));
+            auto& peak = m_peaks[static_cast<std::size_t>(bucketIndex)];
+            for (int channel = 0; channel < m_waveformChannelCount; ++channel)
             {
-                peak = std::max(peak, std::abs(channelData[sampleIndex]));
+                const auto* channelSamples = channelData[static_cast<std::size_t>(channel)];
+                const auto sample = channelSamples[sampleIndex];
+                auto& channelPeak = peak.channels[static_cast<std::size_t>(channel)];
+                channelPeak.positive = std::max(channelPeak.positive, sample);
+                channelPeak.negative = std::min(channelPeak.negative, sample);
             }
         }
-
-        m_peaks.push_back(peak);
     }
 }
 
@@ -503,7 +606,9 @@ double ClipWaveformQuickItem::xForMs(const QRectF& bounds, const int timeMs) con
     }
 
     const auto ratio =
-        (static_cast<double>(std::clamp(timeMs, 0, m_state->sourceDurationMs)) - m_viewStartMs)
+        (static_cast<double>(std::clamp(timeMs, 0, m_state->sourceDurationMs))
+            - static_cast<double>(displayRangeStartMs())
+            - m_viewStartMs)
         / std::max(1.0, visibleDurationMs());
     return bounds.left() + ratio * bounds.width();
 }
@@ -516,37 +621,111 @@ int ClipWaveformQuickItem::msForX(const QRectF& bounds, const double x) const
     }
 
     const auto ratio = std::clamp((x - bounds.left()) / std::max(1.0, bounds.width()), 0.0, 1.0);
-    return static_cast<int>(std::lround(m_viewStartMs + ratio * visibleDurationMs()));
+    return std::clamp(
+        static_cast<int>(std::lround(
+            static_cast<double>(displayRangeStartMs()) + m_viewStartMs + ratio * visibleDurationMs())),
+        0,
+        m_state->sourceDurationMs);
 }
 
-double ClipWaveformQuickItem::interpolatedPeakAtMs(const double timeMs) const
+ClipWaveformQuickItem::WaveformPeak ClipWaveformQuickItem::peakRangeBetweenMs(
+    const double startMs,
+    const double endMs) const
 {
     if (!m_state.has_value() || m_state->sourceDurationMs <= 0 || m_peaks.empty())
     {
-        return 0.0;
+        return {};
     }
 
     if (m_peaks.size() == 1)
     {
-        return std::clamp(static_cast<double>(m_peaks.front()), 0.0, 1.0);
+        return m_peaks.front();
     }
 
-    const auto normalizedTime =
-        std::clamp(timeMs, 0.0, static_cast<double>(m_state->sourceDurationMs))
-        / std::max(1.0, static_cast<double>(m_state->sourceDurationMs));
-    const auto scaledIndex = normalizedTime * static_cast<double>(m_peaks.size() - 1);
-    const auto leftIndex = static_cast<std::size_t>(std::clamp(
-        static_cast<int>(std::floor(scaledIndex)),
+    const auto durationMs = std::max(1.0, static_cast<double>(m_state->sourceDurationMs));
+    const auto clampedStartMs = std::clamp(std::min(startMs, endMs), 0.0, durationMs);
+    const auto clampedEndMs = std::clamp(std::max(startMs, endMs), clampedStartMs, durationMs);
+    const auto startScaledIndex = (clampedStartMs / durationMs) * static_cast<double>(m_peaks.size() - 1);
+    const auto endScaledIndex = (clampedEndMs / durationMs) * static_cast<double>(m_peaks.size() - 1);
+    const auto startIndex = static_cast<std::size_t>(std::clamp(
+        static_cast<int>(std::floor(startScaledIndex)),
         0,
         static_cast<int>(m_peaks.size() - 1)));
-    const auto rightIndex = static_cast<std::size_t>(std::clamp(
-        static_cast<int>(std::ceil(scaledIndex)),
+    const auto endIndex = static_cast<std::size_t>(std::clamp(
+        static_cast<int>(std::ceil(endScaledIndex)),
         0,
         static_cast<int>(m_peaks.size() - 1)));
-    const auto blend = std::clamp(scaledIndex - std::floor(scaledIndex), 0.0, 1.0);
-    const auto leftPeak = static_cast<double>(m_peaks[leftIndex]);
-    const auto rightPeak = static_cast<double>(m_peaks[rightIndex]);
-    return std::clamp(leftPeak + ((rightPeak - leftPeak) * blend), 0.0, 1.0);
+
+    WaveformPeak result;
+    for (auto peakIndex = startIndex; peakIndex <= endIndex; ++peakIndex)
+    {
+        const auto& peak = m_peaks[peakIndex];
+        for (int channel = 0; channel < m_waveformChannelCount; ++channel)
+        {
+            auto& resultChannel = result.channels[static_cast<std::size_t>(channel)];
+            const auto& sourceChannel = peak.channels[static_cast<std::size_t>(channel)];
+            resultChannel.positive = std::max(resultChannel.positive, sourceChannel.positive);
+            resultChannel.negative = std::min(resultChannel.negative, sourceChannel.negative);
+        }
+        if (peakIndex == endIndex)
+        {
+            break;
+        }
+    }
+    for (int channel = 0; channel < m_waveformChannelCount; ++channel)
+    {
+        auto& resultChannel = result.channels[static_cast<std::size_t>(channel)];
+        resultChannel.positive = std::clamp(resultChannel.positive, 0.0F, 1.0F);
+        resultChannel.negative = std::clamp(resultChannel.negative, -1.0F, 0.0F);
+    }
+    return result;
+}
+
+int ClipWaveformQuickItem::displayRangeStartMs() const
+{
+    if (!m_clipRangeOnly || !m_state.has_value() || m_state->sourceDurationMs <= 0)
+    {
+        return 0;
+    }
+
+    if (m_previewClipRangeActive)
+    {
+        return std::clamp(m_previewClipStartMs, 0, std::max(0, m_state->sourceDurationMs - 1));
+    }
+
+    return std::clamp(m_state->clipStartMs, 0, std::max(0, m_state->sourceDurationMs - 1));
+}
+
+int ClipWaveformQuickItem::displayRangeEndMs() const
+{
+    if (!m_clipRangeOnly || !m_state.has_value() || m_state->sourceDurationMs <= 0)
+    {
+        return m_state.has_value() ? std::max(1, m_state->sourceDurationMs) : 1;
+    }
+
+    const auto startMs = displayRangeStartMs();
+    if (m_previewClipRangeActive)
+    {
+        return std::clamp(m_previewClipEndMs, startMs + 1, m_state->sourceDurationMs);
+    }
+
+    return std::clamp(m_state->clipEndMs, startMs + 1, m_state->sourceDurationMs);
+}
+
+int ClipWaveformQuickItem::displayRangeDurationMs() const
+{
+    if (!m_state.has_value() || m_state->sourceDurationMs <= 0)
+    {
+        return 1;
+    }
+    if (!m_clipRangeOnly)
+    {
+        return m_state->sourceDurationMs;
+    }
+
+    const auto startMs = displayRangeStartMs();
+    const auto endMs = displayRangeEndMs();
+    return std::max(1, endMs - startMs);
 }
 
 void ClipWaveformQuickItem::paintHandle(QPainter& painter, const QRectF& bounds, const double x, const QColor& color) const
@@ -648,8 +827,12 @@ double ClipWaveformQuickItem::visibleDurationMs() const
     {
         return 1.0;
     }
+    if (m_clipRangeOnly)
+    {
+        return std::max(1.0, static_cast<double>(displayRangeDurationMs()));
+    }
 
-    return std::max(12.0, static_cast<double>(m_state->sourceDurationMs) / std::max(1.0, m_horizontalZoom));
+    return std::max(12.0, static_cast<double>(displayRangeDurationMs()) / std::max(1.0, m_horizontalZoom));
 }
 
 double ClipWaveformQuickItem::maxHorizontalZoom() const
@@ -658,8 +841,12 @@ double ClipWaveformQuickItem::maxHorizontalZoom() const
     {
         return 1.0;
     }
+    if (m_clipRangeOnly)
+    {
+        return 1.0;
+    }
 
-    return std::max(1.0, static_cast<double>(m_state->sourceDurationMs) / 12.0);
+    return std::max(1.0, static_cast<double>(displayRangeDurationMs()) / 12.0);
 }
 
 void ClipWaveformQuickItem::clampViewWindow()
@@ -669,18 +856,24 @@ void ClipWaveformQuickItem::clampViewWindow()
         m_viewStartMs = 0.0;
         return;
     }
+    if (m_clipRangeOnly)
+    {
+        m_horizontalZoom = 1.0;
+        m_viewStartMs = 0.0;
+        return;
+    }
 
-    const auto maxStartMs = std::max(0.0, static_cast<double>(m_state->sourceDurationMs) - visibleDurationMs());
+    const auto maxStartMs = std::max(0.0, static_cast<double>(displayRangeDurationMs()) - visibleDurationMs());
     m_viewStartMs = std::clamp(m_viewStartMs, 0.0, maxStartMs);
 }
 
 void ClipWaveformQuickItem::updateScrollMetrics()
 {
-    const auto totalDurationMs = (m_state.has_value() && m_state->sourceDurationMs > 0) ? m_state->sourceDurationMs : 0;
+    const auto totalDurationMs = (m_state.has_value() && m_state->sourceDurationMs > 0) ? displayRangeDurationMs() : 0;
     const auto visibleMs = totalDurationMs > 0 ? static_cast<int>(std::lround(visibleDurationMs())) : 0;
     const auto viewStartMs = totalDurationMs > 0 ? static_cast<int>(std::lround(m_viewStartMs)) : 0;
     const auto maxStartMs = std::max(0, totalDurationMs - visibleMs);
-    const auto showScrollBar = totalDurationMs > 0 && maxStartMs > 0;
+    const auto showScrollBar = !m_clipRangeOnly && totalDurationMs > 0 && maxStartMs > 0;
 
     if (m_scrollVisible == showScrollBar
         && m_scrollValue == std::clamp(viewStartMs, 0, maxStartMs)
@@ -749,36 +942,69 @@ void ClipWaveformQuickItem::rebuildWaveformCache()
         return;
     }
 
-    const auto clipRect = selectionRect(bounds);
+    const auto clipRect = m_clipRangeOnly ? bounds : selectionRect(bounds);
     painter.fillRect(bounds, QColor{12, 16, 22});
     painter.fillRect(clipRect, QColor{24, 34, 46});
 
-    const auto centerY = bounds.center().y();
+    const auto displayedChannelCount = std::clamp(m_waveformChannelCount, 1, 2);
+    const auto channelRowHeight = bounds.height() / static_cast<double>(displayedChannelCount);
     painter.setPen(QPen(QColor{28, 35, 44}, 1.0));
-    painter.drawLine(QPointF{bounds.left(), centerY}, QPointF{bounds.right(), centerY});
+    for (int channel = 0; channel < displayedChannelCount; ++channel)
+    {
+        const auto rowTop = bounds.top() + static_cast<double>(channel) * channelRowHeight;
+        const auto rowBottom = (channel + 1 == displayedChannelCount) ? bounds.bottom() : rowTop + channelRowHeight;
+        const QRectF channelBounds{
+            QPointF{bounds.left(), rowTop},
+            QPointF{bounds.right(), rowBottom}};
+        const auto rowCenterY = channelBounds.center().y();
+        painter.drawLine(QPointF{bounds.left(), rowCenterY}, QPointF{bounds.right(), rowCenterY});
+        if (displayedChannelCount > 1 && channel + 1 < displayedChannelCount)
+        {
+            painter.drawLine(QPointF{bounds.left(), rowBottom}, QPointF{bounds.right(), rowBottom});
+        }
+    }
 
     if (!m_peaks.empty())
     {
-        const auto verticalRadius = std::max(10.0, bounds.height() * 0.45);
         const auto leftX = static_cast<int>(std::floor(bounds.left()));
         const auto rightX = static_cast<int>(std::ceil(bounds.right()));
 
         painter.setPen(Qt::NoPen);
         for (int pixelX = leftX; pixelX <= rightX; ++pixelX)
         {
-            const auto timeMs = m_viewStartMs
-                + (((static_cast<double>(pixelX) + 0.5) - bounds.left()) / std::max(1.0, bounds.width()))
+            const auto pixelStartMs = static_cast<double>(displayRangeStartMs()) + m_viewStartMs
+                + ((static_cast<double>(pixelX) - bounds.left()) / std::max(1.0, bounds.width()))
                     * visibleDurationMs();
-            const auto amplitude = interpolatedPeakAtMs(timeMs);
-            const auto halfHeight = std::max(
-                1.0,
-                std::min(bounds.height() * 0.48, amplitude * verticalRadius * m_verticalZoom));
-            const auto active = clipRect.contains(QPointF{static_cast<double>(pixelX), centerY});
-            painter.setBrush(active ? QColor{202, 216, 234} : QColor{92, 102, 114});
-            painter.drawRect(
-                QRectF{
-                    QPointF{static_cast<double>(pixelX), centerY - halfHeight},
-                    QSizeF{1.0, (halfHeight * 2.0) + 1.0}});
+            const auto pixelEndMs = static_cast<double>(displayRangeStartMs()) + m_viewStartMs
+                + (((static_cast<double>(pixelX) + 1.0) - bounds.left()) / std::max(1.0, bounds.width()))
+                    * visibleDurationMs();
+            const auto peak = peakRangeBetweenMs(pixelStartMs, pixelEndMs);
+            for (int channel = 0; channel < displayedChannelCount; ++channel)
+            {
+                const auto rowTop = bounds.top() + static_cast<double>(channel) * channelRowHeight;
+                const auto rowBottom = (channel + 1 == displayedChannelCount) ? bounds.bottom() : rowTop + channelRowHeight;
+                const QRectF channelBounds{
+                    QPointF{bounds.left(), rowTop},
+                    QPointF{bounds.right(), rowBottom}};
+                const auto rowCenterY = channelBounds.center().y();
+                const auto verticalRadius = std::max(2.0, channelBounds.height() * 0.45);
+                const auto& channelPeak = peak.channels[static_cast<std::size_t>(channel)];
+                const auto positiveHeight = std::min(
+                    channelBounds.height() * 0.48,
+                    static_cast<double>(channelPeak.positive) * verticalRadius * m_verticalZoom);
+                const auto negativeHeight = std::min(
+                    channelBounds.height() * 0.48,
+                    static_cast<double>(std::abs(channelPeak.negative)) * verticalRadius * m_verticalZoom);
+                const auto totalHeight = positiveHeight + negativeHeight;
+                const auto topY = rowCenterY - (totalHeight > 0.001 ? positiveHeight : 1.0);
+                const auto drawHeight = totalHeight > 0.001 ? totalHeight + 1.0 : 2.0;
+                const auto active = clipRect.contains(QPointF{static_cast<double>(pixelX), rowCenterY});
+                painter.setBrush(active ? QColor{202, 216, 234} : QColor{92, 102, 114});
+                painter.drawRect(
+                    QRectF{
+                        QPointF{static_cast<double>(pixelX), topY},
+                        QSizeF{1.0, drawHeight}});
+            }
         }
     }
     else

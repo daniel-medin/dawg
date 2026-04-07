@@ -624,11 +624,11 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
         const auto relativeVideoPath = makeRelativePath(controllerState.videoPath, &errorMessage);
         if (!relativeVideoPath.has_value())
         {
-            m_window.m_dialogController->execMessage(
+            static_cast<void>(m_window.m_dialogController->execMessage(
                 QStringLiteral("Save Project"),
                 errorMessage,
                 {},
-                {DialogController::Button::Ok});
+                {DialogController::Button::Ok}));
             return false;
         }
         controllerState.videoPath = *relativeVideoPath;
@@ -639,11 +639,11 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
         const auto relativeProxyVideoPath = makeRelativePath(controllerState.proxyVideoPath, &errorMessage);
         if (!relativeProxyVideoPath.has_value())
         {
-            m_window.m_dialogController->execMessage(
+            static_cast<void>(m_window.m_dialogController->execMessage(
                 QStringLiteral("Save Project"),
                 errorMessage,
                 {},
-                {DialogController::Button::Ok});
+                {DialogController::Button::Ok}));
             return false;
         }
         controllerState.proxyVideoPath = *relativeProxyVideoPath;
@@ -654,11 +654,11 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
         const auto relativeAssetPath = makeRelativePath(assetPath, &errorMessage);
         if (!relativeAssetPath.has_value())
         {
-            m_window.m_dialogController->execMessage(
+            static_cast<void>(m_window.m_dialogController->execMessage(
                 QStringLiteral("Save Project"),
                 errorMessage,
                 {},
-                {DialogController::Button::Ok});
+                {DialogController::Button::Ok}));
             return false;
         }
         assetPath = *relativeAssetPath;
@@ -671,11 +671,11 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
             const auto relativeNodePath = makeRelativePath(track.nodeDocumentPath, &errorMessage);
             if (!relativeNodePath.has_value())
             {
-                m_window.m_dialogController->execMessage(
+                static_cast<void>(m_window.m_dialogController->execMessage(
                     QStringLiteral("Save Project"),
                     errorMessage,
                     {},
-                    {DialogController::Button::Ok});
+                    {DialogController::Button::Ok}));
                 return false;
             }
             track.nodeDocumentPath = *relativeNodePath;
@@ -688,11 +688,11 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
         const auto relativeAssetPath = makeRelativePath(track.attachedAudio->assetPath, &errorMessage);
         if (!relativeAssetPath.has_value())
         {
-            m_window.m_dialogController->execMessage(
+            static_cast<void>(m_window.m_dialogController->execMessage(
                 QStringLiteral("Save Project"),
                 errorMessage,
                 {},
-                {DialogController::Button::Ok});
+                {DialogController::Button::Ok}));
             return false;
         }
         track.attachedAudio->assetPath = *relativeAssetPath;
@@ -706,11 +706,11 @@ bool ProjectWindowController::saveProjectToPath(const QString& projectFilePath, 
 
     if (!dawg::project::saveDocument(projectFilePath, document, &errorMessage))
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Save Project"),
             errorMessage,
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return false;
     }
 
@@ -749,11 +749,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
     const auto sanitizedProjectName = dawg::project::sanitizeProjectName(selectedProjectFileInfo.completeBaseName());
     if (sanitizedProjectName.isEmpty())
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Save Project As"),
             QStringLiteral("Choose a valid project name."),
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return false;
     }
 
@@ -762,11 +762,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
     QDir targetRoot(targetRootPath);
     if (targetRoot.exists() && !targetRoot.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty())
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Save Project As"),
             QStringLiteral("Destination folder already exists and is not empty:\n%1").arg(targetRootPath),
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return false;
     }
 
@@ -776,11 +776,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
         || !QDir().mkpath(targetRoot.filePath(QStringLiteral("settings")))
         || !QDir().mkpath(targetRoot.filePath(QStringLiteral("thumbnails/timeline"))))
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Save Project As"),
             QStringLiteral("Failed to create destination project folders."),
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return false;
     }
 
@@ -828,11 +828,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
             copyIntoTargetProject(controllerState.videoPath, QStringLiteral("video"), &errorMessage);
         if (!copiedVideoPath.has_value())
         {
-            m_window.m_dialogController->execMessage(
+            static_cast<void>(m_window.m_dialogController->execMessage(
                 QStringLiteral("Save Project As"),
                 errorMessage,
                 {},
-                {DialogController::Button::Ok});
+                {DialogController::Button::Ok}));
             return false;
         }
         controllerState.videoPath = *copiedVideoPath;
@@ -844,11 +844,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
             copyIntoTargetProject(controllerState.proxyVideoPath, QStringLiteral("video"), &errorMessage);
         if (!copiedProxyVideoPath.has_value())
         {
-            m_window.m_dialogController->execMessage(
+            static_cast<void>(m_window.m_dialogController->execMessage(
                 QStringLiteral("Save Project As"),
                 errorMessage,
                 {},
-                {DialogController::Button::Ok});
+                {DialogController::Button::Ok}));
             return false;
         }
         controllerState.proxyVideoPath = *copiedProxyVideoPath;
@@ -871,11 +871,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
             copyIntoTargetProject(assetPath, QStringLiteral("audio"), &errorMessage);
         if (!copiedAudioPath.has_value())
         {
-            m_window.m_dialogController->execMessage(
+            static_cast<void>(m_window.m_dialogController->execMessage(
                 QStringLiteral("Save Project As"),
                 errorMessage,
                 {},
-                {DialogController::Button::Ok});
+                {DialogController::Button::Ok}));
             return false;
         }
         copiedAudioPaths.insert(assetPath, *copiedAudioPath);
@@ -897,11 +897,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
                     copyIntoTargetProject(track.nodeDocumentPath, QStringLiteral("nodes"), &errorMessage);
                 if (!copiedNodePath.has_value())
                 {
-                    m_window.m_dialogController->execMessage(
+                    static_cast<void>(m_window.m_dialogController->execMessage(
                         QStringLiteral("Save Project As"),
                         errorMessage,
                         {},
-                        {DialogController::Button::Ok});
+                        {DialogController::Button::Ok}));
                     return false;
                 }
                 copiedNodePaths.insert(track.nodeDocumentPath, *copiedNodePath);
@@ -925,11 +925,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
             copyIntoTargetProject(track.attachedAudio->assetPath, QStringLiteral("audio"), &errorMessage);
         if (!copiedAudioPath.has_value())
         {
-            m_window.m_dialogController->execMessage(
+            static_cast<void>(m_window.m_dialogController->execMessage(
                 QStringLiteral("Save Project As"),
                 errorMessage,
                 {},
-                {DialogController::Button::Ok});
+                {DialogController::Button::Ok}));
             return false;
         }
         copiedAudioPaths.insert(track.attachedAudio->assetPath, *copiedAudioPath);
@@ -951,11 +951,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
             }
             if (!QFile::copy(nodeFileInfo.absoluteFilePath(), targetNodePath))
             {
-                m_window.m_dialogController->execMessage(
+                static_cast<void>(m_window.m_dialogController->execMessage(
                     QStringLiteral("Save Project As"),
                     QStringLiteral("Failed to copy saved node %1 to the new project.").arg(nodeFileInfo.fileName()),
                     {},
-                    {DialogController::Button::Ok});
+                    {DialogController::Button::Ok}));
                 return false;
             }
         }
@@ -997,11 +997,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
     };
     if (!dawg::project::saveDocument(targetProjectFilePath, document, &errorMessage))
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Save Project As"),
             errorMessage,
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return false;
     }
 
@@ -1010,11 +1010,11 @@ bool ProjectWindowController::saveProjectAsNewCopy()
     m_window.m_projectStateChangeInProgress = false;
     if (!restored)
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Save Project As"),
             errorMessage,
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return false;
     }
 
@@ -1034,11 +1034,11 @@ bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
     const auto document = dawg::project::loadDocument(projectFilePath, &errorMessage);
     if (!document.has_value())
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Open Project"),
             errorMessage,
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return false;
     }
 
@@ -1110,11 +1110,11 @@ bool ProjectWindowController::loadProjectFile(const QString& projectFilePath)
             << "loadProjectFile controller restore failed:"
             << projectFilePath
             << "error=" << errorMessage;
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Open Project"),
             errorMessage,
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return false;
     }
 
@@ -1147,11 +1147,11 @@ bool ProjectWindowController::openProjectFileWithPrompt(const QString& projectFi
     if (!QFileInfo::exists(normalizedProjectPath))
     {
         removeRecentProjectPath(normalizedProjectPath);
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("Open Project"),
             QStringLiteral("Project file not found:\n%1").arg(QDir::toNativeSeparators(normalizedProjectPath)),
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return false;
     }
 
@@ -1165,11 +1165,11 @@ bool ProjectWindowController::createProjectAt(const QString& projectName, const 
     QDir projectRoot(projectRootPath);
     if (projectRoot.exists() && !projectRoot.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty())
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("New Project"),
             QStringLiteral("Project folder already exists and is not empty:\n%1").arg(projectRootPath),
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return false;
     }
 
@@ -1179,11 +1179,11 @@ bool ProjectWindowController::createProjectAt(const QString& projectName, const 
         || !QDir().mkpath(projectRoot.filePath(QStringLiteral("settings")))
         || !QDir().mkpath(projectRoot.filePath(QStringLiteral("thumbnails/timeline"))))
     {
-        m_window.m_dialogController->execMessage(
+        static_cast<void>(m_window.m_dialogController->execMessage(
             QStringLiteral("New Project"),
             QStringLiteral("Failed to create project folders in:\n%1").arg(projectRootPath),
             {},
-            {DialogController::Button::Ok});
+            {DialogController::Button::Ok}));
         return false;
     }
 

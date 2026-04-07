@@ -254,7 +254,7 @@ bool AudioPlaybackCoordinator::syncNodePreview(
     const int playheadMs,
     const bool forceRepositionActiveTracks)
 {
-    if (clips.empty() || nodeDurationMs <= 0)
+    if (nodeDurationMs <= 0)
     {
         stopNodePreview();
         return false;
@@ -325,7 +325,7 @@ bool AudioPlaybackCoordinator::syncNodePreview(
     }
     m_nodePreviewTrackIds = std::move(previewTrackIds);
     m_nodePreviewActiveTrackIds = std::move(activeTrackIds);
-    return anyClipStarted || !m_nodePreviewTrackIds.empty();
+    return anyClipStarted || !m_nodePreviewTrackIds.empty() || clips.empty();
 }
 
 void AudioPlaybackCoordinator::stopNodePreview()

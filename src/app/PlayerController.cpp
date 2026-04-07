@@ -497,7 +497,7 @@ bool PlayerController::startNodeEditorPreview(
     const int playheadMs,
     const int projectFrame)
 {
-    if (!hasVideoLoaded() || clips.empty() || nodeDurationMs <= 0)
+    if (!hasVideoLoaded() || nodeDurationMs <= 0)
     {
         return false;
     }
@@ -543,7 +543,7 @@ bool PlayerController::syncNodeEditorPreview(
     const int playheadMs,
     const bool forceRepositionActiveTracks)
 {
-    if (!hasVideoLoaded() || clips.empty() || nodeDurationMs <= 0)
+    if (!hasVideoLoaded() || nodeDurationMs <= 0)
     {
         stopNodeEditorPreview();
         return false;

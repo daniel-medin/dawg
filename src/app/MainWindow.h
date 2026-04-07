@@ -259,6 +259,9 @@ private:
     void deleteFromFocusedPanel();
     void setNodeEditorLaneMuted(const QString& laneId, bool muted);
     void setNodeEditorLaneSoloed(const QString& laneId, bool soloed);
+    void moveNodeEditorClip(const QString& laneId, const QString& clipId, int laneOffsetMs);
+    void trimNodeEditorClip(const QString& laneId, const QString& clipId, int targetMs, bool trimStart);
+    [[nodiscard]] bool trimSelectedNodeEditorClipToPlayhead(bool trimStart);
     bool startNodeEditorPreview();
     void stopNodeEditorPreview(bool restorePlaybackAnchor = true);
     void toggleNodeEditorPreview();

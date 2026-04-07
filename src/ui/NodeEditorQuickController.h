@@ -96,6 +96,8 @@ public:
     Q_INVOKABLE void selectLane(const QString& laneId);
     Q_INVOKABLE void selectLaneHeader(const QString& laneId);
     Q_INVOKABLE void selectClip(const QString& laneId, const QString& clipId);
+    Q_INVOKABLE void moveClipToRatio(const QString& laneId, const QString& clipId, qreal offsetRatio);
+    Q_INVOKABLE void trimClipToRatio(const QString& laneId, const QString& clipId, bool trimStart, qreal targetRatio);
     Q_INVOKABLE void setLaneMuted(const QString& laneId, bool muted);
     Q_INVOKABLE void setLaneSoloed(const QString& laneId, bool soloed);
     Q_INVOKABLE qreal laneMeterLevel(const QString& laneId) const;
@@ -118,6 +120,8 @@ signals:
     void playheadChanged(int playheadMs);
     void laneMuteRequested(const QString& laneId, bool muted);
     void laneSoloRequested(const QString& laneId, bool soloed);
+    void clipMoveRequested(const QString& laneId, const QString& clipId, int laneOffsetMs);
+    void clipTrimRequested(const QString& laneId, const QString& clipId, int targetMs, bool trimStart);
     void fileActionRequested(const QString& actionKey);
     void audioActionRequested(const QString& actionKey);
 

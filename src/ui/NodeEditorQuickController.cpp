@@ -483,6 +483,55 @@ void NodeEditorQuickController::selectClip(const QString& laneId, const QString&
     emit stateChanged();
 }
 
+void NodeEditorQuickController::moveClipToRatio(
+    const QString& laneId,
+    const QString& clipId,
+    const qreal offsetRatio)
+{
+    if (laneId.isEmpty() || clipId.isEmpty())
+    {
+        return;
+    }
+
+    selectClip(laneId, clipId);
+    const auto durationMs = nodeDurationMs();
+    if (durationMs <= 0)
+    {
+        return;
+    }
+
+    const auto laneOffsetMs = std::clamp(
+        static_cast<int>(std::lround(std::clamp(offsetRatio, 0.0, 1.0) * static_cast<qreal>(durationMs))),
+        0,
+        durationMs);
+    emit clipMoveRequested(laneId, clipId, laneOffsetMs);
+}
+
+void NodeEditorQuickController::trimClipToRatio(
+    const QString& laneId,
+    const QString& clipId,
+    const bool trimStart,
+    const qreal targetRatio)
+{
+    if (laneId.isEmpty() || clipId.isEmpty())
+    {
+        return;
+    }
+
+    selectClip(laneId, clipId);
+    const auto durationMs = nodeDurationMs();
+    if (durationMs <= 0)
+    {
+        return;
+    }
+
+    const auto targetMs = std::clamp(
+        static_cast<int>(std::lround(std::clamp(targetRatio, 0.0, 1.0) * static_cast<qreal>(durationMs))),
+        0,
+        durationMs);
+    emit clipTrimRequested(laneId, clipId, targetMs, trimStart);
+}
+
 void NodeEditorQuickController::setLaneMuted(const QString& laneId, const bool muted)
 {
     if (laneId.isEmpty())
