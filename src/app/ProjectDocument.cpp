@@ -77,7 +77,7 @@ AudioAttachment audioAttachmentFromJson(const QJsonObject& object)
     {
         attachment.clipEndMs = object.value(QStringLiteral("clipEndMs")).toInt();
     }
-    attachment.loopEnabled = object.value(QStringLiteral("loopEnabled")).toBool(false);
+    attachment.loopEnabled = false;
     return attachment;
 }
 
@@ -376,7 +376,7 @@ QJsonObject controllerStateToJson(const ControllerState& state)
         {QStringLiteral("masterMixMuted"), state.masterMixMuted},
         {QStringLiteral("mixSoloXorMode"), state.mixSoloXorMode},
         {QStringLiteral("mixLanes"), mixLanesToJson(state.mixLanes)},
-        {QStringLiteral("clipEditorPlayheads"), clipPlayheadsToJson(state.clipEditorPlayheads)}
+        {QStringLiteral("trackAudioPlayheads"), clipPlayheadsToJson(state.trackAudioPlayheads)}
     };
     return object;
 }
@@ -415,7 +415,7 @@ ControllerState controllerStateFromJson(const QJsonObject& object)
     state.masterMixMuted = object.value(QStringLiteral("masterMixMuted")).toBool(false);
     state.mixSoloXorMode = object.value(QStringLiteral("mixSoloXorMode")).toBool(false);
     state.mixLanes = mixLanesFromJson(object.value(QStringLiteral("mixLanes")).toArray());
-    state.clipEditorPlayheads = clipPlayheadsFromJson(object.value(QStringLiteral("clipEditorPlayheads")).toArray());
+    state.trackAudioPlayheads = clipPlayheadsFromJson(object.value(QStringLiteral("trackAudioPlayheads")).toArray());
     return state;
 }
 
@@ -428,9 +428,6 @@ QJsonObject uiStateToJson(const UiState& state)
         {QStringLiteral("timelineDetached"), state.timelineDetached},
         {QStringLiteral("detachedTimelineWindowGeometry"),
          QString::fromLatin1(state.detachedTimelineWindowGeometry.toBase64())},
-        {QStringLiteral("clipEditorDetached"), state.clipEditorDetached},
-        {QStringLiteral("detachedClipEditorWindowGeometry"),
-         QString::fromLatin1(state.detachedClipEditorWindowGeometry.toBase64())},
         {QStringLiteral("mixDetached"), state.mixDetached},
         {QStringLiteral("detachedMixWindowGeometry"),
          QString::fromLatin1(state.detachedMixWindowGeometry.toBase64())},
@@ -438,7 +435,6 @@ QJsonObject uiStateToJson(const UiState& state)
         {QStringLiteral("detachedAudioPoolWindowGeometry"),
          QString::fromLatin1(state.detachedAudioPoolWindowGeometry.toBase64())},
         {QStringLiteral("timelineVisible"), state.timelineVisible},
-        {QStringLiteral("clipEditorVisible"), state.clipEditorVisible},
         {QStringLiteral("nodeEditorVisible"), state.nodeEditorVisible},
         {QStringLiteral("mixVisible"), state.mixVisible},
         {QStringLiteral("audioPoolVisible"), state.audioPoolVisible},
@@ -450,7 +446,6 @@ QJsonObject uiStateToJson(const UiState& state)
         {QStringLiteral("useProxyVideo"), state.useProxyVideo},
         {QStringLiteral("audioPoolPreferredWidth"), state.audioPoolPreferredWidth},
         {QStringLiteral("timelinePreferredHeight"), state.timelinePreferredHeight},
-        {QStringLiteral("clipEditorPreferredHeight"), state.clipEditorPreferredHeight},
         {QStringLiteral("nodeEditorPreferredHeight"), state.nodeEditorPreferredHeight},
         {QStringLiteral("mixPreferredHeight"), state.mixPreferredHeight},
         {QStringLiteral("contentSplitterSizes"), intVectorToJson(state.contentSplitterSizes)},
@@ -469,9 +464,6 @@ UiState uiStateFromJson(const QJsonObject& object)
     state.timelineDetached = object.value(QStringLiteral("timelineDetached")).toBool(false);
     state.detachedTimelineWindowGeometry = QByteArray::fromBase64(
         object.value(QStringLiteral("detachedTimelineWindowGeometry")).toString().toLatin1());
-    state.clipEditorDetached = object.value(QStringLiteral("clipEditorDetached")).toBool(false);
-    state.detachedClipEditorWindowGeometry = QByteArray::fromBase64(
-        object.value(QStringLiteral("detachedClipEditorWindowGeometry")).toString().toLatin1());
     state.mixDetached = object.value(QStringLiteral("mixDetached")).toBool(false);
     state.detachedMixWindowGeometry = QByteArray::fromBase64(
         object.value(QStringLiteral("detachedMixWindowGeometry")).toString().toLatin1());
@@ -479,7 +471,6 @@ UiState uiStateFromJson(const QJsonObject& object)
     state.detachedAudioPoolWindowGeometry = QByteArray::fromBase64(
         object.value(QStringLiteral("detachedAudioPoolWindowGeometry")).toString().toLatin1());
     state.timelineVisible = object.value(QStringLiteral("timelineVisible")).toBool(true);
-    state.clipEditorVisible = object.value(QStringLiteral("clipEditorVisible")).toBool(false);
     state.nodeEditorVisible = object.value(QStringLiteral("nodeEditorVisible")).toBool(false);
     state.mixVisible = object.value(QStringLiteral("mixVisible")).toBool(false);
     state.audioPoolVisible = object.value(QStringLiteral("audioPoolVisible")).toBool(false);
@@ -491,7 +482,6 @@ UiState uiStateFromJson(const QJsonObject& object)
     state.useProxyVideo = object.value(QStringLiteral("useProxyVideo")).toBool(false);
     state.audioPoolPreferredWidth = object.value(QStringLiteral("audioPoolPreferredWidth")).toInt(320);
     state.timelinePreferredHeight = object.value(QStringLiteral("timelinePreferredHeight")).toInt(148);
-    state.clipEditorPreferredHeight = object.value(QStringLiteral("clipEditorPreferredHeight")).toInt(224);
     state.nodeEditorPreferredHeight = object.value(QStringLiteral("nodeEditorPreferredHeight")).toInt(260);
     state.mixPreferredHeight = object.value(QStringLiteral("mixPreferredHeight")).toInt(368);
     state.contentSplitterSizes = intVectorFromJson(object.value(QStringLiteral("contentSplitterSizes")).toArray());

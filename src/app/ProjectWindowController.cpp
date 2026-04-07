@@ -325,16 +325,6 @@ void ProjectWindowController::updateWindowTitle()
         m_window.m_detachedTimelineWindow->setTitle(detachedParts.join(QStringLiteral(" - ")));
         m_window.m_detachedTimelineWindow->setIcon(m_window.windowIcon());
     }
-    if (m_window.m_detachedClipEditorWindow)
-    {
-        QStringList detachedParts{QStringLiteral("Detached Clip Editor"), QStringLiteral("dawg")};
-        if (!m_window.m_currentProjectName.isEmpty())
-        {
-            detachedParts.push_back(m_window.m_currentProjectName);
-        }
-        m_window.m_detachedClipEditorWindow->setTitle(detachedParts.join(QStringLiteral(" - ")));
-        m_window.m_detachedClipEditorWindow->setIcon(m_window.windowIcon());
-    }
     if (m_window.m_detachedMixWindow)
     {
         QStringList detachedParts{QStringLiteral("Detached Mixer"), QStringLiteral("dawg")};

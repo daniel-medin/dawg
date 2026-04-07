@@ -7,16 +7,16 @@
 #include <QTimer>
 #include <QUuid>
 
-#include "ui/ClipEditorTypes.h"
+#include "ui/AudioClipPreviewTypes.h"
 
 class AudioEngine;
 class AudioPlaybackCoordinator;
 class MotionTracker;
 
-class ClipEditorSession
+class TrackAudioSession
 {
 public:
-    ClipEditorSession(
+    TrackAudioSession(
         MotionTracker& tracker,
         AudioEngine& audioEngine,
         AudioPlaybackCoordinator& audioPlaybackCoordinator,
@@ -65,7 +65,7 @@ public:
         const std::function<std::optional<int>(const QString&)>& audioDurationMsForPath);
 
     [[nodiscard]] bool selectedTrackLoopEnabled(bool hasVideoLoaded, const QUuid& selectedTrackId) const;
-    [[nodiscard]] std::optional<ClipEditorState> selectedClipEditorState(
+    [[nodiscard]] std::optional<AudioClipPreviewState> selectedAudioClipPreviewState(
         bool hasVideoLoaded,
         const QUuid& selectedTrackId,
         int currentFrameIndex,

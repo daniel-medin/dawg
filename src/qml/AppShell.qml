@@ -80,17 +80,6 @@ Item {
             z: 1
         }
 
-        ClipEditorScene {
-            id: clipEditorScene
-            objectName: "clipEditorScene"
-            x: rectValue(shellLayoutController.clipEditorRect, "x")
-            y: rectValue(shellLayoutController.clipEditorRect, "y")
-            width: rectValue(shellLayoutController.clipEditorRect, "width")
-            height: rectValue(shellLayoutController.clipEditorRect, "height")
-            visible: rectVisible(shellLayoutController.clipEditorRect)
-            z: 1
-        }
-
         NodeEditorScene {
             id: nodeEditorScene
             objectName: "nodeEditorScene"

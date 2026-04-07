@@ -5,7 +5,6 @@ Item {
     property bool handlesOnly: false
     readonly property var handleModel: [
         { key: "timeline", cursor: Qt.SizeVerCursor },
-        { key: "clipEditor", cursor: Qt.SizeVerCursor },
         { key: "nodeEditor", cursor: Qt.SizeVerCursor },
         { key: "mix", cursor: Qt.SizeVerCursor },
         { key: "audioPool", cursor: Qt.SizeHorCursor }
@@ -26,9 +25,6 @@ Item {
     function handleRectFor(key) {
         if (key === "timeline") {
             return shellLayoutController.timelineHandleRect
-        }
-        if (key === "clipEditor") {
-            return shellLayoutController.clipEditorHandleRect
         }
         if (key === "nodeEditor") {
             return shellLayoutController.nodeEditorHandleRect
@@ -84,18 +80,6 @@ Item {
         visible: rectVisible(shellLayoutController.timelineRect)
                  && !root.handlesOnly
         color: "#050608"
-        border.width: 1
-        border.color: "#151b23"
-    }
-
-    Rectangle {
-        x: rectValue(shellLayoutController.clipEditorRect, "x")
-        y: rectValue(shellLayoutController.clipEditorRect, "y")
-        width: rectValue(shellLayoutController.clipEditorRect, "width")
-        height: rectValue(shellLayoutController.clipEditorRect, "height")
-        visible: rectVisible(shellLayoutController.clipEditorRect)
-                 && !root.handlesOnly
-        color: "#07090c"
         border.width: 1
         border.color: "#151b23"
     }

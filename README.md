@@ -44,6 +44,8 @@ This is not intended to feel like a traditional DAW with lots of horizontal audi
 - show nodes as spans in the timeline
 - drag node starts, ends, and full spans in the timeline
 - attach audio to nodes and trim a node to the sound length
+- edit node-local lanes in the Node Editor, where imported audio becomes audio clips on lanes instead of renaming the node container
+- preview Node Editor lane audio from the node-local playhead when the Node Editor is focused
 - save portable `.node` files with embedded node audio for reuse in other projects
 - auto-pan nodes from left to right screen position
 - drag audio from the Audio Pool onto the video to create a node
@@ -77,10 +79,10 @@ This is not intended to feel like a traditional DAW with lots of horizontal audi
 The app layer is being split into smaller controllers and services instead of keeping everything in `MainWindow` and `PlayerController`.
 
 - `MainWindow` is now a frameless `QQuickView` root that loads a single `AppShell.qml` scene and exposes the shell controllers to that scene
-- the Quick-owned shell now owns the title bar, panel layout, dialogs, file picker, context menus, shell overlays, Audio Pool, timeline, clip editor, mixer, attached video viewport, and detached video window
+- the Quick-owned shell now owns the title bar, panel layout, dialogs, file picker, context menus, shell overlays, Audio Pool, timeline, mixer, attached video viewport, and detached video window
 - `ProjectWindowController`, `MediaImportController`, `PanelLayoutController`, `DebugUiController`, and `MainWindowActions` own major UI/application slices
 - `PlayerController` stays the public runtime facade
-- `VideoPlaybackCoordinator`, `AudioPlaybackCoordinator`, `TimelineLayoutService`, `TrackEditService`, `SelectionController`, `ClipEditorSession`, `MixStateStore`, `ProjectSessionAdapter`, and `NodeController` now hold most feature-specific logic
+- `VideoPlaybackCoordinator`, `AudioPlaybackCoordinator`, `TimelineLayoutService`, `TrackEditService`, `SelectionController`, `TrackAudioSession`, `MixStateStore`, `ProjectSessionAdapter`, and `NodeController` now hold most feature-specific logic
 
 Remaining widget usage is intentionally narrow: only a few native helper/debug surfaces are still QWidget-based while the normal shell and editing UI run through Qt Quick.
 
@@ -89,6 +91,12 @@ Audio now runs through a single JUCE backend path. If JUCE device initialization
 The attached viewport now uses a Qt Quick + D3D11 path on Windows, with the Qt Quick scene graph pinned to `Direct3D11`.
 
 Startup no longer depends on a debug-only local `.dev` bootstrap path. Project open/save/restore is now the intended startup flow.
+
+### Node Editor Model
+
+Nodes are containers. A node can contain node-local lanes, and each lane can hold multiple audio clips. Importing audio into the Node Editor creates an audio clip on a lane and keeps the node name unchanged.
+
+The Node Editor timeline uses node-local time based on the selected node span. When the Node Editor has focus, playback previews the node lane contents from the node-local playhead without switching the normal project timeline transport model.
 
 ## Build
 

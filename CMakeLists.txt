@@ -17,6 +17,17 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc video videoio)
 find_package(JUCE CONFIG REQUIRED)
 find_package(PkgConfig QUIET)
 
+if(WIN32 AND DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+    # vcpkg's Qt package can omit translation catalogs, but windeployqt still probes
+    # this file even when translation deployment is disabled.
+    set(_dawg_qt_translation_catalog_dir "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/translations/Qt6")
+    set(_dawg_qt_translation_catalog "${_dawg_qt_translation_catalog_dir}/catalogs.json")
+    if(NOT EXISTS "${_dawg_qt_translation_catalog}")
+        file(MAKE_DIRECTORY "${_dawg_qt_translation_catalog_dir}")
+        file(WRITE "${_dawg_qt_translation_catalog}" "[]\n")
+    endif()
+endif()
+
 if(DAWG_ENABLE_FFMPEG AND PkgConfig_FOUND)
     pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec libavformat libavutil libswscale libswresample)
 endif()
@@ -41,8 +52,8 @@ add_executable(dawg WIN32
     src/app/FilePickerController.h
     src/app/AudioPoolService.cpp
     src/app/AudioPoolService.h
-    src/app/ClipEditorSession.cpp
-    src/app/ClipEditorSession.h
+    src/app/TrackAudioSession.cpp
+    src/app/TrackAudioSession.h
     src/app/DebugUiController.cpp
     src/app/DebugUiController.h
     src/app/MainWindowActions.cpp
@@ -123,9 +134,7 @@ add_executable(dawg WIN32
     src/ui/NativeVideoViewport.h
     src/ui/DebugOverlayWindow.cpp
     src/ui/DebugOverlayWindow.h
-    src/ui/ClipEditorTypes.h
-    src/ui/ClipEditorQuickController.cpp
-    src/ui/ClipEditorQuickController.h
+    src/ui/AudioClipPreviewTypes.h
     src/ui/ClipWaveformQuickItem.cpp
     src/ui/ClipWaveformQuickItem.h
     src/ui/MixTypes.h
@@ -200,6 +209,8 @@ if(WIN32)
             "$<TARGET_FILE:Qt6::windeployqt>"
             --dir "$<TARGET_FILE_DIR:dawg>"
             --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            --no-translations
+            --no-compiler-runtime
             "$<TARGET_FILE:dawg>"
         COMMENT "Deploying Qt runtime and QML modules"
         VERBATIM

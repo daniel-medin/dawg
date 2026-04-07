@@ -41,7 +41,7 @@ struct ControllerState
     bool masterMixMuted = false;
     bool mixSoloXorMode = false;
     std::vector<MixLaneState> mixLanes;
-    std::vector<std::pair<QUuid, int>> clipEditorPlayheads;
+    std::vector<std::pair<QUuid, int>> trackAudioPlayheads;
 };
 
 struct UiState
@@ -50,14 +50,11 @@ struct UiState
     QByteArray detachedVideoWindowGeometry;
     bool timelineDetached = false;
     QByteArray detachedTimelineWindowGeometry;
-    bool clipEditorDetached = false;
-    QByteArray detachedClipEditorWindowGeometry;
     bool mixDetached = false;
     QByteArray detachedMixWindowGeometry;
     bool audioPoolDetached = false;
     QByteArray detachedAudioPoolWindowGeometry;
     bool timelineVisible = true;
-    bool clipEditorVisible = false;
     bool nodeEditorVisible = false;
     bool mixVisible = false;
     bool audioPoolVisible = false;
@@ -69,7 +66,6 @@ struct UiState
     bool useProxyVideo = false;
     int audioPoolPreferredWidth = 320;
     int timelinePreferredHeight = 148;
-    int clipEditorPreferredHeight = 224;
     int nodeEditorPreferredHeight = 260;
     int mixPreferredHeight = 368;
     std::vector<int> contentSplitterSizes;

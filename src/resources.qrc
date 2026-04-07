@@ -5,7 +5,6 @@
         <file alias="branding/logo-transparent.png">../assets/logo_transparent.png</file>
         <file alias="qml/AppShell.qml">qml/AppShell.qml</file>
         <file alias="qml/ClipGainStrip.qml">qml/ClipGainStrip.qml</file>
-        <file alias="qml/ClipEditorScene.qml">qml/ClipEditorScene.qml</file>
         <file alias="qml/DebugOverlayScene.qml">qml/DebugOverlayScene.qml</file>
         <file alias="qml/MixScene.qml">qml/MixScene.qml</file>
         <file alias="qml/MixStrip.qml">qml/MixStrip.qml</file>

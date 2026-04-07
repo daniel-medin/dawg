@@ -278,7 +278,6 @@ void ActionRegistry::rebuild()
 
     auto* audioMenu = addMenu(QStringLiteral("Audio"));
     addAction(audioMenu, QStringLiteral("importSoundAudio"), m_window.m_importSoundAction);
-    addAction(audioMenu, QStringLiteral("loopSound"), m_window.m_loopSoundAction);
     addAction(audioMenu, QStringLiteral("autoPan"), m_window.m_autoPanAction);
     addAction(audioMenu, QStringLiteral("audioPool"), m_window.m_audioPoolAction);
 
@@ -302,12 +301,10 @@ void ActionRegistry::rebuild()
     auto* viewMenu = addMenu(QStringLiteral("View"));
     addAction(viewMenu, QStringLiteral("detachVideo"), m_window.m_detachVideoAction);
     addAction(viewMenu, QStringLiteral("detachTimeline"), m_window.m_detachTimelineAction);
-    addAction(viewMenu, QStringLiteral("detachClipEditor"), m_window.m_detachClipEditorAction);
     addAction(viewMenu, QStringLiteral("detachMix"), m_window.m_detachMixAction);
     addAction(viewMenu, QStringLiteral("detachAudioPool"), m_window.m_detachAudioPoolAction);
     addSeparator(viewMenu);
     addAction(viewMenu, QStringLiteral("showTimeline"), m_window.m_showTimelineAction);
-    addAction(viewMenu, QStringLiteral("showClipEditor"), m_window.m_showClipEditorAction);
     addAction(viewMenu, QStringLiteral("showNodeEditor"), m_window.m_showNodeEditorAction);
     addAction(viewMenu, QStringLiteral("showMix"), m_window.m_showMixAction);
     addAction(viewMenu, QStringLiteral("showAudioPool"), m_window.m_audioPoolAction);

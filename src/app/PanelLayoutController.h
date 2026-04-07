@@ -13,15 +13,12 @@ public:
     void applyProjectUiState(const dawg::project::UiState& state);
     void updateAudioPoolVisibility(bool visible);
     void updateTimelineVisibility(bool visible);
-    void updateClipEditorVisibility(bool visible);
     void updateNodeEditorVisibility(bool visible);
     void updateMixVisibility(bool visible);
     void detachVideo();
     void attachVideo();
     void detachTimeline();
     void attachTimeline();
-    void detachClipEditor();
-    void attachClipEditor();
     void detachMix();
     void attachMix();
     void detachAudioPool();

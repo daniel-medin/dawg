@@ -6,7 +6,7 @@
 #include <QString>
 #include <QUuid>
 
-struct ClipEditorState
+struct AudioClipPreviewState
 {
     QUuid trackId;
     QString label;

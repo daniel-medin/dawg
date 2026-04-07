@@ -8,6 +8,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QWheelEvent>
+#include <QtGlobal>
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_core/juce_core.h>
@@ -32,7 +33,7 @@ juce::AudioFormatManager& waveformFormatManager()
     return manager;
 }
 
-bool sameWaveformState(const std::optional<ClipEditorState>& lhs, const std::optional<ClipEditorState>& rhs)
+bool sameWaveformState(const std::optional<AudioClipPreviewState>& lhs, const std::optional<AudioClipPreviewState>& rhs)
 {
     if (lhs.has_value() != rhs.has_value())
     {
@@ -51,6 +52,28 @@ bool sameWaveformState(const std::optional<ClipEditorState>& lhs, const std::opt
         && lhs->clipEndMs == rhs->clipEndMs
         && lhs->playheadMs == rhs->playheadMs;
 }
+
+AudioClipPreviewState audioClipPreviewStateFromMap(const QVariantMap& map)
+{
+    AudioClipPreviewState state;
+    state.label = map.value(QStringLiteral("label")).toString();
+    state.assetPath = map.value(QStringLiteral("assetPath")).toString();
+    state.clipStartMs = std::max(0, map.value(QStringLiteral("clipStartMs"), 0).toInt());
+    state.clipEndMs = std::max(
+        state.clipStartMs + 1,
+        map.value(QStringLiteral("clipEndMs"), state.clipStartMs + 1).toInt());
+    state.sourceDurationMs = std::max(
+        state.clipEndMs,
+        map.value(QStringLiteral("sourceDurationMs"), state.clipEndMs).toInt());
+    state.playheadMs = std::clamp(
+        map.value(QStringLiteral("playheadMs"), state.clipStartMs).toInt(),
+        0,
+        std::max(0, state.sourceDurationMs - 1));
+    state.gainDb = static_cast<float>(map.value(QStringLiteral("gainDb"), 0.0).toDouble());
+    state.hasAttachedAudio = map.value(QStringLiteral("hasAttachedAudio"), !state.assetPath.isEmpty()).toBool();
+    state.loopEnabled = map.value(QStringLiteral("loopEnabled"), false).toBool();
+    return state;
+}
 }
 
 ClipWaveformQuickItem::ClipWaveformQuickItem(QQuickItem* parent)
@@ -61,7 +84,7 @@ ClipWaveformQuickItem::ClipWaveformQuickItem(QQuickItem* parent)
     setFlag(ItemHasContents, true);
 }
 
-void ClipWaveformQuickItem::setState(const std::optional<ClipEditorState>& state)
+void ClipWaveformQuickItem::setState(const std::optional<AudioClipPreviewState>& state)
 {
     if (!state.has_value() || !state->hasAttachedAudio)
     {
@@ -112,6 +135,31 @@ void ClipWaveformQuickItem::setState(const std::optional<ClipEditorState>& state
     update();
 }
 
+QVariantMap ClipWaveformQuickItem::waveformState() const
+{
+    return m_waveformState;
+}
+
+void ClipWaveformQuickItem::setWaveformState(const QVariantMap& state)
+{
+    if (m_waveformState == state)
+    {
+        return;
+    }
+
+    m_waveformState = state;
+    const auto waveformState = audioClipPreviewStateFromMap(state);
+    if (waveformState.hasAttachedAudio && !waveformState.assetPath.isEmpty() && waveformState.sourceDurationMs > 0)
+    {
+        setState(waveformState);
+    }
+    else
+    {
+        setState(std::nullopt);
+    }
+    emit waveformStateChanged();
+}
+
 bool ClipWaveformQuickItem::clipRangeHandlesVisible() const
 {
     return m_clipRangeHandlesVisible;
@@ -128,6 +176,42 @@ void ClipWaveformQuickItem::setClipRangeHandlesVisible(const bool visible)
     invalidateWaveformCache();
     update();
     emit clipRangeHandlesVisibleChanged();
+}
+
+bool ClipWaveformQuickItem::playheadVisible() const
+{
+    return m_playheadVisible;
+}
+
+void ClipWaveformQuickItem::setPlayheadVisible(const bool visible)
+{
+    if (m_playheadVisible == visible)
+    {
+        return;
+    }
+
+    m_playheadVisible = visible;
+    update();
+    emit playheadVisibleChanged();
+}
+
+qreal ClipWaveformQuickItem::contentMargin() const
+{
+    return m_contentMargin;
+}
+
+void ClipWaveformQuickItem::setContentMargin(const qreal margin)
+{
+    const auto nextMargin = std::clamp(margin, 0.0, 64.0);
+    if (qFuzzyCompare(m_contentMargin + 1.0, nextMargin + 1.0))
+    {
+        return;
+    }
+
+    m_contentMargin = nextMargin;
+    invalidateWaveformCache();
+    update();
+    emit contentMarginChanged();
 }
 
 bool ClipWaveformQuickItem::scrollVisible() const
@@ -173,7 +257,7 @@ void ClipWaveformQuickItem::setViewStartMs(const int viewStartMs)
 void ClipWaveformQuickItem::paint(QPainter* painter)
 {
     painter->setRenderHint(QPainter::Antialiasing, false);
-    const QRectF bounds = QRectF{0.0, 0.0, width(), height()}.adjusted(10.0, 10.0, -10.0, -10.0);
+    const QRectF bounds = waveformBounds();
     if (!bounds.isValid())
     {
         return;
@@ -181,7 +265,10 @@ void ClipWaveformQuickItem::paint(QPainter* painter)
 
     ensureWaveformCache();
     painter->drawImage(QPointF{0.0, 0.0}, m_waveformCache);
-    paintPlayhead(*painter, bounds, QColor{241, 196, 86});
+    if (m_playheadVisible)
+    {
+        paintPlayhead(*painter, bounds, QColor{241, 196, 86});
+    }
 }
 
 void ClipWaveformQuickItem::mousePressEvent(QMouseEvent* event)
@@ -194,7 +281,7 @@ void ClipWaveformQuickItem::mousePressEvent(QMouseEvent* event)
 
     forceActiveFocus(Qt::MouseFocusReason);
 
-    const QRectF bounds = QRectF{0.0, 0.0, width(), height()}.adjusted(10.0, 10.0, -10.0, -10.0);
+    const QRectF bounds = waveformBounds();
     const auto x = event->position().x();
     constexpr double handleHitRadius = 8.0;
 
@@ -228,7 +315,7 @@ void ClipWaveformQuickItem::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
-    const QRectF bounds = QRectF{0.0, 0.0, width(), height()}.adjusted(10.0, 10.0, -10.0, -10.0);
+    const QRectF bounds = waveformBounds();
     constexpr double handleHitRadius = 8.0;
     const auto x = event->position().x();
     if (m_dragMode != DragMode::None)
@@ -295,7 +382,7 @@ void ClipWaveformQuickItem::wheelEvent(QWheelEvent* event)
         return;
     }
 
-    const QRectF bounds = QRectF{0.0, 0.0, width(), height()}.adjusted(10.0, 10.0, -10.0, -10.0);
+    const QRectF bounds = waveformBounds();
     if (!bounds.isValid())
     {
         event->ignore();
@@ -371,6 +458,14 @@ void ClipWaveformQuickItem::loadWaveform(const QString& filePath)
 
         m_peaks.push_back(peak);
     }
+}
+
+QRectF ClipWaveformQuickItem::waveformBounds() const
+{
+    const auto margin = std::min<double>(
+        static_cast<double>(m_contentMargin),
+        std::max(0.0, std::min(width(), height()) * 0.45));
+    return QRectF{0.0, 0.0, width(), height()}.adjusted(margin, margin, -margin, -margin);
 }
 
 QRectF ClipWaveformQuickItem::selectionRect(const QRectF& bounds) const
@@ -499,7 +594,7 @@ void ClipWaveformQuickItem::applyDragAt(const QPointF& position)
         return;
     }
 
-    const QRectF bounds = QRectF{0.0, 0.0, width(), height()}.adjusted(10.0, 10.0, -10.0, -10.0);
+    const QRectF bounds = waveformBounds();
     auto clipStartMs = m_state->clipStartMs;
     auto clipEndMs = m_state->clipEndMs;
     const auto draggedMs = msForX(bounds, position.x());
@@ -532,7 +627,7 @@ void ClipWaveformQuickItem::applyPlayheadAt(const QPointF& position)
         return;
     }
 
-    const QRectF bounds = QRectF{0.0, 0.0, width(), height()}.adjusted(10.0, 10.0, -10.0, -10.0);
+    const QRectF bounds = waveformBounds();
     const auto nextPlayheadMs = std::clamp(
         msForX(bounds, position.x()),
         0,
@@ -635,7 +730,7 @@ void ClipWaveformQuickItem::rebuildWaveformCache()
     QPainter painter(&m_waveformCache);
     painter.setRenderHint(QPainter::Antialiasing, false);
 
-    const QRectF bounds = QRectF{0.0, 0.0, width(), height()}.adjusted(10.0, 10.0, -10.0, -10.0);
+    const QRectF bounds = waveformBounds();
     if (!bounds.isValid())
     {
         m_waveformCacheDirty = false;

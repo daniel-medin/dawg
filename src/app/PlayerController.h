@@ -21,7 +21,7 @@
 #include "app/TransportController.h"
 #include "app/AudioPlaybackCoordinator.h"
 #include "app/AudioPoolService.h"
-#include "app/ClipEditorSession.h"
+#include "app/TrackAudioSession.h"
 #include "app/MixStateStore.h"
 #include "app/PerformanceLogger.h"
 #include "app/ProjectDocument.h"
@@ -127,6 +127,16 @@ public:
     void stopAudioPoolPreview();
     bool startSelectedTrackClipPreview();
     void stopSelectedTrackClipPreview();
+    bool startNodeEditorPreview(
+        const std::vector<AudioPlaybackCoordinator::NodePreviewClip>& clips,
+        int nodeDurationMs,
+        int playheadMs);
+    bool syncNodeEditorPreview(
+        const std::vector<AudioPlaybackCoordinator::NodePreviewClip>& clips,
+        int nodeDurationMs,
+        int playheadMs,
+        bool forceRepositionActiveTracks = false);
+    void stopNodeEditorPreview();
     void resetProjectState();
     bool restoreProjectState(const dawg::project::ControllerState& state, QString* errorMessage = nullptr);
     bool setSelectedTrackClipRangeMs(int clipStartMs, int clipEndMs);
@@ -175,11 +185,12 @@ public:
     [[nodiscard]] QSize videoFrameSize() const;
     [[nodiscard]] QString trackLabel(const QUuid& trackId) const;
     [[nodiscard]] QString trackNodeDocumentPath(const QUuid& trackId) const;
+    [[nodiscard]] std::optional<std::pair<int, int>> selectedTrackFrameRange() const;
     [[nodiscard]] bool trackHasAttachedAudio(const QUuid& trackId) const;
     [[nodiscard]] bool selectedTrackLoopEnabled() const;
     [[nodiscard]] bool trackAutoPanEnabled(const QUuid& trackId) const;
     [[nodiscard]] bool selectedTracksAutoPanEnabled() const;
-    [[nodiscard]] std::optional<ClipEditorState> selectedClipEditorState() const;
+    [[nodiscard]] std::optional<AudioClipPreviewState> selectedAudioClipPreviewState() const;
     bool removeAudioFromPool(const QString& filePath);
     bool removeAudioAndConnectedNodesFromPool(const QString& filePath);
     [[nodiscard]] std::vector<AudioPoolItem> audioPoolItems() const;
@@ -233,7 +244,7 @@ private:
     [[nodiscard]] std::optional<std::pair<int, int>> activeLoopRange() const;
     [[nodiscard]] bool loopRangeOverlaps(const TimelineLoopRange& candidate, int ignoreIndex = -1) const;
     void applyLiveMixStateToCurrentPlayback();
-    void handleClipEditorPreviewTimeout();
+    void handleTrackAudioPreviewTimeout();
     void setSelectedTrackId(const QUuid& trackId, bool fadePreviousSelection = true);
 
     TransportController m_transport;
@@ -245,7 +256,7 @@ private:
     MotionTracker m_tracker;
     std::unique_ptr<SelectionController> m_selectionController;
     std::unique_ptr<TrackEditService> m_trackEditService;
-    std::unique_ptr<ClipEditorSession> m_clipEditorSession;
+    std::unique_ptr<TrackAudioSession> m_trackAudioSession;
     std::unique_ptr<MixStateStore> m_mixStateStore;
     QString m_projectVideoPath;
     QString m_proxyVideoPath;
@@ -261,7 +272,7 @@ private:
     std::vector<QUuid> m_redoSelectedTrackIds;
     PerformanceLogger m_perfLogger;
     const QUuid m_embeddedVideoAudioTrackId = QUuid(QStringLiteral("{eb6fc60f-0781-433f-9f03-ff16531165f7}"));
-    QTimer m_clipEditorPreviewStopTimer;
+    QTimer m_trackAudioPreviewStopTimer;
     mutable QHash<QString, std::optional<int>> m_audioDurationMsByPath;
     mutable QHash<QString, std::optional<int>> m_audioChannelCountByPath;
     PlaybackDebugStats m_playbackDebugStats;

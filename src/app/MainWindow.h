@@ -17,14 +17,14 @@
 #include <QSet>
 #include <QTimer>
 
+#include "app/AudioPlaybackCoordinator.h"
 #include "app/ProjectDocument.h"
-#include "ui/ClipEditorTypes.h"
+#include "ui/AudioClipPreviewTypes.h"
 #include "ui/MixTypes.h"
 #include "ui/TimelineTypes.h"
 
 class PlayerController;
 class DebugOverlayWindow;
-class ClipEditorQuickController;
 class ClipWaveformQuickItem;
 class MixQuickController;
 class NativeVideoViewport;
@@ -130,15 +130,12 @@ private slots:
     void updateDebugVisibility(bool enabled);
     void updateAudioPoolVisibility(bool visible);
     void updateTimelineVisibility(bool visible);
-    void updateClipEditorVisibility(bool visible);
     void updateNodeEditorVisibility(bool visible);
     void updateMixVisibility(bool visible);
     void detachVideo();
     void attachVideo();
     void detachTimeline();
     void attachTimeline();
-    void detachClipEditor();
-    void attachClipEditor();
     void detachMix();
     void attachMix();
     void detachAudioPool();
@@ -179,7 +176,6 @@ private:
         const TimelineThumbnailGenerationRequest& request,
         bool success,
         const QString& errorMessage);
-    void refreshClipEditor();
     void refreshNodeEditor();
     void handleNodeEditorFileAction(const QString& actionKey);
     void handleNodeEditorAudioAction(const QString& actionKey);
@@ -246,7 +242,6 @@ private:
     void syncShellLayoutViewport();
     void syncShellPanelGeometry();
     void handleTimelineQuickStatusChanged();
-    void handleClipEditorQuickStatusChanged();
     void clearTimeline();
     void setTimelineVideoPath(const QString& videoPath);
     void setTimelineState(int totalFrames, double fps);
@@ -254,13 +249,32 @@ private:
     void setTimelineSeekOnClickEnabled(bool enabled);
     void setTimelineThumbnailsVisible(bool visible);
     void syncThumbnailStripViewWindow();
+    void syncThumbnailStripSelectedNodeRange();
     void syncNodeEditorActionAvailability();
+    [[nodiscard]] bool nodeEditorHasFocus() const;
+    [[nodiscard]] bool videoPanelHasFocus() const;
+    void resetNodeEditorPlayheadToStart();
+    [[nodiscard]] std::optional<int> nodeEditorProjectFrameForPlayheadMs(int playheadMs) const;
+    [[nodiscard]] std::optional<double> nodeEditorProjectFramePositionForPlayheadMs(int playheadMs) const;
+    void syncProjectPlayheadToNodeEditor(int playheadMs);
+    void syncProjectMarkersToNodeEditor(int playheadMs);
+    void syncThumbnailStripMarkerToNodeEditor(int playheadMs);
+    void syncNodeEditorPlayheadToProjectFrame(int frameIndex);
+    [[nodiscard]] bool deleteSelectedNodeEditorSelection();
+    void deleteFromFocusedPanel();
+    void setNodeEditorLaneMuted(const QString& laneId, bool muted);
+    void setNodeEditorLaneSoloed(const QString& laneId, bool soloed);
+    bool startNodeEditorPreview();
+    void stopNodeEditorPreview(bool restorePlaybackAnchor = true);
+    void toggleNodeEditorPreview();
+    void updateNodeEditorPreview();
+    [[nodiscard]] QString nodeEditorPreviewActiveAudioSignature(int playheadMs) const;
+    [[nodiscard]] bool shouldSyncNodeEditorPreviewAudio(int playheadMs);
     [[nodiscard]] std::optional<int> timelineLoopShortcutFrame() const;
     [[nodiscard]] bool timelineHasSelectedLoopRange() const;
     [[nodiscard]] bool timelineHasFocus() const;
     [[nodiscard]] int timelineMinimumHeight() const;
     void updateTimelineMinimumHeight();
-    void syncClipWaveformItem();
     void syncNodeWaveformItem();
     [[nodiscard]] QString projectNodesDirectoryPath() const;
     [[nodiscard]] bool saveSelectedNodeToFile(
@@ -290,11 +304,8 @@ private:
     TimelineQuickController* m_timelineQuickController = nullptr;
     QQuickItem* m_thumbnailStripQuickWidget = nullptr;
     ThumbnailStripQuickController* m_thumbnailStripQuickController = nullptr;
-    QQuickItem* m_clipEditorQuickWidget = nullptr;
-    ClipEditorQuickController* m_clipEditorQuickController = nullptr;
     QQuickItem* m_nodeEditorQuickWidget = nullptr;
     NodeEditorQuickController* m_nodeEditorQuickController = nullptr;
-    ClipWaveformQuickItem* m_clipWaveformItem = nullptr;
     ClipWaveformQuickItem* m_nodeEditorWaveformItem = nullptr;
     QQuickItem* m_mixQuickWidget = nullptr;
     MixQuickController* m_mixQuickController = nullptr;
@@ -305,8 +316,6 @@ private:
     QByteArray m_detachedVideoWindowGeometry;
     QQuickView* m_detachedTimelineWindow = nullptr;
     QByteArray m_detachedTimelineWindowGeometry;
-    QQuickView* m_detachedClipEditorWindow = nullptr;
-    QByteArray m_detachedClipEditorWindowGeometry;
     QQuickView* m_detachedMixWindow = nullptr;
     QByteArray m_detachedMixWindowGeometry;
     QQuickView* m_detachedAudioPoolWindow = nullptr;
@@ -357,17 +366,14 @@ private:
     QAction* m_moveNodeRightAction = nullptr;
     QAction* m_trimNodeAction = nullptr;
     QAction* m_autoPanAction = nullptr;
-    QAction* m_loopSoundAction = nullptr;
     QAction* m_toggleNodeNameAction = nullptr;
     QAction* m_showAllNodeNamesAction = nullptr;
     QAction* m_useProxyVideoAction = nullptr;
     QAction* m_importSoundAction = nullptr;
     QAction* m_detachVideoAction = nullptr;
     QAction* m_detachTimelineAction = nullptr;
-    QAction* m_detachClipEditorAction = nullptr;
     QAction* m_detachMixAction = nullptr;
     QAction* m_detachAudioPoolAction = nullptr;
-    QAction* m_showClipEditorAction = nullptr;
     QAction* m_showNodeEditorAction = nullptr;
     QAction* m_showTimelineAction = nullptr;
     QAction* m_showMixAction = nullptr;
@@ -399,7 +405,6 @@ private:
     QShortcut* m_nodeEndShortcut = nullptr;
     QShortcut* m_selectNextNodeShortcut = nullptr;
     QShortcut* m_showTimelineShortcut = nullptr;
-    QShortcut* m_showClipEditorShortcut = nullptr;
     QShortcut* m_showMixShortcut = nullptr;
     QShortcut* m_trimNodeShortcut = nullptr;
     QShortcut* m_autoPanShortcut = nullptr;
@@ -413,7 +418,6 @@ private:
     bool m_audioPoolShowLength = true;
     bool m_audioPoolShowSize = true;
     int m_timelinePreferredHeight = 148;
-    int m_clipEditorPreferredHeight = 224;
     int m_nodeEditorPreferredHeight = 260;
     int m_mixPreferredHeight = 368;
     QString m_clipName;
@@ -423,8 +427,7 @@ private:
     QString m_videoMemoryUsageText;
     QString m_qtQuickLoadText;
     QString m_qtQuickGraphicsApiText;
-    std::optional<ClipEditorState> m_clipEditorState;
-    std::optional<ClipEditorState> m_nodeEditorState;
+    std::optional<AudioClipPreviewState> m_nodeEditorState;
     std::optional<int> m_pendingLoopShortcutStartFrame;
     std::optional<int> m_pendingLoopShortcutEndFrame;
     float m_masterMixGainDb = 0.0F;
@@ -435,7 +438,7 @@ private:
     QTimer m_clearAllShortcutTimer;
     QTimer m_memoryUsageTimer;
     QTimer m_mixMeterTimer;
-    QTimer m_clipEditorPreviewTimer;
+    QTimer m_nodeEditorPreviewTimer;
     QTimer m_statusToastTimer;
     QTimer m_canvasTipsTimer;
     QTimer m_nodeNudgeTimer;
@@ -446,17 +449,26 @@ private:
     QElapsedTimer m_debugTextTimer;
     QElapsedTimer m_audioPoolPlaybackRefreshTimer;
     QElapsedTimer m_timelinePlaybackUiTimer;
+    QElapsedTimer m_nodeEditorPreviewElapsedTimer;
+    int m_nodeEditorPreviewAnchorMs = 0;
+    int m_nodeEditorPreviewStartMs = 0;
+    int m_nodeEditorPreviewNodeDurationMs = 0;
+    std::vector<AudioPlaybackCoordinator::NodePreviewClip> m_nodeEditorPreviewClips;
+    bool m_nodeEditorPreviewUpdatingPlayhead = false;
+    int m_lastNodeEditorSyncedProjectFrame = -1;
+    int m_lastNodeEditorPreviewProjectSyncMs = -1;
+    int m_lastNodeEditorPreviewMeterUpdateMs = -1;
+    QString m_nodeEditorPreviewActiveAudioSignature;
+    int m_lastNodeEditorPreviewAudioSyncMs = -1;
     int m_outputFpsFrameCount = 0;
     int m_lastTimelinePlaybackUiFrame = -1;
     double m_outputFps = 0.0;
     double m_uiViewportUpdateMs = 0.0;
     double m_uiTimelineUpdateMs = 0.0;
     double m_uiChromeUpdateMs = 0.0;
-    double m_uiClipEditorUpdateMs = 0.0;
     double m_uiDebugTextUpdateMs = 0.0;
     bool m_videoDetached = false;
     bool m_timelineDetached = false;
-    bool m_clipEditorDetached = false;
     bool m_mixDetached = false;
     bool m_audioPoolDetached = false;
     bool m_shuttingDown = false;

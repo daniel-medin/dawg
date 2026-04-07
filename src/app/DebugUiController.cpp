@@ -363,11 +363,6 @@ void DebugUiController::updateFrame(const QImage& image, const int frameIndex, c
         }
     }
 
-    QElapsedTimer clipEditorTimer;
-    clipEditorTimer.start();
-    m_window.refreshClipEditor();
-    updateSmoothedMs(m_window.m_uiClipEditorUpdateMs, elapsedMs(clipEditorTimer));
-
     QElapsedTimer debugTextTimer;
     debugTextTimer.start();
     updateDebugText();
@@ -462,11 +457,10 @@ void DebugUiController::updateDebugText()
                                                  : QStringLiteral("no"))
                                        .arg(playbackStats.runtimeStats.queueStarvationCount);
     const auto uiPerfText = QStringLiteral(
-        "UI ms viewport=%1 timeline=%2 chrome=%3 clip=%4 debug=%5")
+        "UI ms viewport=%1 timeline=%2 chrome=%3 debug=%4")
                                 .arg(m_window.m_uiViewportUpdateMs, 0, 'f', 1)
                                 .arg(m_window.m_uiTimelineUpdateMs, 0, 'f', 1)
                                 .arg(m_window.m_uiChromeUpdateMs, 0, 'f', 1)
-                                .arg(m_window.m_uiClipEditorUpdateMs, 0, 'f', 1)
                                 .arg(m_window.m_uiDebugTextUpdateMs, 0, 'f', 1);
     const auto overlayStats = VideoOverlayQuickItem::debugStats();
     const auto overlayPaintText = QStringLiteral(
@@ -565,7 +559,6 @@ void DebugUiController::handleVideoLoaded(const QString& filePath, const int tot
         m_window.m_nativeViewport->setOverlays(m_window.m_controller->currentOverlays());
     }
     m_window.refreshTimeline();
-    m_window.refreshClipEditor();
     if (!filePath.isEmpty())
     {
         m_window.showCanvasTipsOverlay();

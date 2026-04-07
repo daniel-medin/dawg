@@ -16,7 +16,10 @@ class ThumbnailStripQuickController : public QObject
     Q_OBJECT
     Q_PROPERTY(QVariantMap stripRect READ stripRect NOTIFY visualsChanged)
     Q_PROPERTY(QVariantList thumbnailTiles READ thumbnailTiles NOTIFY visualsChanged)
-    Q_PROPERTY(double markerX READ markerX NOTIFY overlayChanged)
+    Q_PROPERTY(double markerX READ markerX NOTIFY markerChanged)
+    Q_PROPERTY(bool hasSelectedNodeRange READ hasSelectedNodeRange NOTIFY overlayChanged)
+    Q_PROPERTY(double selectedNodeRangeX READ selectedNodeRangeX NOTIFY overlayChanged)
+    Q_PROPERTY(double selectedNodeRangeWidth READ selectedNodeRangeWidth NOTIFY overlayChanged)
     Q_PROPERTY(bool hasHoverLine READ hasHoverLine NOTIFY overlayChanged)
     Q_PROPERTY(double hoverX READ hoverX NOTIFY overlayChanged)
     Q_PROPERTY(bool playbackActive READ playbackActive NOTIFY playbackActiveChanged)
@@ -30,11 +33,16 @@ public:
     void setTimeline(int totalFrames, double fps);
     void setViewWindow(double startFrame, double visibleFrameSpan);
     void setCurrentFrame(int frameIndex);
+    void setCurrentFramePosition(double framePosition);
+    void setSelectedNodeRange(std::optional<int> startFrame, std::optional<int> endFrame);
     void setPlaybackActive(bool active);
 
     [[nodiscard]] QVariantMap stripRect() const;
     [[nodiscard]] QVariantList thumbnailTiles() const;
     [[nodiscard]] double markerX() const;
+    [[nodiscard]] bool hasSelectedNodeRange() const;
+    [[nodiscard]] double selectedNodeRangeX() const;
+    [[nodiscard]] double selectedNodeRangeWidth() const;
     [[nodiscard]] bool hasHoverLine() const;
     [[nodiscard]] double hoverX() const;
     [[nodiscard]] bool playbackActive() const;
@@ -50,6 +58,7 @@ public:
 signals:
     void frameRequested(int frameIndex);
     void visualsChanged();
+    void markerChanged();
     void overlayChanged();
     void playbackActiveChanged();
 
@@ -61,6 +70,7 @@ private:
     [[nodiscard]] QString thumbnailSourceForFrame(int targetFrameIndex) const;
     [[nodiscard]] int frameForPosition(double x) const;
     [[nodiscard]] double xForFrame(int frameIndex) const;
+    [[nodiscard]] double xForFramePosition(double framePosition) const;
     void requestFrame(int frameIndex);
     void requestFrameCoalesced(int frameIndex);
     void flushPendingFrameRequest();
@@ -73,6 +83,7 @@ private:
     double m_viewportHeight = 0.0;
     int m_totalFrames = 0;
     int m_currentFrame = 0;
+    double m_currentFramePosition = 0.0;
     double m_fps = 0.0;
     double m_viewStartFrame = 0.0;
     double m_visibleFrameSpan = 1.0;
@@ -84,6 +95,11 @@ private:
     QVariantMap m_stripRect;
     QVariantList m_thumbnailTiles;
     double m_markerX = 0.0;
+    bool m_hasSelectedNodeRange = false;
+    double m_selectedNodeRangeX = 0.0;
+    double m_selectedNodeRangeWidth = 0.0;
+    std::optional<int> m_selectedNodeStartFrame;
+    std::optional<int> m_selectedNodeEndFrame;
     bool m_hasHoverLine = false;
     double m_hoverX = 0.0;
     QString m_projectRootPath;

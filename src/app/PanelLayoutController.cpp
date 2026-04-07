@@ -72,8 +72,6 @@ dawg::project::UiState PanelLayoutController::snapshotProjectUiState() const
 {
     const auto timelineVisible = (m_window.m_showTimelineAction && m_window.m_showTimelineAction->isChecked())
         || m_window.m_timelineDetached;
-    const auto clipEditorVisible = (m_window.m_showClipEditorAction && m_window.m_showClipEditorAction->isChecked())
-        || m_window.m_clipEditorDetached;
     const auto nodeEditorVisible = m_window.m_showNodeEditorAction && m_window.m_showNodeEditorAction->isChecked();
     const auto mixVisible = (m_window.m_showMixAction && m_window.m_showMixAction->isChecked())
         || m_window.m_mixDetached;
@@ -89,10 +87,6 @@ dawg::project::UiState PanelLayoutController::snapshotProjectUiState() const
     state.detachedTimelineWindowGeometry = m_window.m_timelineDetached && m_window.m_detachedTimelineWindow
                                                ? saveWindowGeometry(m_window.m_detachedTimelineWindow)
                                                : m_window.m_detachedTimelineWindowGeometry;
-    state.clipEditorDetached = m_window.m_clipEditorDetached;
-    state.detachedClipEditorWindowGeometry = m_window.m_clipEditorDetached && m_window.m_detachedClipEditorWindow
-                                                 ? saveWindowGeometry(m_window.m_detachedClipEditorWindow)
-                                                 : m_window.m_detachedClipEditorWindowGeometry;
     state.mixDetached = m_window.m_mixDetached;
     state.detachedMixWindowGeometry = m_window.m_mixDetached && m_window.m_detachedMixWindow
                                           ? saveWindowGeometry(m_window.m_detachedMixWindow)
@@ -102,7 +96,6 @@ dawg::project::UiState PanelLayoutController::snapshotProjectUiState() const
                                                 ? saveWindowGeometry(m_window.m_detachedAudioPoolWindow)
                                                 : m_window.m_detachedAudioPoolWindowGeometry;
     state.timelineVisible = timelineVisible;
-    state.clipEditorVisible = clipEditorVisible;
     state.nodeEditorVisible = nodeEditorVisible;
     state.mixVisible = mixVisible;
     state.audioPoolVisible = audioPoolVisible;
@@ -115,7 +108,6 @@ dawg::project::UiState PanelLayoutController::snapshotProjectUiState() const
     state.useProxyVideo = m_window.m_useProxyVideoAction && m_window.m_useProxyVideoAction->isChecked();
     state.audioPoolPreferredWidth = m_window.m_audioPoolPreferredWidth;
     state.timelinePreferredHeight = m_window.m_timelinePreferredHeight;
-    state.clipEditorPreferredHeight = m_window.m_clipEditorPreferredHeight;
     state.nodeEditorPreferredHeight = m_window.m_nodeEditorPreferredHeight;
     state.mixPreferredHeight = m_window.m_mixPreferredHeight;
     state.windowGeometry = m_window.saveGeometry();
@@ -128,14 +120,12 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
     qInfo().noquote()
         << "Applying UI state:"
         << "timelineVisible=" << state.timelineVisible
-        << "clipEditorVisible=" << state.clipEditorVisible
         << "nodeEditorVisible=" << state.nodeEditorVisible
         << "mixVisible=" << state.mixVisible
         << "audioPoolVisible=" << state.audioPoolVisible;
     m_window.m_projectStateChangeInProgress = true;
     m_window.m_detachedVideoWindowGeometry = state.detachedVideoWindowGeometry;
     m_window.m_detachedTimelineWindowGeometry = state.detachedTimelineWindowGeometry;
-    m_window.m_detachedClipEditorWindowGeometry = state.detachedClipEditorWindowGeometry;
     m_window.m_detachedMixWindowGeometry = state.detachedMixWindowGeometry;
     m_window.m_detachedAudioPoolWindowGeometry = state.detachedAudioPoolWindowGeometry;
     m_window.m_audioPoolPreferredWidth = std::max(240, state.audioPoolPreferredWidth);
@@ -151,13 +141,11 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
         m_window.m_audioPoolQuickController->setShowSize(state.audioPoolShowSize);
     }
     m_window.m_timelinePreferredHeight = std::max(m_window.timelineMinimumHeight(), state.timelinePreferredHeight);
-    m_window.m_clipEditorPreferredHeight = std::max(148, state.clipEditorPreferredHeight);
     m_window.m_nodeEditorPreferredHeight = std::max(148, state.nodeEditorPreferredHeight);
     m_window.m_mixPreferredHeight = std::max(132, state.mixPreferredHeight);
     if (state.mainVerticalSplitterSizes.size() == 4)
     {
         m_window.m_timelinePreferredHeight = std::max(m_window.timelineMinimumHeight(), state.mainVerticalSplitterSizes[1]);
-        m_window.m_clipEditorPreferredHeight = std::max(148, state.mainVerticalSplitterSizes[2]);
         m_window.m_mixPreferredHeight = std::max(132, state.mainVerticalSplitterSizes[3]);
     }
 
@@ -227,7 +215,6 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
     }
 
     updateTimelineVisibility(state.timelineVisible);
-    updateClipEditorVisibility(state.clipEditorVisible);
     updateNodeEditorVisibility(state.nodeEditorVisible);
     updateMixVisibility(state.mixVisible);
     updateAudioPoolVisibility(state.audioPoolVisible);
@@ -255,17 +242,6 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
         else
         {
             attachTimeline();
-        }
-    }
-    if (state.clipEditorDetached != m_window.m_clipEditorDetached)
-    {
-        if (state.clipEditorDetached && state.clipEditorVisible)
-        {
-            detachClipEditor();
-        }
-        else
-        {
-            attachClipEditor();
         }
     }
     if (state.mixDetached != m_window.m_mixDetached)
@@ -297,13 +273,11 @@ void PanelLayoutController::applyProjectUiState(const dawg::project::UiState& st
     qInfo().noquote()
         << "Applied UI state:"
         << "timelineVisible=" << (m_window.m_shellLayoutController && m_window.m_shellLayoutController->timelineVisible())
-        << "clipEditorVisible=" << (m_window.m_shellLayoutController && m_window.m_shellLayoutController->clipEditorVisible())
         << "nodeEditorVisible=" << (m_window.m_shellLayoutController && m_window.m_shellLayoutController->nodeEditorVisible())
         << "mixVisible=" << (m_window.m_shellLayoutController && m_window.m_shellLayoutController->mixVisible())
         << "audioPoolVisible=" << (m_window.m_shellLayoutController && m_window.m_shellLayoutController->audioPoolVisible())
         << "preferredAudioPoolWidth=" << m_window.m_audioPoolPreferredWidth
         << "preferredTimelineHeight=" << m_window.m_timelinePreferredHeight
-        << "preferredClipEditorHeight=" << m_window.m_clipEditorPreferredHeight
         << "preferredNodeEditorHeight=" << m_window.m_nodeEditorPreferredHeight
         << "preferredMixHeight=" << m_window.m_mixPreferredHeight;
 
@@ -328,7 +302,6 @@ void PanelLayoutController::updateAudioPoolVisibility(const bool visible)
         m_window.m_shellLayoutController->setPreferredSizes(
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
-            m_window.m_clipEditorPreferredHeight,
             m_window.m_nodeEditorPreferredHeight,
             m_window.m_mixPreferredHeight);
     }
@@ -365,7 +338,6 @@ void PanelLayoutController::updateTimelineVisibility(const bool visible)
         m_window.m_shellLayoutController->setPreferredSizes(
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
-            m_window.m_clipEditorPreferredHeight,
             m_window.m_nodeEditorPreferredHeight,
             m_window.m_mixPreferredHeight);
     }
@@ -380,51 +352,6 @@ void PanelLayoutController::updateTimelineVisibility(const bool visible)
     if (!visible && m_window.m_timelineDetached)
     {
         attachTimeline();
-    }
-}
-
-void PanelLayoutController::updateClipEditorVisibility(const bool visible)
-{
-    if (m_window.m_clipEditorQuickWidget)
-    {
-        if (!visible && !m_window.m_clipEditorDetached)
-        {
-            m_window.m_clipEditorPreferredHeight =
-                std::max(148, static_cast<int>(std::lround(m_window.m_clipEditorQuickWidget->height())));
-        }
-        m_window.m_clipEditorQuickWidget->setVisible(visible && !m_window.m_clipEditorDetached);
-    }
-
-    if (visible)
-    {
-        m_window.refreshClipEditor();
-    }
-    else
-    {
-        m_window.m_clipEditorPreviewTimer.stop();
-    }
-
-    if (m_window.m_shellLayoutController)
-    {
-        m_window.m_shellLayoutController->setClipEditorVisible(visible && !m_window.m_clipEditorDetached);
-        m_window.m_shellLayoutController->setPreferredSizes(
-            m_window.m_audioPoolPreferredWidth,
-            m_window.m_timelinePreferredHeight,
-            m_window.m_clipEditorPreferredHeight,
-            m_window.m_nodeEditorPreferredHeight,
-            m_window.m_mixPreferredHeight);
-    }
-    syncMainVerticalPanelSizes();
-
-    if (m_window.m_showClipEditorAction && m_window.m_showClipEditorAction->isChecked() != visible)
-    {
-        const QSignalBlocker blocker{m_window.m_showClipEditorAction};
-        m_window.m_showClipEditorAction->setChecked(visible);
-    }
-    updatePanelActionText(m_window.m_showClipEditorAction, visible, QStringLiteral("Clip Editor"));
-    if (!visible && m_window.m_clipEditorDetached)
-    {
-        attachClipEditor();
     }
 }
 
@@ -459,7 +386,6 @@ void PanelLayoutController::updateMixVisibility(const bool visible)
         m_window.m_shellLayoutController->setPreferredSizes(
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
-            m_window.m_clipEditorPreferredHeight,
             m_window.m_nodeEditorPreferredHeight,
             m_window.m_mixPreferredHeight);
     }
@@ -500,7 +426,6 @@ void PanelLayoutController::updateNodeEditorVisibility(const bool visible)
         m_window.m_shellLayoutController->setPreferredSizes(
             m_window.m_audioPoolPreferredWidth,
             m_window.m_timelinePreferredHeight,
-            m_window.m_clipEditorPreferredHeight,
             m_window.m_nodeEditorPreferredHeight,
             m_window.m_mixPreferredHeight);
     }
@@ -692,75 +617,6 @@ void PanelLayoutController::attachTimeline()
     }
 }
 
-void PanelLayoutController::detachClipEditor()
-{
-    if (m_window.m_clipEditorDetached || !m_window.m_detachedClipEditorWindow || !m_window.m_showClipEditorAction)
-    {
-        return;
-    }
-
-    if (!m_window.m_showClipEditorAction->isChecked())
-    {
-        const QSignalBlocker blocker{m_window.m_showClipEditorAction};
-        m_window.m_showClipEditorAction->setChecked(true);
-    }
-
-    if (!m_window.m_detachedClipEditorWindowGeometry.isEmpty())
-    {
-        restoreWindowGeometry(m_window.m_detachedClipEditorWindow, m_window.m_detachedClipEditorWindowGeometry);
-    }
-    else
-    {
-        const auto panelSize = m_window.m_clipEditorQuickWidget
-            ? QSize(
-                static_cast<int>(std::lround(m_window.m_clipEditorQuickWidget->width())),
-                static_cast<int>(std::lround(m_window.m_clipEditorQuickWidget->height())))
-            : QSize{960, 340};
-        m_window.m_detachedClipEditorWindow->resize(panelSize.expandedTo(QSize{720, 260}));
-    }
-
-    m_window.m_clipEditorDetached = true;
-    updateClipEditorVisibility(true);
-    updateDetachedPanelUiState();
-    m_window.m_detachedClipEditorWindow->show();
-    m_window.m_detachedClipEditorWindow->raise();
-    m_window.m_detachedClipEditorWindow->requestActivate();
-    if (!m_window.m_projectStateChangeInProgress && m_window.hasOpenProject())
-    {
-        m_window.setProjectDirty(true);
-    }
-    if (!m_window.m_projectStateChangeInProgress)
-    {
-        m_window.showStatus(QStringLiteral("Clip editor detached."));
-    }
-}
-
-void PanelLayoutController::attachClipEditor()
-{
-    if (!m_window.m_clipEditorDetached || !m_window.m_detachedClipEditorWindow)
-    {
-        return;
-    }
-
-    m_window.m_detachedClipEditorWindowGeometry = saveWindowGeometry(m_window.m_detachedClipEditorWindow);
-    m_window.m_detachedClipEditorWindow->hide();
-    m_window.m_clipEditorDetached = false;
-    updateClipEditorVisibility(m_window.m_showClipEditorAction && m_window.m_showClipEditorAction->isChecked());
-    updateDetachedPanelUiState();
-    if (m_window.m_clipEditorQuickWidget && m_window.m_clipEditorQuickWidget->isVisible())
-    {
-        m_window.m_clipEditorQuickWidget->forceActiveFocus();
-    }
-    if (!m_window.m_projectStateChangeInProgress && m_window.hasOpenProject())
-    {
-        m_window.setProjectDirty(true);
-    }
-    if (!m_window.m_projectStateChangeInProgress)
-    {
-        m_window.showStatus(QStringLiteral("Clip editor attached."));
-    }
-}
-
 void PanelLayoutController::detachMix()
 {
     if (m_window.m_mixDetached || !m_window.m_detachedMixWindow || !m_window.m_showMixAction)
@@ -933,12 +789,6 @@ void PanelLayoutController::updateDetachedPanelUiState()
             m_window.m_timelineDetached ? QStringLiteral("Attach Timeline") : QStringLiteral("Detach Timeline"));
         m_window.m_detachTimelineAction->setEnabled(m_window.m_timelineQuickWidget != nullptr);
     }
-    if (m_window.m_detachClipEditorAction)
-    {
-        m_window.m_detachClipEditorAction->setText(
-            m_window.m_clipEditorDetached ? QStringLiteral("Attach Clip Editor") : QStringLiteral("Detach Clip Editor"));
-        m_window.m_detachClipEditorAction->setEnabled(m_window.m_clipEditorQuickWidget != nullptr);
-    }
     if (m_window.m_detachMixAction)
     {
         m_window.m_detachMixAction->setText(
@@ -963,15 +813,12 @@ void PanelLayoutController::syncMainVerticalPanelSizes()
     m_window.m_shellLayoutController->setPreferredSizes(
         m_window.m_audioPoolPreferredWidth,
         m_window.m_timelinePreferredHeight,
-        m_window.m_clipEditorPreferredHeight,
         m_window.m_nodeEditorPreferredHeight,
         m_window.m_mixPreferredHeight);
     m_window.m_shellLayoutController->setThumbnailsVisible(
         !m_window.m_showTimelineThumbnailsAction || m_window.m_showTimelineThumbnailsAction->isChecked());
     m_window.m_shellLayoutController->setTimelineVisible(
         m_window.m_showTimelineAction && m_window.m_showTimelineAction->isChecked() && !m_window.m_timelineDetached);
-    m_window.m_shellLayoutController->setClipEditorVisible(
-        m_window.m_showClipEditorAction && m_window.m_showClipEditorAction->isChecked() && !m_window.m_clipEditorDetached);
     m_window.m_shellLayoutController->setNodeEditorVisible(
         m_window.m_showNodeEditorAction && m_window.m_showNodeEditorAction->isChecked());
     m_window.m_shellLayoutController->setMixVisible(

@@ -20,6 +20,7 @@
 namespace
 {
 constexpr float kMixerFloorSilenceDb = -100.0F;
+constexpr int kPlaybackReadAheadBufferSamples = 32768;
 
 struct TrackIdHash
 {
@@ -339,6 +340,7 @@ struct JuceAudioEngine::Impl
     juce::AudioDeviceManager deviceManager;
     juce::AudioSourcePlayer audioSourcePlayer;
     juce::MixerAudioSource mixer;
+    juce::TimeSliceThread readAheadThread{juce::String{"DAWG audio read-ahead"}};
     std::unique_ptr<GainAudioSource> masterGainSource;
     std::unique_ptr<MeterAudioSource> masterMeterSource;
     juce::AudioFormatManager formatManager;
@@ -351,6 +353,7 @@ JuceAudioEngine::JuceAudioEngine(QObject* parent)
     , m_impl(std::make_unique<Impl>())
 {
     m_impl->formatManager.registerBasicFormats();
+    m_impl->readAheadThread.startThread();
 
     const auto initError = m_impl->deviceManager.initialise(0, 2, nullptr, true);
     if (!initError.isEmpty())
@@ -374,6 +377,7 @@ JuceAudioEngine::~JuceAudioEngine()
     {
         m_impl->deviceManager.removeAudioCallback(&m_impl->audioSourcePlayer);
         m_impl->audioSourcePlayer.setSource(nullptr);
+        m_impl->readAheadThread.stopThread(1000);
     }
 }
 
@@ -483,7 +487,11 @@ bool JuceAudioEngine::playTrack(const QUuid& trackId, const QString& filePath, c
 
     playback->readerSource = std::make_unique<juce::AudioFormatReaderSource>(playbackReader.release(), true);
     playback->readerSource->setLooping(resolvedOptions.loopEnabled);
-    playback->transport.setSource(playback->readerSource.get(), 0, nullptr, sourceSampleRate);
+    playback->transport.setSource(
+        playback->readerSource.get(),
+        kPlaybackReadAheadBufferSamples,
+        &m_impl->readAheadThread,
+        sourceSampleRate);
     playback->transport.setPosition(static_cast<double>(resolvedOptions.transportOffsetMs) / 1000.0);
     playback->gainSource = std::make_unique<GainAudioSource>(playback->transport);
     playback->panSource = std::make_unique<PanAudioSource>(*playback->gainSource);

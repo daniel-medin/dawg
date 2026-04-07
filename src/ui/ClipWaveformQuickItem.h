@@ -5,24 +5,34 @@
 
 #include <QImage>
 #include <QQuickPaintedItem>
+#include <QVariantMap>
 
-#include "ui/ClipEditorTypes.h"
+#include "ui/AudioClipPreviewTypes.h"
 
 class ClipWaveformQuickItem : public QQuickPaintedItem
 {
     Q_OBJECT
     Q_PROPERTY(bool clipRangeHandlesVisible READ clipRangeHandlesVisible WRITE setClipRangeHandlesVisible NOTIFY clipRangeHandlesVisibleChanged)
+    Q_PROPERTY(bool playheadVisible READ playheadVisible WRITE setPlayheadVisible NOTIFY playheadVisibleChanged)
+    Q_PROPERTY(qreal contentMargin READ contentMargin WRITE setContentMargin NOTIFY contentMarginChanged)
     Q_PROPERTY(bool scrollVisible READ scrollVisible NOTIFY scrollMetricsChanged)
     Q_PROPERTY(int scrollValue READ scrollValue NOTIFY scrollMetricsChanged)
     Q_PROPERTY(int scrollMaximum READ scrollMaximum NOTIFY scrollMetricsChanged)
     Q_PROPERTY(int scrollPageStep READ scrollPageStep NOTIFY scrollMetricsChanged)
+    Q_PROPERTY(QVariantMap waveformState READ waveformState WRITE setWaveformState NOTIFY waveformStateChanged)
 
 public:
     explicit ClipWaveformQuickItem(QQuickItem* parent = nullptr);
 
-    void setState(const std::optional<ClipEditorState>& state);
+    void setState(const std::optional<AudioClipPreviewState>& state);
+    [[nodiscard]] QVariantMap waveformState() const;
+    void setWaveformState(const QVariantMap& state);
     [[nodiscard]] bool clipRangeHandlesVisible() const;
     void setClipRangeHandlesVisible(bool visible);
+    [[nodiscard]] bool playheadVisible() const;
+    void setPlayheadVisible(bool visible);
+    [[nodiscard]] qreal contentMargin() const;
+    void setContentMargin(qreal margin);
     [[nodiscard]] bool scrollVisible() const;
     [[nodiscard]] int scrollValue() const;
     [[nodiscard]] int scrollMaximum() const;
@@ -36,7 +46,10 @@ signals:
     void clipRangeChanged(int clipStartMs, int clipEndMs);
     void playheadChanged(int playheadMs);
     void clipRangeHandlesVisibleChanged();
+    void playheadVisibleChanged();
+    void contentMarginChanged();
     void scrollMetricsChanged();
+    void waveformStateChanged();
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
@@ -54,6 +67,7 @@ private:
     };
 
     void loadWaveform(const QString& filePath);
+    [[nodiscard]] QRectF waveformBounds() const;
     [[nodiscard]] QRectF selectionRect(const QRectF& bounds) const;
     [[nodiscard]] double clipStartX(const QRectF& bounds) const;
     [[nodiscard]] double clipEndX(const QRectF& bounds) const;
@@ -73,8 +87,11 @@ private:
     void ensureWaveformCache();
     void rebuildWaveformCache();
 
-    std::optional<ClipEditorState> m_state;
+    std::optional<AudioClipPreviewState> m_state;
+    QVariantMap m_waveformState;
     bool m_clipRangeHandlesVisible = true;
+    bool m_playheadVisible = true;
+    qreal m_contentMargin = 10.0;
     QString m_loadedAssetPath;
     std::vector<float> m_peaks;
     DragMode m_dragMode = DragMode::None;

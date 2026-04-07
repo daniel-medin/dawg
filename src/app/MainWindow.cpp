@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 
 #include <QApplication>
 #include <QCursor>
@@ -32,6 +33,7 @@
 #include <QSGRendererInterface>
 #include <QScrollArea>
 #include <QScreen>
+#include <QScopedValueRollback>
 #include <QSettings>
 #include <QShortcut>
 #include <QSignalBlocker>
@@ -71,7 +73,6 @@
 #include "app/VideoProxyController.h"
 #include "app/WindowChromeController.h"
 #include "core/audio/AudioDurationProbe.h"
-#include "ui/ClipEditorQuickController.h"
 #include "ui/ClipWaveformQuickItem.h"
 #include "ui/DebugOverlayWindow.h"
 #include "ui/MixQuickController.h"
@@ -220,11 +221,6 @@ QUrl quickTitleBarUrl()
 QUrl mixSceneUrl()
 {
     return QUrl(QStringLiteral("qrc:/qml/MixScene.qml"));
-}
-
-QUrl clipEditorSceneUrl()
-{
-    return QUrl(QStringLiteral("qrc:/qml/ClipEditorScene.qml"));
 }
 
 QUrl shellLayoutSceneUrl()
@@ -810,94 +806,232 @@ QString mixGainDisplayText(const float gainDb)
     return QStringLiteral("%1 dB").arg(gainDb, 0, 'f', 1);
 }
 
-dawg::node::TrackData nodeTrackFromClipState(const ClipEditorState& state, const QString& fallbackLabel)
+dawg::node::AudioClipData nodeAudioClipFromClipState(const AudioClipPreviewState& state, const QString& fallbackLabel)
 {
-    dawg::node::TrackData track;
-    track.label = state.label.trimmed().isEmpty() ? fallbackLabel : state.label.trimmed();
+    dawg::node::AudioClipData clip;
+    clip.label = state.label.trimmed().isEmpty() ? fallbackLabel : state.label.trimmed();
     if (state.hasAttachedAudio)
     {
-        track.attachedAudio = AudioAttachment{
+        clip.attachedAudio = AudioAttachment{
             .assetPath = state.assetPath,
             .gainDb = state.gainDb,
             .clipStartMs = state.clipStartMs,
             .clipEndMs = state.clipEndMs,
-            .loopEnabled = state.loopEnabled
+            .loopEnabled = false
         };
     }
-    return track;
+    return clip;
 }
 
-std::optional<ClipEditorState> clipStateFromNodeTrack(
-    const dawg::node::TrackData& track,
+std::optional<AudioClipPreviewState> clipStateFromNodeAudioClip(
+    const dawg::node::AudioClipData& clip,
     const QString& fallbackLabel)
 {
-    if (!track.attachedAudio.has_value() || track.attachedAudio->assetPath.isEmpty())
+    if (!clip.attachedAudio.has_value() || clip.attachedAudio->assetPath.isEmpty())
     {
         return std::nullopt;
     }
 
-    const auto durationMs = dawg::audio::probeAudioDurationMs(track.attachedAudio->assetPath);
+    const auto durationMs = dawg::audio::probeAudioDurationMs(clip.attachedAudio->assetPath);
     if (!durationMs.has_value() || *durationMs <= 0)
     {
         return std::nullopt;
     }
 
-    const auto clipStartMs = std::clamp(track.attachedAudio->clipStartMs, 0, *durationMs);
+    const auto clipStartMs = std::clamp(clip.attachedAudio->clipStartMs, 0, *durationMs);
     const auto clipEndMs = std::clamp(
-        track.attachedAudio->clipEndMs.value_or(*durationMs),
+        clip.attachedAudio->clipEndMs.value_or(*durationMs),
         clipStartMs + 1,
         *durationMs);
-    ClipEditorState state;
-    state.label = track.label.trimmed().isEmpty() ? fallbackLabel : track.label.trimmed();
-    state.assetPath = track.attachedAudio->assetPath;
+    AudioClipPreviewState state;
+    state.label = clip.label.trimmed().isEmpty() ? fallbackLabel : clip.label.trimmed();
+    state.assetPath = clip.attachedAudio->assetPath;
     state.clipStartMs = clipStartMs;
     state.clipEndMs = clipEndMs;
     state.sourceDurationMs = *durationMs;
     state.playheadMs = clipStartMs;
-    state.gainDb = track.attachedAudio->gainDb;
+    state.gainDb = clip.attachedAudio->gainDb;
     state.hasAttachedAudio = true;
-    state.loopEnabled = track.attachedAudio->loopEnabled;
+    state.loopEnabled = false;
     return state;
 }
 
-QVariantList nodeTrackItemsFromDocument(const dawg::node::Document& document)
+QVariantList nodeTrackItemsFromDocument(const dawg::node::Document& document, const int nodeDurationMs)
 {
     QVariantList items;
-    for (int index = 0; index < static_cast<int>(document.node.tracks.size()); ++index)
+    const auto safeNodeDurationMs = std::max(1, nodeDurationMs);
+    for (int laneIndex = 0; laneIndex < static_cast<int>(document.node.lanes.size()); ++laneIndex)
     {
-        const auto& track = document.node.tracks[static_cast<std::size_t>(index)];
-        const auto title = track.label.trimmed().isEmpty()
-            ? QStringLiteral("Track %1").arg(index + 1)
-            : track.label.trimmed();
-        QString subtitle;
-        if (track.attachedAudio.has_value() && !track.attachedAudio->assetPath.isEmpty())
+        const auto& lane = document.node.lanes[static_cast<std::size_t>(laneIndex)];
+        const auto title = lane.label.trimmed().isEmpty()
+            ? QStringLiteral("Lane %1").arg(laneIndex + 1)
+            : lane.label.trimmed();
+        const auto clipCount = static_cast<int>(lane.audioClips.size());
+        const auto subtitle = clipCount == 0
+            ? QStringLiteral("Empty lane")
+            : QStringLiteral("%1 audio clip(s)").arg(clipCount);
+
+        QVariantList clipItems;
+        QVariantMap waveformState;
+        for (int clipIndex = 0; clipIndex < static_cast<int>(lane.audioClips.size()); ++clipIndex)
         {
-            subtitle = QFileInfo(track.attachedAudio->assetPath).fileName();
-            if (subtitle.isEmpty())
+            const auto& clip = lane.audioClips[static_cast<std::size_t>(clipIndex)];
+            if (!clip.attachedAudio.has_value() || clip.attachedAudio->assetPath.isEmpty())
             {
-                subtitle = QStringLiteral("Embedded audio");
+                continue;
             }
-        }
-        else
-        {
-            subtitle = QStringLiteral("No audio");
+
+            const auto clipTitle = clip.label.trimmed().isEmpty()
+                ? QStringLiteral("Audio Clip %1").arg(clipIndex + 1)
+                : clip.label.trimmed();
+            const auto clipFileName = QFileInfo(clip.attachedAudio->assetPath).fileName();
+            QVariantMap clipWaveformState;
+            int clipDurationMs = 1;
+            double clipOffsetRatio = std::clamp(
+                static_cast<double>(clip.laneOffsetMs) / static_cast<double>(safeNodeDurationMs),
+                0.0,
+                1.0);
+            double clipWidthRatio = 0.0;
+            const auto durationMs = dawg::audio::probeAudioDurationMs(clip.attachedAudio->assetPath);
+            if (durationMs.has_value() && *durationMs > 0)
+            {
+                const auto clipStartMs = std::clamp(
+                    clip.attachedAudio->clipStartMs,
+                    0,
+                    std::max(0, *durationMs - 1));
+                const auto clipEndMs = std::clamp(
+                    clip.attachedAudio->clipEndMs.value_or(*durationMs),
+                    clipStartMs + 1,
+                    *durationMs);
+                clipDurationMs = std::max(1, clipEndMs - clipStartMs);
+                clipWidthRatio = std::clamp(
+                    static_cast<double>(clipDurationMs) / static_cast<double>(safeNodeDurationMs),
+                    0.0,
+                    1.0 - clipOffsetRatio);
+                clipWaveformState = QVariantMap{
+                    {QStringLiteral("label"), clipTitle},
+                    {QStringLiteral("assetPath"), clip.attachedAudio->assetPath},
+                    {QStringLiteral("clipStartMs"), clipStartMs},
+                    {QStringLiteral("clipEndMs"), clipEndMs},
+                    {QStringLiteral("sourceDurationMs"), *durationMs},
+                    {QStringLiteral("playheadMs"), clipStartMs},
+                    {QStringLiteral("gainDb"), clip.attachedAudio->gainDb},
+                    {QStringLiteral("hasAttachedAudio"), true},
+                    {QStringLiteral("loopEnabled"), false}
+                };
+                if (waveformState.isEmpty())
+                {
+                    waveformState = clipWaveformState;
+                }
+            }
+            clipItems.push_back(QVariantMap{
+                {QStringLiteral("clipId"), clip.id},
+                {QStringLiteral("title"), clipTitle},
+                {QStringLiteral("subtitle"), clipFileName.isEmpty() ? QStringLiteral("Embedded audio") : clipFileName},
+                {QStringLiteral("laneOffsetMs"), clip.laneOffsetMs},
+                {QStringLiteral("clipDurationMs"), clipDurationMs},
+                {QStringLiteral("clipOffsetRatio"), clipOffsetRatio},
+                {QStringLiteral("clipWidthRatio"), clipWidthRatio},
+                {QStringLiteral("hasWaveform"), !clipWaveformState.isEmpty()},
+                {QStringLiteral("waveformState"), clipWaveformState}
+            });
         }
 
         items.push_back(QVariantMap{
+            {QStringLiteral("laneId"), lane.id},
             {QStringLiteral("title"), title},
             {QStringLiteral("subtitle"), subtitle},
-            {QStringLiteral("primary"), index == 0}
+            {QStringLiteral("primary"), laneIndex == 0},
+            {QStringLiteral("muted"), lane.muted},
+            {QStringLiteral("soloed"), lane.soloed},
+            {QStringLiteral("clipCount"), clipCount},
+            {QStringLiteral("clips"), clipItems},
+            {QStringLiteral("hasWaveform"), !waveformState.isEmpty()},
+            {QStringLiteral("waveformState"), waveformState}
         });
     }
     return items;
 }
 
-bool materializeNodeTrackAudio(
-    dawg::node::TrackData& track,
+QUuid uuidFromNodeDocumentId(const QString& id)
+{
+    auto cleaned = id.trimmed();
+    if (cleaned.isEmpty())
+    {
+        return QUuid{};
+    }
+    if (!cleaned.startsWith(QLatin1Char('{')))
+    {
+        cleaned = QStringLiteral("{%1}").arg(cleaned);
+    }
+    return QUuid(cleaned);
+}
+
+std::vector<AudioPlaybackCoordinator::NodePreviewClip> nodePreviewClipsFromDocument(
+    const dawg::node::Document& document)
+{
+    std::vector<AudioPlaybackCoordinator::NodePreviewClip> clips;
+    const auto anyLaneSoloed = std::any_of(
+        document.node.lanes.cbegin(),
+        document.node.lanes.cend(),
+        [](const dawg::node::LaneData& lane)
+        {
+            return lane.soloed;
+        });
+    for (const auto& lane : document.node.lanes)
+    {
+        if (lane.muted || (anyLaneSoloed && !lane.soloed))
+        {
+            continue;
+        }
+
+        for (const auto& clip : lane.audioClips)
+        {
+            if (!clip.attachedAudio.has_value() || clip.attachedAudio->assetPath.isEmpty())
+            {
+                continue;
+            }
+
+            const auto durationMs = dawg::audio::probeAudioDurationMs(clip.attachedAudio->assetPath);
+            if (!durationMs.has_value() || *durationMs <= 0)
+            {
+                continue;
+            }
+
+            const auto clipStartMs = std::clamp(
+                clip.attachedAudio->clipStartMs,
+                0,
+                std::max(0, *durationMs - 1));
+            const auto clipEndMs = std::clamp(
+                clip.attachedAudio->clipEndMs.value_or(*durationMs),
+                clipStartMs + 1,
+                *durationMs);
+            const auto previewTrackId = uuidFromNodeDocumentId(clip.id);
+            if (previewTrackId.isNull())
+            {
+                continue;
+            }
+
+            clips.push_back(AudioPlaybackCoordinator::NodePreviewClip{
+                .previewTrackId = previewTrackId,
+                .assetPath = clip.attachedAudio->assetPath,
+                .laneOffsetMs = clip.laneOffsetMs,
+                .clipStartMs = clipStartMs,
+                .clipEndMs = clipEndMs,
+                .gainDb = clip.attachedAudio->gainDb,
+                .loopEnabled = false
+            });
+        }
+    }
+    return clips;
+}
+
+bool materializeNodeClipAudio(
+    dawg::node::AudioClipData& clip,
     const QString& audioDirectoryPath,
     QString* errorMessage)
 {
-    if (!track.attachedAudio.has_value())
+    if (!clip.attachedAudio.has_value())
     {
         return true;
     }
@@ -911,15 +1045,15 @@ bool materializeNodeTrackAudio(
         return false;
     }
 
-    if (!track.embeddedAudioData.isEmpty())
+    if (!clip.embeddedAudioData.isEmpty())
     {
-        const auto embeddedAudioFileName = track.embeddedAudioFileName.isEmpty()
+        const auto embeddedAudioFileName = clip.embeddedAudioFileName.isEmpty()
             ? QStringLiteral("node-audio.wav")
-            : track.embeddedAudioFileName;
+            : clip.embeddedAudioFileName;
         const auto targetAudioPath = uniqueTargetFilePath(audioDirectoryPath, embeddedAudioFileName);
         QFile audioFile(targetAudioPath);
         if (!audioFile.open(QIODevice::WriteOnly)
-            || audioFile.write(track.embeddedAudioData) != track.embeddedAudioData.size())
+            || audioFile.write(clip.embeddedAudioData) != clip.embeddedAudioData.size())
         {
             if (errorMessage)
             {
@@ -928,16 +1062,16 @@ bool materializeNodeTrackAudio(
             return false;
         }
         audioFile.close();
-        track.attachedAudio->assetPath = QDir::cleanPath(targetAudioPath);
+        clip.attachedAudio->assetPath = QDir::cleanPath(targetAudioPath);
         return true;
     }
 
-    const auto assetPath = track.attachedAudio->assetPath;
+    const auto assetPath = clip.attachedAudio->assetPath;
     if (assetPath.isEmpty() || !QFileInfo::exists(assetPath))
     {
         if (errorMessage)
         {
-            *errorMessage = QStringLiteral("The node contains an audio track that could not be found.");
+            *errorMessage = QStringLiteral("The node contains an audio clip that could not be found.");
         }
         return false;
     }
@@ -952,7 +1086,7 @@ bool materializeNodeTrackAudio(
         return false;
     }
 
-    track.attachedAudio->assetPath = QDir::cleanPath(targetAudioPath);
+    clip.attachedAudio->assetPath = QDir::cleanPath(targetAudioPath);
     return true;
 }
 
@@ -1049,11 +1183,12 @@ MainWindow::MainWindow(QWindow* parent)
     m_clearAllShortcutTimer.setInterval(1500);
     m_memoryUsageTimer.setInterval(1000);
     m_mixMeterTimer.setInterval(33);
-    m_clipEditorPreviewTimer.setInterval(16);
+    m_nodeEditorPreviewTimer.setTimerType(Qt::PreciseTimer);
+    m_nodeEditorPreviewTimer.setInterval(16);
     connect(&m_clearAllShortcutTimer, &QTimer::timeout, this, &MainWindow::clearPendingClearAllShortcut);
     connect(&m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsage);
     connect(&m_mixMeterTimer, &QTimer::timeout, this, &MainWindow::updateMixMeterLevels);
-    connect(&m_clipEditorPreviewTimer, &QTimer::timeout, this, &MainWindow::refreshClipEditor);
+    connect(&m_nodeEditorPreviewTimer, &QTimer::timeout, this, &MainWindow::updateNodeEditorPreview);
     m_statusToastTimer.setSingleShot(true);
     m_statusToastTimer.setInterval(2800);
     connect(&m_statusToastTimer, &QTimer::timeout, this, [this]()
@@ -1102,17 +1237,6 @@ MainWindow::MainWindow(QWindow* parent)
             detachTimeline();
         }
     });
-    connect(m_detachClipEditorAction, &QAction::triggered, this, [this]()
-    {
-        if (m_clipEditorDetached)
-        {
-            attachClipEditor();
-        }
-        else
-        {
-            detachClipEditor();
-        }
-    });
     connect(m_detachMixAction, &QAction::triggered, this, [this]()
     {
         if (m_mixDetached)
@@ -1137,31 +1261,12 @@ MainWindow::MainWindow(QWindow* parent)
     });
     connect(m_showTimelineAction, &QAction::toggled, this, [this](const bool visible)
     {
-        if (visible && m_showNodeEditorAction && m_showNodeEditorAction->isChecked())
-        {
-            setActionCheckedSilently(m_showNodeEditorAction, false);
-            updateNodeEditorVisibility(false);
-        }
         updateTimelineVisibility(visible);
         if (!m_projectStateChangeInProgress && hasOpenProject())
         {
             setProjectDirty(true);
         }
         showStatus(visible ? QStringLiteral("Timeline shown.") : QStringLiteral("Timeline hidden."));
-    });
-    connect(m_showClipEditorAction, &QAction::toggled, this, [this](const bool visible)
-    {
-        if (visible && m_showNodeEditorAction && m_showNodeEditorAction->isChecked())
-        {
-            setActionCheckedSilently(m_showNodeEditorAction, false);
-            updateNodeEditorVisibility(false);
-        }
-        updateClipEditorVisibility(visible);
-        if (!m_projectStateChangeInProgress && hasOpenProject())
-        {
-            setProjectDirty(true);
-        }
-        showStatus(visible ? QStringLiteral("Clip editor shown.") : QStringLiteral("Clip editor hidden."));
     });
     connect(m_showNodeEditorAction, &QAction::toggled, this, [this](const bool visible)
     {
@@ -1173,12 +1278,6 @@ MainWindow::MainWindow(QWindow* parent)
                 return;
             }
 
-            setActionCheckedSilently(m_showTimelineAction, false);
-            setActionCheckedSilently(m_showClipEditorAction, false);
-            setActionCheckedSilently(m_showMixAction, false);
-            updateTimelineVisibility(false);
-            updateClipEditorVisibility(false);
-            updateMixVisibility(false);
             refreshNodeEditor();
         }
 
@@ -1191,11 +1290,6 @@ MainWindow::MainWindow(QWindow* parent)
     });
     connect(m_showMixAction, &QAction::toggled, this, [this](const bool visible)
     {
-        if (visible && m_showNodeEditorAction && m_showNodeEditorAction->isChecked())
-        {
-            setActionCheckedSilently(m_showNodeEditorAction, false);
-            updateNodeEditorVisibility(false);
-        }
         updateMixVisibility(visible);
         if (!m_projectStateChangeInProgress && hasOpenProject())
         {
@@ -1276,7 +1370,16 @@ MainWindow::MainWindow(QWindow* parent)
         refreshTimeline();
     });
     connect(m_goToStartAction, &QAction::triggered, m_controller, &PlayerController::goToStart);
-    connect(m_playAction, &QAction::triggered, m_controller, &PlayerController::togglePlayback);
+    connect(m_playAction, &QAction::triggered, this, [this]()
+    {
+        if (nodeEditorHasFocus())
+        {
+            toggleNodeEditorPreview();
+            return;
+        }
+        stopNodeEditorPreview();
+        m_controller->togglePlayback();
+    });
     connect(m_stepForwardAction, &QAction::triggered, m_controller, &PlayerController::stepForward);
     connect(m_stepBackAction, &QAction::triggered, m_controller, &PlayerController::stepBackward);
     connect(m_stepFastForwardAction, &QAction::triggered, m_controller, &PlayerController::stepFastForward);
@@ -1308,13 +1411,6 @@ MainWindow::MainWindow(QWindow* parent)
     connect(m_clearLoopRangeAction, &QAction::triggered, this, &MainWindow::clearLoopRange);
     connect(m_trimNodeAction, &QAction::triggered, this, &MainWindow::trimSelectedNodeToSound);
     connect(m_autoPanAction, &QAction::triggered, this, &MainWindow::toggleSelectedNodeAutoPan);
-    connect(m_loopSoundAction, &QAction::toggled, this, [this](const bool enabled)
-    {
-        if (m_controller->setSelectedTrackLoopEnabled(enabled))
-        {
-            refreshClipEditor();
-        }
-    });
     connect(m_toggleNodeNameAction, &QAction::triggered, m_controller, &PlayerController::toggleSelectedTrackLabels);
     connect(m_showAllNodeNamesAction, &QAction::toggled, this, [this](const bool enabled)
     {
@@ -1435,9 +1531,34 @@ MainWindow::MainWindow(QWindow* parent)
         updateDebugVisibility(enabled);
         showStatus(enabled ? QStringLiteral("Debug info shown.") : QStringLiteral("Debug info hidden."));
     });
-    connect(m_playPauseShortcut, &QShortcut::activated, m_controller, &PlayerController::togglePlayback);
-    connect(m_startShortcut, &QShortcut::activated, m_controller, &PlayerController::goToStart);
-    connect(m_numpadStartShortcut, &QShortcut::activated, m_controller, &PlayerController::goToStart);
+    connect(m_playPauseShortcut, &QShortcut::activated, this, [this]()
+    {
+        if (nodeEditorHasFocus())
+        {
+            toggleNodeEditorPreview();
+            return;
+        }
+        stopNodeEditorPreview();
+        m_controller->togglePlayback();
+    });
+    connect(m_startShortcut, &QShortcut::activated, this, [this]()
+    {
+        if (nodeEditorHasFocus())
+        {
+            resetNodeEditorPlayheadToStart();
+            return;
+        }
+        m_controller->goToStart();
+    });
+    connect(m_numpadStartShortcut, &QShortcut::activated, this, [this]()
+    {
+        if (nodeEditorHasFocus())
+        {
+            resetNodeEditorPlayheadToStart();
+            return;
+        }
+        m_controller->goToStart();
+    });
     connect(m_stepBackShortcut, &QShortcut::activated, m_controller, &PlayerController::stepBackward);
     connect(m_stepForwardShortcut, &QShortcut::activated, m_controller, &PlayerController::stepForward);
     connect(m_stepFastForwardShortcut, &QShortcut::activated, m_controller, &PlayerController::stepFastForward);
@@ -1465,12 +1586,11 @@ MainWindow::MainWindow(QWindow* parent)
         this,
         &MainWindow::handleNodeEndShortcut);
     connect(m_showTimelineShortcut, &QShortcut::activated, m_showTimelineAction, &QAction::trigger);
-    connect(m_showClipEditorShortcut, &QShortcut::activated, m_showClipEditorAction, &QAction::trigger);
     connect(m_trimNodeShortcut, &QShortcut::activated, this, &MainWindow::trimSelectedNodeToSound);
     connect(m_autoPanShortcut, &QShortcut::activated, this, &MainWindow::toggleSelectedNodeAutoPan);
     connect(m_audioPoolShortcut, &QShortcut::activated, m_audioPoolAction, &QAction::trigger);
     connect(m_toggleNodeNameShortcut, &QShortcut::activated, m_controller, &PlayerController::toggleSelectedTrackLabels);
-    connect(m_deleteShortcut, &QShortcut::activated, m_controller, &PlayerController::deleteSelectedTrack);
+    connect(m_deleteShortcut, &QShortcut::activated, this, &MainWindow::deleteFromFocusedPanel);
     connect(m_unselectAllShortcut, &QShortcut::activated, m_controller, &PlayerController::clearSelection);
     connect(m_controller, &PlayerController::frameReady, this, &MainWindow::updateFrame);
     connect(m_controller, &PlayerController::overlaysChanged, this, &MainWindow::refreshOverlays);
@@ -1537,21 +1657,6 @@ MainWindow::MainWindow(QWindow* parent)
         }
     });
     connect(m_showMixShortcut, &QShortcut::activated, m_showMixAction, &QAction::trigger);
-    connect(m_clipEditorQuickController, &ClipEditorQuickController::gainChanged, this, [this](const float gainDb)
-    {
-        if (m_controller->setSelectedTrackAudioGainDb(gainDb))
-        {
-            refreshClipEditor();
-        }
-    });
-    connect(m_clipEditorQuickController, &ClipEditorQuickController::attachAudioRequested, this, &MainWindow::importSound);
-    connect(m_clipEditorQuickController, &ClipEditorQuickController::loopSoundChanged, this, [this](const bool enabled)
-    {
-        if (m_controller->setSelectedTrackLoopEnabled(enabled))
-        {
-            refreshClipEditor();
-        }
-    });
     connect(m_mixQuickController, &MixQuickController::masterGainChanged, m_controller, &PlayerController::setMasterMixGainDb);
     connect(m_mixQuickController, &MixQuickController::masterMutedChanged, m_controller, &PlayerController::setMasterMixMuted);
     connect(m_mixQuickController, &MixQuickController::laneGainChanged, m_controller, &PlayerController::setMixLaneGainDb);
@@ -1712,12 +1817,6 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         event->ignore();
         return true;
     }
-    if (watched == m_detachedClipEditorWindow && event && event->type() == QEvent::Close && m_clipEditorDetached && !m_shuttingDown)
-    {
-        attachClipEditor();
-        event->ignore();
-        return true;
-    }
     if (watched == m_detachedMixWindow && event && event->type() == QEvent::Close && m_mixDetached && !m_shuttingDown)
     {
         attachMix();
@@ -1731,9 +1830,9 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         return true;
     }
 
-    const auto clipEditorFocused = [this]() -> bool
+    const auto nodeEditorFocused = [this]() -> bool
     {
-        return itemHasActiveFocus(this, m_clipEditorQuickWidget);
+        return nodeEditorHasFocus();
     };
 
     if (watched == m_nativeViewportWindow
@@ -1752,7 +1851,23 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         if (!keyEvent->isAutoRepeat()
             && keyEvent->key() == Qt::Key_Space
             && keyEvent->modifiers() == Qt::NoModifier
-            && clipEditorFocused())
+            && nodeEditorFocused())
+        {
+            event->accept();
+            return true;
+        }
+        if (!keyEvent->isAutoRepeat()
+            && (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter)
+            && keyEvent->modifiers() == Qt::NoModifier
+            && nodeEditorFocused())
+        {
+            event->accept();
+            return true;
+        }
+        if (!keyEvent->isAutoRepeat()
+            && keyEvent->key() == Qt::Key_Backspace
+            && keyEvent->modifiers() == Qt::NoModifier
+            && nodeEditorFocused())
         {
             event->accept();
             return true;
@@ -1793,17 +1908,25 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         if (!keyEvent->isAutoRepeat()
             && keyEvent->key() == Qt::Key_Space
             && keyEvent->modifiers() == Qt::NoModifier
-            && clipEditorFocused())
+            && nodeEditorFocused())
         {
-            if (m_controller->isSelectedTrackClipPreviewPlaying())
-            {
-                m_controller->stopSelectedTrackClipPreview();
-            }
-            else
-            {
-                static_cast<void>(m_controller->startSelectedTrackClipPreview());
-            }
-            refreshClipEditor();
+            toggleNodeEditorPreview();
+            return true;
+        }
+        if (!keyEvent->isAutoRepeat()
+            && (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter)
+            && keyEvent->modifiers() == Qt::NoModifier
+            && nodeEditorFocused())
+        {
+            resetNodeEditorPlayheadToStart();
+            return true;
+        }
+        if (!keyEvent->isAutoRepeat()
+            && keyEvent->key() == Qt::Key_Backspace
+            && keyEvent->modifiers() == Qt::NoModifier
+            && nodeEditorFocused())
+        {
+            static_cast<void>(deleteSelectedNodeEditorSelection());
             return true;
         }
     }
@@ -2056,6 +2179,10 @@ void MainWindow::closeEvent(QCloseEvent* event)
     }
 
     m_shuttingDown = true;
+    stopNodeEditorPreview();
+    m_nodeEditorWaveformItem = nullptr;
+    m_shellRootItem = nullptr;
+    setSource({});
     QQuickView::closeEvent(event);
     qInfo().noquote()
         << "MainWindow::closeEvent after base:"
@@ -2467,49 +2594,61 @@ void MainWindow::handleNodeEditorFileAction(const QString& actionKey)
 
 void MainWindow::handleNodeEditorAudioAction(const QString& actionKey)
 {
-    if (actionKey != QStringLiteral("import"))
+    const auto isImportAction = actionKey == QStringLiteral("import");
+    const auto isNewLaneAction = actionKey == QStringLiteral("newLane") || actionKey == QStringLiteral("createTrack");
+    if (!isImportAction && !isNewLaneAction)
     {
         return;
     }
 
-    if (!ensureProjectForMediaAction(QStringLiteral("import audio")))
+    if (!ensureProjectForMediaAction(isImportAction ? QStringLiteral("import audio") : QStringLiteral("create a node track")))
     {
         return;
     }
 
     if (!m_controller || !m_controller->hasSelection())
     {
-        showStatus(QStringLiteral("Select a node before importing audio."));
-        return;
-    }
-
-    const auto filePath = chooseOpenFileName(
-        QStringLiteral("Import Audio"),
-        QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
-        QStringLiteral("Audio Files (*.wav *.mp3 *.flac *.aif *.aiff *.m4a *.aac *.ogg);;All Files (*.*)"));
-    if (filePath.isEmpty())
-    {
+        showStatus(isImportAction
+            ? QStringLiteral("Select a node before importing audio.")
+            : QStringLiteral("Select a node before creating a track."));
         return;
     }
 
     QString errorMessage;
-    const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("audio"), &errorMessage);
-    if (!copiedFilePath.has_value())
+    std::optional<QString> copiedFilePath;
+    QFileInfo importedAudioInfo;
+    if (isImportAction)
     {
-        m_dialogController->execMessage(
+        const auto filePath = chooseOpenFileName(
             QStringLiteral("Import Audio"),
-            errorMessage,
-            {},
-            {DialogController::Button::Ok});
-        return;
-    }
+            QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
+            QStringLiteral("Audio Files (*.wav *.mp3 *.flac *.aif *.aiff *.m4a *.aac *.ogg);;All Files (*.*)"));
+        if (filePath.isEmpty())
+        {
+            return;
+        }
 
-    static_cast<void>(m_controller->importAudioToPool(*copiedFilePath));
+        copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("audio"), &errorMessage);
+        if (!copiedFilePath.has_value())
+        {
+            m_dialogController->execMessage(
+                QStringLiteral("Import Audio"),
+                errorMessage,
+                {},
+                {DialogController::Button::Ok});
+            return;
+        }
+
+        importedAudioInfo = QFileInfo(*copiedFilePath);
+        static_cast<void>(m_controller->importAudioToPool(*copiedFilePath));
+    }
 
     const auto selectedTrackId = m_controller->selectedTrackId();
     if (selectedTrackId.isNull())
     {
-        showStatus(QStringLiteral("Select a node before importing audio."));
+        showStatus(isImportAction
+            ? QStringLiteral("Select a node before importing audio.")
+            : QStringLiteral("Select a node before creating a lane."));
         return;
     }
 
@@ -2528,7 +2667,7 @@ void MainWindow::handleNodeEditorAudioAction(const QString& actionKey)
         if (!loadedDocument.has_value())
         {
             m_dialogController->execMessage(
-                QStringLiteral("Import Audio"),
+                isImportAction ? QStringLiteral("Import Audio") : QStringLiteral("Create Track"),
                 errorMessage,
                 {},
                 {DialogController::Button::Ok});
@@ -2549,42 +2688,66 @@ void MainWindow::handleNodeEditorAudioAction(const QString& actionKey)
         nodeDocument.node.autoPanEnabled = m_controller->selectedTracksAutoPanEnabled();
         nodeDocument.node.timelineFrameCount = m_controller->totalFrames();
         nodeDocument.node.timelineFps = m_controller->fps();
-        if (const auto currentState = m_controller->selectedClipEditorState();
-            currentState.has_value() && currentState->hasAttachedAudio)
-        {
-            nodeDocument.node.tracks.push_back(nodeTrackFromClipState(*currentState, nodeLabel));
-        }
     }
 
     if (nodeDocument.node.label.trimmed().isEmpty())
     {
         nodeDocument.node.label = m_controller->trackLabel(selectedTrackId).trimmed();
     }
-    nodeDocument.name = nodeDocument.node.label.trimmed().isEmpty()
-        ? QStringLiteral("Node")
-        : nodeDocument.node.label.trimmed();
+    if (nodeDocument.name.trimmed().isEmpty())
+    {
+        nodeDocument.name = nodeDocument.node.label.trimmed().isEmpty()
+            ? QStringLiteral("Node")
+            : nodeDocument.node.label.trimmed();
+    }
     nodeDocument.node.timelineFrameCount = m_controller->totalFrames();
     nodeDocument.node.timelineFps = m_controller->fps();
     nodeDocument.node.autoPanEnabled = m_controller->selectedTracksAutoPanEnabled();
 
-    const QFileInfo importedAudioInfo(*copiedFilePath);
-    dawg::node::TrackData importedTrack;
-    importedTrack.label = importedAudioInfo.completeBaseName().isEmpty()
-        ? importedAudioInfo.fileName()
-        : importedAudioInfo.completeBaseName();
-    importedTrack.attachedAudio = AudioAttachment{
-        .assetPath = *copiedFilePath,
-        .gainDb = 0.0F,
-        .clipStartMs = 0,
-        .clipEndMs = std::nullopt,
-        .loopEnabled = false
-    };
-    nodeDocument.node.tracks.push_back(importedTrack);
+    QString selectedLaneId;
+    if (m_nodeEditorQuickController)
+    {
+        selectedLaneId = m_nodeEditorQuickController->selectedLaneId();
+    }
+
+    auto laneIt = selectedLaneId.isEmpty()
+        ? nodeDocument.node.lanes.end()
+        : std::find_if(
+            nodeDocument.node.lanes.begin(),
+            nodeDocument.node.lanes.end(),
+            [&selectedLaneId](const dawg::node::LaneData& lane)
+            {
+                return lane.id == selectedLaneId;
+            });
+    if (isNewLaneAction || laneIt == nodeDocument.node.lanes.end())
+    {
+        dawg::node::LaneData lane;
+        lane.label = QStringLiteral("Track %1").arg(static_cast<int>(nodeDocument.node.lanes.size()) + 1);
+        nodeDocument.node.lanes.push_back(lane);
+        laneIt = std::prev(nodeDocument.node.lanes.end());
+        selectedLaneId = laneIt->id;
+    }
+
+    if (isImportAction && copiedFilePath.has_value())
+    {
+        dawg::node::AudioClipData importedClip;
+        importedClip.label = importedAudioInfo.completeBaseName().isEmpty()
+            ? importedAudioInfo.fileName()
+            : importedAudioInfo.completeBaseName();
+        importedClip.attachedAudio = AudioAttachment{
+            .assetPath = *copiedFilePath,
+            .gainDb = 0.0F,
+            .clipStartMs = 0,
+            .clipEndMs = std::nullopt,
+            .loopEnabled = false
+        };
+        laneIt->audioClips.push_back(importedClip);
+    }
 
     if (!dawg::node::saveDocument(boundNodeDocumentPath, nodeDocument, &errorMessage))
     {
         m_dialogController->execMessage(
-            QStringLiteral("Import Audio"),
+            isImportAction ? QStringLiteral("Import Audio") : QStringLiteral("Create Track"),
             errorMessage,
             {},
             {DialogController::Button::Ok});
@@ -2598,13 +2761,24 @@ void MainWindow::handleNodeEditorAudioAction(const QString& actionKey)
         nodeDocument.node.timelineFps));
 
     refreshAudioPool();
+    if (m_nodeEditorQuickController)
+    {
+        m_nodeEditorQuickController->selectLane(selectedLaneId);
+    }
     refreshNodeEditor();
     if (!m_projectStateChangeInProgress && hasOpenProject())
     {
         setProjectDirty(true);
     }
-    showStatus(QStringLiteral("Imported %1 into the node editor as a new internal track.")
-        .arg(importedAudioInfo.fileName()));
+    if (isImportAction)
+    {
+        showStatus(QStringLiteral("Imported %1 into lane %2.")
+            .arg(importedAudioInfo.fileName(), laneIt->label));
+    }
+    else
+    {
+        showStatus(QStringLiteral("Created %1.").arg(laneIt->label));
+    }
 }
 
 void MainWindow::handleLoopStartShortcut()
@@ -2682,21 +2856,6 @@ void MainWindow::clearLoopRange()
 
 void MainWindow::handleNodeStartShortcut()
 {
-    const auto clipEditorFocused = itemHasActiveFocus(this, m_clipEditorQuickWidget);
-    if (clipEditorFocused)
-    {
-        if (const auto state = m_controller->selectedClipEditorState();
-            state.has_value() && state->hasAttachedAudio && state->playheadMs.has_value())
-        {
-            const auto nextClipEndMs = std::max(*state->playheadMs + 1, state->clipEndMs);
-            if (m_controller->setSelectedTrackClipRangeMs(*state->playheadMs, nextClipEndMs))
-            {
-                refreshClipEditor();
-            }
-            return;
-        }
-    }
-
     if (timelineHasFocus() || timelineLoopShortcutFrame().has_value())
     {
         handleLoopStartShortcut();
@@ -2714,21 +2873,6 @@ void MainWindow::handleNodeStartShortcut()
 
 void MainWindow::handleNodeEndShortcut()
 {
-    const auto clipEditorFocused = itemHasActiveFocus(this, m_clipEditorQuickWidget);
-    if (clipEditorFocused)
-    {
-        if (const auto state = m_controller->selectedClipEditorState();
-            state.has_value() && state->hasAttachedAudio && state->playheadMs.has_value())
-        {
-            const auto nextClipEndMs = std::max(state->clipStartMs + 1, *state->playheadMs);
-            if (m_controller->setSelectedTrackClipRangeMs(state->clipStartMs, nextClipEndMs))
-            {
-                refreshClipEditor();
-            }
-            return;
-        }
-    }
-
     if (timelineHasFocus() || timelineLoopShortcutFrame().has_value())
     {
         handleLoopEndShortcut();
@@ -2848,6 +2992,7 @@ void MainWindow::moveSelectedNodeRight()
 void MainWindow::updateFrame(const QImage& image, const int frameIndex, const double timestampSeconds)
 {
     m_debugUiController->updateFrame(image, frameIndex, timestampSeconds);
+    syncNodeEditorPlayheadToProjectFrame(frameIndex);
     if (m_controller
         && m_controller->isPlaying()
         && m_audioPoolQuickWidget
@@ -2888,7 +3033,6 @@ void MainWindow::refreshOverlays()
     }
 
     refreshTimeline();
-    refreshClipEditor();
     refreshNodeEditor();
 }
 
@@ -2898,12 +3042,20 @@ void MainWindow::updateInsertionFollowsPlaybackState(const bool enabled)
     {
         m_insertionFollowsPlaybackAction->setChecked(enabled);
     }
+    if (m_nodeEditorQuickController)
+    {
+        m_nodeEditorQuickController->setInsertionFollowsPlayback(enabled);
+    }
     updateDebugText();
 }
 
 void MainWindow::updatePlaybackState(const bool playing)
 {
     clearStuckWaitCursor(this);
+    if (m_nodeEditorQuickController)
+    {
+        m_nodeEditorQuickController->setPlaybackActive(playing || m_nodeEditorPreviewTimer.isActive());
+    }
     if (m_mixQuickController)
     {
         m_mixQuickController->setPlaybackActive(playing);
@@ -2956,6 +3108,7 @@ void MainWindow::updateMotionTrackingState(const bool enabled)
 void MainWindow::updateSelectionState(const bool hasSelection)
 {
     m_actionsController->updateSelectionState(hasSelection);
+    syncThumbnailStripSelectedNodeRange();
     syncNodeEditorActionAvailability();
 }
 
@@ -2991,13 +3144,12 @@ void MainWindow::updateTimelineVisibility(const bool visible)
     m_panelLayoutController->updateTimelineVisibility(visible);
 }
 
-void MainWindow::updateClipEditorVisibility(const bool visible)
-{
-    m_panelLayoutController->updateClipEditorVisibility(visible);
-}
-
 void MainWindow::updateNodeEditorVisibility(const bool visible)
 {
+    if (!visible)
+    {
+        stopNodeEditorPreview();
+    }
     m_panelLayoutController->updateNodeEditorVisibility(visible);
 }
 
@@ -3024,16 +3176,6 @@ void MainWindow::detachTimeline()
 void MainWindow::attachTimeline()
 {
     m_panelLayoutController->attachTimeline();
-}
-
-void MainWindow::detachClipEditor()
-{
-    m_panelLayoutController->detachClipEditor();
-}
-
-void MainWindow::attachClipEditor()
-{
-    m_panelLayoutController->attachClipEditor();
 }
 
 void MainWindow::detachMix()
@@ -3408,6 +3550,7 @@ void MainWindow::refreshTimeline()
         m_thumbnailStripQuickController->setProjectRootPath(m_currentProjectRootPath);
         m_thumbnailStripQuickController->setVideoPath(timelineVideoPath);
         syncThumbnailStripViewWindow();
+        syncThumbnailStripSelectedNodeRange();
     }
     const auto needsThumbnailManifest =
         !timelineVideoPath.isEmpty()
@@ -3573,30 +3716,6 @@ void MainWindow::handleProjectTimelineThumbnailsGenerationFinished(
     }
 }
 
-void MainWindow::refreshClipEditor()
-{
-    if (!m_clipEditorQuickController || !m_clipEditorQuickWidget || !m_clipEditorQuickWidget->isVisible())
-    {
-        m_clipEditorPreviewTimer.stop();
-        return;
-    }
-
-    m_clipEditorState = m_controller->selectedClipEditorState();
-    m_clipEditorQuickController->setState(m_clipEditorState);
-    syncClipWaveformItem();
-    if (m_controller->isSelectedTrackClipPreviewPlaying())
-    {
-        if (!m_clipEditorPreviewTimer.isActive())
-        {
-            m_clipEditorPreviewTimer.start();
-        }
-    }
-    else
-    {
-        m_clipEditorPreviewTimer.stop();
-    }
-}
-
 void MainWindow::refreshNodeEditor()
 {
     if (!m_nodeEditorQuickController)
@@ -3609,6 +3728,23 @@ void MainWindow::refreshNodeEditor()
     const auto selectedTrackId = m_controller->selectedTrackId();
     const auto nodeDocumentPath = m_controller->trackNodeDocumentPath(selectedTrackId);
     const auto selectedNodeLabel = selectedNodeDisplayLabel(m_controller);
+    const auto runtimeNodeState = m_controller->selectedAudioClipPreviewState();
+    auto nodeTimelineState = runtimeNodeState.value_or(AudioClipPreviewState{});
+    nodeTimelineState.trackId = selectedTrackId;
+    nodeTimelineState.label = selectedNodeLabel;
+    nodeTimelineState.loopEnabled = false;
+    if (const auto selectedFrameRange = m_controller->selectedTrackFrameRange(); selectedFrameRange.has_value())
+    {
+        nodeTimelineState.nodeStartFrame = selectedFrameRange->first;
+        nodeTimelineState.nodeEndFrame = selectedFrameRange->second;
+    }
+    const auto nodeDurationMs = nodeTimelineState.nodeEndFrame >= nodeTimelineState.nodeStartFrame
+        ? std::max(
+            1,
+            static_cast<int>(std::lround(
+                (static_cast<double>(nodeTimelineState.nodeEndFrame - nodeTimelineState.nodeStartFrame + 1) * 1000.0)
+                / std::max(0.0001, m_controller ? m_controller->fps() : 0.0))))
+        : 1;
     auto hasUnsavedNodeChanges =
         !selectedTrackId.isNull()
         && (nodeDocumentPath.isEmpty() || m_nodeTracksWithUnsavedChanges.contains(selectedTrackId));
@@ -3629,13 +3765,23 @@ void MainWindow::refreshNodeEditor()
             hasUnsavedNodeChanges =
                 m_nodeTracksWithUnsavedChanges.contains(selectedTrackId)
                 || labelDiffers;
-            nodeTrackItems = nodeTrackItemsFromDocument(*nodeDocument);
-            for (const auto& track : nodeDocument->node.tracks)
+            nodeTrackItems = nodeTrackItemsFromDocument(*nodeDocument, nodeDurationMs);
+            for (const auto& lane : nodeDocument->node.lanes)
             {
-                if (const auto previewState = clipStateFromNodeTrack(track, nodeDocument->node.label);
-                    previewState.has_value())
+                for (const auto& clip : lane.audioClips)
                 {
-                    m_nodeEditorState = previewState;
+                    if (const auto previewState = clipStateFromNodeAudioClip(clip, nodeDocument->node.label);
+                        previewState.has_value())
+                    {
+                        m_nodeEditorState = previewState;
+                        m_nodeEditorState->trackId = nodeTimelineState.trackId;
+                        m_nodeEditorState->nodeStartFrame = nodeTimelineState.nodeStartFrame;
+                        m_nodeEditorState->nodeEndFrame = nodeTimelineState.nodeEndFrame;
+                        break;
+                    }
+                }
+                if (m_nodeEditorState.has_value())
+                {
                     break;
                 }
             }
@@ -3644,7 +3790,11 @@ void MainWindow::refreshNodeEditor()
 
     if (!m_nodeEditorState.has_value())
     {
-        m_nodeEditorState = m_controller->selectedClipEditorState();
+        m_nodeEditorState = nodeTimelineState;
+    }
+    if (m_nodeEditorState.has_value())
+    {
+        m_nodeEditorState->loopEnabled = false;
     }
     if (nodeTrackItems.isEmpty() && m_nodeEditorState.has_value())
     {
@@ -3654,10 +3804,30 @@ void MainWindow::refreshNodeEditor()
         const auto subtitle = m_nodeEditorState->hasAttachedAudio
             ? QFileInfo(m_nodeEditorState->assetPath).fileName()
             : QStringLiteral("No audio");
+        QVariantMap waveformState;
+        if (m_nodeEditorState->hasAttachedAudio && !m_nodeEditorState->assetPath.isEmpty())
+        {
+            waveformState = QVariantMap{
+                {QStringLiteral("label"), title},
+                {QStringLiteral("assetPath"), m_nodeEditorState->assetPath},
+                {QStringLiteral("clipStartMs"), m_nodeEditorState->clipStartMs},
+                {QStringLiteral("clipEndMs"), m_nodeEditorState->clipEndMs},
+                {QStringLiteral("sourceDurationMs"), m_nodeEditorState->sourceDurationMs},
+                {QStringLiteral("playheadMs"), m_nodeEditorState->playheadMs.value_or(m_nodeEditorState->clipStartMs)},
+                {QStringLiteral("gainDb"), m_nodeEditorState->gainDb},
+                {QStringLiteral("hasAttachedAudio"), true},
+                {QStringLiteral("loopEnabled"), false}
+            };
+        }
         nodeTrackItems.push_back(QVariantMap{
+            {QStringLiteral("laneId"), QStringLiteral("runtime")},
             {QStringLiteral("title"), title},
             {QStringLiteral("subtitle"), subtitle},
-            {QStringLiteral("primary"), true}
+            {QStringLiteral("primary"), true},
+            {QStringLiteral("muted"), false},
+            {QStringLiteral("soloed"), false},
+            {QStringLiteral("hasWaveform"), !waveformState.isEmpty()},
+            {QStringLiteral("waveformState"), waveformState}
         });
     }
 
@@ -3666,6 +3836,7 @@ void MainWindow::refreshNodeEditor()
         selectedNodeLabel,
         nodeDocumentPath,
         hasUnsavedNodeChanges,
+        m_controller ? m_controller->fps() : 0.0,
         m_nodeEditorState,
         nodeTrackItems);
     syncNodeWaveformItem();
@@ -3699,46 +3870,6 @@ void MainWindow::syncNodeEditorActionAvailability()
     {
         m_actionRegistry->rebuild();
     }
-}
-
-void MainWindow::handleClipEditorQuickStatusChanged()
-{
-    if (!m_shellRootItem)
-    {
-        return;
-    }
-
-    if (!m_clipWaveformItem)
-    {
-        m_clipWaveformItem = m_shellRootItem->findChild<ClipWaveformQuickItem*>(QStringLiteral("clipWaveform"));
-        if (m_clipWaveformItem)
-        {
-            connect(m_clipWaveformItem, &ClipWaveformQuickItem::clipRangeChanged, m_controller, &PlayerController::setSelectedTrackClipRangeMs);
-            connect(m_clipWaveformItem, &ClipWaveformQuickItem::playheadChanged, this, [this](const int playheadMs)
-            {
-                if (m_controller->setSelectedTrackClipPlayheadMs(playheadMs))
-                {
-                    if (!m_projectStateChangeInProgress && hasOpenProject())
-                    {
-                        setProjectDirty(true);
-                    }
-                    refreshClipEditor();
-                }
-            });
-        }
-    }
-
-    syncClipWaveformItem();
-}
-
-void MainWindow::syncClipWaveformItem()
-{
-    if (!m_clipWaveformItem)
-    {
-        return;
-    }
-
-    m_clipWaveformItem->setState(m_clipEditorState);
 }
 
 void MainWindow::syncNodeWaveformItem()
@@ -3799,7 +3930,7 @@ bool MainWindow::saveSelectedNodeToFile(
         return false;
     }
 
-    const auto currentState = m_controller->selectedClipEditorState();
+    const auto currentState = m_controller->selectedAudioClipPreviewState();
     const auto trackLabel = m_controller->trackLabel(selectedTrackId).trimmed();
     const auto nodeLabel = !nodeLabelOverride.trimmed().isEmpty()
         ? nodeLabelOverride.trimmed()
@@ -3858,26 +3989,40 @@ bool MainWindow::saveSelectedNodeToFile(
     nodeDocument.node.timelineFrameCount = m_controller->totalFrames();
     nodeDocument.node.timelineFps = m_controller->fps();
 
-    if (nodeDocument.node.tracks.empty())
+    if (nodeDocument.node.lanes.empty())
     {
-        nodeDocument.node.tracks.push_back(dawg::node::TrackData{.label = nodeLabel});
+        nodeDocument.node.lanes.push_back(dawg::node::LaneData{.label = QStringLiteral("Lane 1")});
     }
 
     if (currentState.has_value())
     {
-        auto runtimeTrack = nodeTrackFromClipState(*currentState, nodeLabel);
-        auto runtimeTrackIt = std::find_if(
-            nodeDocument.node.tracks.begin(),
-            nodeDocument.node.tracks.end(),
-            [](const dawg::node::TrackData& track)
-            {
-                return track.attachedAudio.has_value();
-            });
-        if (runtimeTrackIt == nodeDocument.node.tracks.end())
+        auto runtimeClip = nodeAudioClipFromClipState(*currentState, nodeLabel);
+        auto* targetLane = &nodeDocument.node.lanes.front();
+        dawg::node::AudioClipData* targetClip = nullptr;
+        for (auto& lane : nodeDocument.node.lanes)
         {
-            runtimeTrackIt = nodeDocument.node.tracks.begin();
+            const auto targetClipIt = std::find_if(
+                lane.audioClips.begin(),
+                lane.audioClips.end(),
+                [](const dawg::node::AudioClipData& clip)
+                {
+                    return clip.attachedAudio.has_value();
+                });
+            if (targetClipIt != lane.audioClips.end())
+            {
+                targetLane = &lane;
+                targetClip = &(*targetClipIt);
+                break;
+            }
         }
-        *runtimeTrackIt = runtimeTrack;
+        if (targetClip == nullptr)
+        {
+            targetLane->audioClips.push_back(runtimeClip);
+        }
+        else
+        {
+            *targetClip = runtimeClip;
+        }
     }
 
     QString errorMessage;
@@ -3959,16 +4104,19 @@ bool MainWindow::openNodeFileAsNewNode(const QString& nodeFilePath)
         nodesDirectoryPath,
         dawg::node::nodeFileNameForName(preferredNodeName.isEmpty() ? QStringLiteral("Node") : preferredNodeName));
     const auto audioDirectoryPath = QDir(m_currentProjectRootPath).filePath(QStringLiteral("audio"));
-    for (auto& track : materializedDocument.node.tracks)
+    for (auto& lane : materializedDocument.node.lanes)
     {
-        if (!materializeNodeTrackAudio(track, audioDirectoryPath, &errorMessage))
+        for (auto& clip : lane.audioClips)
         {
-            m_dialogController->execMessage(
-                QStringLiteral("Open Node"),
-                errorMessage,
-                {},
-                {DialogController::Button::Ok});
-            return false;
+            if (!materializeNodeClipAudio(clip, audioDirectoryPath, &errorMessage))
+            {
+                m_dialogController->execMessage(
+                    QStringLiteral("Open Node"),
+                    errorMessage,
+                    {},
+                    {DialogController::Button::Ok});
+                return false;
+            }
         }
     }
     if (!dawg::node::saveDocument(targetNodePath, materializedDocument, &errorMessage))
@@ -3981,33 +4129,37 @@ bool MainWindow::openNodeFileAsNewNode(const QString& nodeFilePath)
         return false;
     }
 
-    const auto trackIt = std::find_if(
-        materializedDocument.node.tracks.cbegin(),
-        materializedDocument.node.tracks.cend(),
-        [](const dawg::node::TrackData& track)
-        {
-            return track.attachedAudio.has_value() && !track.attachedAudio->assetPath.isEmpty();
-        });
-    const dawg::node::TrackData* primaryTrack =
-        trackIt != materializedDocument.node.tracks.cend()
-        ? &(*trackIt)
-        : (materializedDocument.node.tracks.empty() ? nullptr : &materializedDocument.node.tracks.front());
-
-    if (primaryTrack != nullptr
-        && primaryTrack->attachedAudio.has_value()
-        && !primaryTrack->attachedAudio->assetPath.isEmpty())
+    const dawg::node::AudioClipData* primaryClip = nullptr;
+    for (const auto& lane : materializedDocument.node.lanes)
     {
-        if (!m_controller->createTrackWithAudioAtCurrentFrame(primaryTrack->attachedAudio->assetPath, imageCenter))
+        const auto clipIt = std::find_if(
+            lane.audioClips.cbegin(),
+            lane.audioClips.cend(),
+            [](const dawg::node::AudioClipData& clip)
+            {
+                return clip.attachedAudio.has_value() && !clip.attachedAudio->assetPath.isEmpty();
+            });
+        if (clipIt != lane.audioClips.cend())
+        {
+            primaryClip = &(*clipIt);
+            break;
+        }
+    }
+
+    if (primaryClip != nullptr
+        && primaryClip->attachedAudio.has_value()
+        && !primaryClip->attachedAudio->assetPath.isEmpty())
+    {
+        if (!m_controller->createTrackWithAudioAtCurrentFrame(primaryClip->attachedAudio->assetPath, imageCenter))
         {
             return false;
         }
-        const auto importedState = m_controller->selectedClipEditorState();
+        const auto importedState = m_controller->selectedAudioClipPreviewState();
         static_cast<void>(m_controller->setSelectedTrackClipRangeMs(
-            primaryTrack->attachedAudio->clipStartMs,
-            primaryTrack->attachedAudio->clipEndMs.value_or(
-                importedState.has_value() ? importedState->clipEndMs : primaryTrack->attachedAudio->clipStartMs)));
-        static_cast<void>(m_controller->setSelectedTrackAudioGainDb(primaryTrack->attachedAudio->gainDb));
-        static_cast<void>(m_controller->setSelectedTrackLoopEnabled(primaryTrack->attachedAudio->loopEnabled));
+            primaryClip->attachedAudio->clipStartMs,
+            primaryClip->attachedAudio->clipEndMs.value_or(
+                importedState.has_value() ? importedState->clipEndMs : primaryClip->attachedAudio->clipStartMs)));
+        static_cast<void>(m_controller->setSelectedTrackAudioGainDb(primaryClip->attachedAudio->gainDb));
     }
     else
     {
@@ -4017,7 +4169,7 @@ bool MainWindow::openNodeFileAsNewNode(const QString& nodeFilePath)
     const auto selectedTrackId = m_controller->selectedTrackId();
     const auto preferredLabel = !materializedDocument.node.label.trimmed().isEmpty()
         ? materializedDocument.node.label.trimmed()
-        : (primaryTrack != nullptr ? primaryTrack->label.trimmed() : QString{});
+        : (primaryClip != nullptr ? primaryClip->label.trimmed() : QString{});
     if (!selectedTrackId.isNull() && !preferredLabel.isEmpty())
     {
         m_controller->renameTrack(selectedTrackId, preferredLabel);
@@ -4043,8 +4195,8 @@ bool MainWindow::openNodeFileAsNewNode(const QString& nodeFilePath)
     }
     refreshNodeEditor();
     showStatus(
-        primaryTrack != nullptr && materializedDocument.node.tracks.size() > 1
-            ? QStringLiteral("Opened node %1 using the first internal track for now.")
+        primaryClip != nullptr && materializedDocument.node.lanes.size() > 1
+            ? QStringLiteral("Opened node %1 using the first lane audio clip for now.")
                 .arg(QFileInfo(nodeFilePath).completeBaseName())
             : QStringLiteral("Opened node %1.").arg(QFileInfo(nodeFilePath).completeBaseName()));
     return true;
@@ -4285,6 +4437,7 @@ void MainWindow::setTimelineState(const int totalFrames, const double fps)
     {
         m_thumbnailStripQuickController->setTimeline(totalFrames, fps);
         syncThumbnailStripViewWindow();
+        syncThumbnailStripSelectedNodeRange();
     }
 }
 
@@ -4329,6 +4482,23 @@ void MainWindow::syncThumbnailStripViewWindow()
         m_timelineQuickController->visibleFrameSpanValue());
 }
 
+void MainWindow::syncThumbnailStripSelectedNodeRange()
+{
+    if (!m_thumbnailStripQuickController || !m_controller)
+    {
+        return;
+    }
+
+    const auto selectedRange = m_controller->selectedTrackFrameRange();
+    if (!selectedRange.has_value())
+    {
+        m_thumbnailStripQuickController->setSelectedNodeRange(std::nullopt, std::nullopt);
+        return;
+    }
+
+    m_thumbnailStripQuickController->setSelectedNodeRange(selectedRange->first, selectedRange->second);
+}
+
 std::optional<int> MainWindow::timelineLoopShortcutFrame() const
 {
     return m_timelineQuickController ? m_timelineQuickController->loopShortcutFrame() : std::nullopt;
@@ -4342,6 +4512,745 @@ bool MainWindow::timelineHasSelectedLoopRange() const
 bool MainWindow::timelineHasFocus() const
 {
     return itemHasActiveFocus(const_cast<MainWindow*>(this), m_timelineQuickWidget);
+}
+
+bool MainWindow::nodeEditorHasFocus() const
+{
+    return itemHasActiveFocus(const_cast<MainWindow*>(this), m_nodeEditorQuickWidget);
+}
+
+bool MainWindow::videoPanelHasFocus() const
+{
+    return itemHasActiveFocus(const_cast<MainWindow*>(this), m_videoViewportQuickWidget)
+        || (m_detachedVideoWindow && m_detachedVideoWindow->isActive())
+        || (m_nativeViewportWindow && m_nativeViewportWindow->isActiveWindow());
+}
+
+void MainWindow::resetNodeEditorPlayheadToStart()
+{
+    if (!m_nodeEditorQuickController)
+    {
+        return;
+    }
+
+    {
+        const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
+        m_nodeEditorQuickController->setInsertionMarkerMs(0);
+        m_nodeEditorQuickController->setPlayheadMs(0);
+    }
+
+    m_nodeEditorPreviewAnchorMs = 0;
+    m_nodeEditorPreviewStartMs = 0;
+    if (m_nodeEditorPreviewTimer.isActive())
+    {
+        syncProjectMarkersToNodeEditor(0);
+        m_nodeEditorPreviewElapsedTimer.restart();
+        if (m_controller)
+        {
+            static_cast<void>(m_controller->syncNodeEditorPreview(
+                m_nodeEditorPreviewClips,
+                m_nodeEditorPreviewNodeDurationMs,
+                0,
+                true));
+        }
+        updateMixMeterLevels();
+    }
+    else
+    {
+        syncProjectPlayheadToNodeEditor(0);
+    }
+}
+
+std::optional<int> MainWindow::nodeEditorProjectFrameForPlayheadMs(const int playheadMs) const
+{
+    if (!m_controller)
+    {
+        return std::nullopt;
+    }
+
+    const auto selectedRange = m_controller->selectedTrackFrameRange();
+    if (!selectedRange.has_value())
+    {
+        return std::nullopt;
+    }
+
+    const auto fps = std::max(0.0001, m_controller->fps());
+    const auto frameOffset = static_cast<int>(std::lround((static_cast<double>(std::max(0, playheadMs)) * fps) / 1000.0));
+    return std::clamp(
+        selectedRange->first + frameOffset,
+        selectedRange->first,
+        selectedRange->second);
+}
+
+std::optional<double> MainWindow::nodeEditorProjectFramePositionForPlayheadMs(const int playheadMs) const
+{
+    if (!m_controller)
+    {
+        return std::nullopt;
+    }
+
+    const auto selectedRange = m_controller->selectedTrackFrameRange();
+    if (!selectedRange.has_value())
+    {
+        return std::nullopt;
+    }
+
+    const auto fps = std::max(0.0001, m_controller->fps());
+    const auto frameOffset = (static_cast<double>(std::max(0, playheadMs)) * fps) / 1000.0;
+    return std::clamp(
+        static_cast<double>(selectedRange->first) + frameOffset,
+        static_cast<double>(selectedRange->first),
+        static_cast<double>(selectedRange->second));
+}
+
+void MainWindow::syncProjectPlayheadToNodeEditor(const int playheadMs)
+{
+    if (!m_controller)
+    {
+        return;
+    }
+
+    const auto projectFrame = nodeEditorProjectFrameForPlayheadMs(playheadMs);
+    if (!projectFrame.has_value() || *projectFrame == m_lastNodeEditorSyncedProjectFrame)
+    {
+        return;
+    }
+
+    m_lastNodeEditorSyncedProjectFrame = *projectFrame;
+    m_controller->seekToFrame(*projectFrame);
+    setTimelineCurrentFrame(*projectFrame);
+}
+
+void MainWindow::syncProjectMarkersToNodeEditor(const int playheadMs)
+{
+    const auto projectFrame = nodeEditorProjectFrameForPlayheadMs(playheadMs);
+    if (!projectFrame.has_value() || *projectFrame == m_lastNodeEditorSyncedProjectFrame)
+    {
+        syncThumbnailStripMarkerToNodeEditor(playheadMs);
+        return;
+    }
+
+    m_lastNodeEditorSyncedProjectFrame = *projectFrame;
+    if (m_timelineQuickController && m_timelineQuickWidget && m_timelineQuickWidget->isVisible())
+    {
+        m_timelineQuickController->setCurrentFrame(*projectFrame);
+    }
+    syncThumbnailStripMarkerToNodeEditor(playheadMs);
+}
+
+void MainWindow::syncThumbnailStripMarkerToNodeEditor(const int playheadMs)
+{
+    if (!m_thumbnailStripQuickController)
+    {
+        return;
+    }
+
+    const auto projectFramePosition = nodeEditorProjectFramePositionForPlayheadMs(playheadMs);
+    if (!projectFramePosition.has_value())
+    {
+        return;
+    }
+
+    m_thumbnailStripQuickController->setCurrentFramePosition(*projectFramePosition);
+}
+
+void MainWindow::syncNodeEditorPlayheadToProjectFrame(const int frameIndex)
+{
+    if (!m_controller || !m_nodeEditorQuickController)
+    {
+        return;
+    }
+
+    const auto selectedRange = m_controller->selectedTrackFrameRange();
+    if (!selectedRange.has_value())
+    {
+        m_lastNodeEditorSyncedProjectFrame = -1;
+        return;
+    }
+
+    const auto nodeDurationMs = m_nodeEditorQuickController->nodeDurationMs();
+    if (nodeDurationMs <= 0)
+    {
+        return;
+    }
+
+    const auto fps = std::max(0.0001, m_controller->fps());
+    int playheadMs = 0;
+    if (frameIndex <= selectedRange->first)
+    {
+        playheadMs = 0;
+    }
+    else if (frameIndex > selectedRange->second)
+    {
+        playheadMs = nodeDurationMs;
+    }
+    else
+    {
+        playheadMs = std::clamp(
+            static_cast<int>(std::lround(
+                (static_cast<double>(frameIndex - selectedRange->first) * 1000.0) / fps)),
+            0,
+            nodeDurationMs);
+    }
+
+    m_lastNodeEditorSyncedProjectFrame = frameIndex;
+    const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
+    m_nodeEditorQuickController->setPlayheadMs(playheadMs);
+}
+
+bool MainWindow::deleteSelectedNodeEditorSelection()
+{
+    if (!m_controller || !m_nodeEditorQuickController || !m_controller->hasSelection())
+    {
+        return false;
+    }
+
+    const auto selectedLaneId = m_nodeEditorQuickController->selectedLaneId();
+    const auto selectedLaneHeaderId = m_nodeEditorQuickController->selectedLaneHeaderId();
+    const auto selectedClipId = m_nodeEditorQuickController->selectedClipId();
+    if (selectedClipId.isEmpty() && selectedLaneHeaderId.isEmpty())
+    {
+        showStatus(QStringLiteral("Select a lane name or double-click an audio clip before deleting."));
+        return false;
+    }
+
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    const auto nodeDocumentPath = selectedTrackId.isNull()
+        ? QString{}
+        : m_controller->trackNodeDocumentPath(selectedTrackId).trimmed();
+    if (nodeDocumentPath.isEmpty() || !QFileInfo::exists(nodeDocumentPath))
+    {
+        showStatus(QStringLiteral("Save or import audio into this node before deleting clips."));
+        return false;
+    }
+
+    QString errorMessage;
+    auto nodeDocument = dawg::node::loadDocument(nodeDocumentPath, &errorMessage);
+    if (!nodeDocument.has_value())
+    {
+        showStatus(errorMessage.isEmpty() ? QStringLiteral("Failed to load node clip.") : errorMessage);
+        return false;
+    }
+
+    auto laneIt = std::find_if(
+        nodeDocument->node.lanes.begin(),
+        nodeDocument->node.lanes.end(),
+        [&selectedLaneId, &selectedLaneHeaderId, &selectedClipId](const dawg::node::LaneData& lane)
+        {
+            return lane.id == (selectedClipId.isEmpty() ? selectedLaneHeaderId : selectedLaneId);
+        });
+    if (laneIt == nodeDocument->node.lanes.end())
+    {
+        showStatus(QStringLiteral("Selected node track no longer exists."));
+        return false;
+    }
+
+    QString selectionLaneId = laneIt->id;
+    QString nextSelectedLaneId = selectionLaneId;
+    QString statusText;
+    if (!selectedClipId.isEmpty())
+    {
+        const auto originalClipCount = laneIt->audioClips.size();
+        laneIt->audioClips.erase(
+            std::remove_if(
+                laneIt->audioClips.begin(),
+                laneIt->audioClips.end(),
+                [&selectedClipId](const dawg::node::AudioClipData& clip)
+                {
+                    return clip.id == selectedClipId;
+                }),
+            laneIt->audioClips.end());
+        if (laneIt->audioClips.size() == originalClipCount)
+        {
+            showStatus(QStringLiteral("Selected audio clip no longer exists."));
+            return false;
+        }
+        statusText = QStringLiteral("Deleted audio clip.");
+    }
+    else
+    {
+        const auto clipCount = static_cast<int>(laneIt->audioClips.size());
+        if (clipCount > 0)
+        {
+            if (!m_dialogController)
+            {
+                showStatus(QStringLiteral("This lane contains audio clips."));
+                return false;
+            }
+
+            const auto choice = m_dialogController->execMessage(
+                QStringLiteral("Delete Lane"),
+                QStringLiteral("This lane contains %1 audio clip(s).").arg(clipCount),
+                QStringLiteral("Deleting the lane will also remove every audio clip in it."),
+                {DialogController::Button::Yes, DialogController::Button::Cancel},
+                DialogController::Button::Cancel);
+            if (choice != DialogController::Button::Yes)
+            {
+                showStatus(QStringLiteral("Lane delete canceled."));
+                return false;
+            }
+        }
+
+        const auto laneIndex = static_cast<std::size_t>(std::distance(nodeDocument->node.lanes.begin(), laneIt));
+        laneIt = nodeDocument->node.lanes.erase(laneIt);
+        if (!nodeDocument->node.lanes.empty())
+        {
+            const auto nextLaneIndex = std::min(laneIndex, nodeDocument->node.lanes.size() - 1);
+            nextSelectedLaneId = nodeDocument->node.lanes[nextLaneIndex].id;
+        }
+        else
+        {
+            nextSelectedLaneId.clear();
+        }
+        statusText = QStringLiteral("Deleted lane.");
+    }
+
+    if (!dawg::node::saveDocument(nodeDocumentPath, *nodeDocument, &errorMessage))
+    {
+        showStatus(errorMessage.isEmpty() ? QStringLiteral("Failed to delete node editor selection.") : errorMessage);
+        return false;
+    }
+
+    static_cast<void>(m_controller->setTrackNodeDocument(
+        selectedTrackId,
+        QDir::cleanPath(nodeDocumentPath),
+        nodeDocument->node.timelineFrameCount,
+        nodeDocument->node.timelineFps));
+    m_nodeEditorQuickController->selectLane(nextSelectedLaneId);
+    if (!m_projectStateChangeInProgress && hasOpenProject())
+    {
+        setProjectDirty(true);
+    }
+    if (m_nodeEditorPreviewTimer.isActive())
+    {
+        const auto hasPreviewableAudio = std::any_of(
+            nodeDocument->node.lanes.cbegin(),
+            nodeDocument->node.lanes.cend(),
+            [](const dawg::node::LaneData& lane)
+            {
+                return std::any_of(
+                    lane.audioClips.cbegin(),
+                    lane.audioClips.cend(),
+                    [](const dawg::node::AudioClipData& clip)
+                    {
+                        return clip.attachedAudio.has_value() && !clip.attachedAudio->assetPath.isEmpty();
+                    });
+            });
+        stopNodeEditorPreview(false);
+        if (hasPreviewableAudio)
+        {
+            static_cast<void>(startNodeEditorPreview());
+        }
+    }
+    refreshNodeEditor();
+    showStatus(statusText);
+    return true;
+}
+
+void MainWindow::deleteFromFocusedPanel()
+{
+    if (nodeEditorHasFocus())
+    {
+        static_cast<void>(deleteSelectedNodeEditorSelection());
+        return;
+    }
+
+    if (videoPanelHasFocus() && m_controller)
+    {
+        m_controller->deleteSelectedTrack();
+    }
+}
+
+void MainWindow::setNodeEditorLaneMuted(const QString& laneId, const bool muted)
+{
+    if (!m_controller || laneId.isEmpty())
+    {
+        return;
+    }
+
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    const auto nodeDocumentPath = selectedTrackId.isNull()
+        ? QString{}
+        : m_controller->trackNodeDocumentPath(selectedTrackId).trimmed();
+    if (nodeDocumentPath.isEmpty() || !QFileInfo::exists(nodeDocumentPath))
+    {
+        showStatus(QStringLiteral("Save or import audio into this node before muting lanes."));
+        return;
+    }
+
+    QString errorMessage;
+    auto nodeDocument = dawg::node::loadDocument(nodeDocumentPath, &errorMessage);
+    if (!nodeDocument.has_value())
+    {
+        showStatus(errorMessage.isEmpty() ? QStringLiteral("Failed to load node lane.") : errorMessage);
+        return;
+    }
+
+    auto laneIt = std::find_if(
+        nodeDocument->node.lanes.begin(),
+        nodeDocument->node.lanes.end(),
+        [&laneId](const dawg::node::LaneData& lane)
+        {
+            return lane.id == laneId;
+        });
+    if (laneIt == nodeDocument->node.lanes.end())
+    {
+        showStatus(QStringLiteral("Selected node lane no longer exists."));
+        return;
+    }
+    if (laneIt->muted == muted)
+    {
+        return;
+    }
+
+    laneIt->muted = muted;
+    if (!dawg::node::saveDocument(nodeDocumentPath, *nodeDocument, &errorMessage))
+    {
+        showStatus(errorMessage.isEmpty() ? QStringLiteral("Failed to update node lane mute.") : errorMessage);
+        return;
+    }
+
+    if (!m_projectStateChangeInProgress && hasOpenProject())
+    {
+        setProjectDirty(true);
+    }
+    if (m_nodeEditorPreviewTimer.isActive())
+    {
+        const auto playheadMs = m_nodeEditorQuickController ? m_nodeEditorQuickController->playheadMs() : 0;
+        m_nodeEditorPreviewClips = nodePreviewClipsFromDocument(*nodeDocument);
+        m_nodeEditorPreviewActiveAudioSignature.clear();
+        m_lastNodeEditorPreviewAudioSyncMs = -1;
+        if (m_controller && !m_nodeEditorPreviewClips.empty())
+        {
+            static_cast<void>(m_controller->syncNodeEditorPreview(
+                m_nodeEditorPreviewClips,
+                m_nodeEditorPreviewNodeDurationMs,
+                playheadMs));
+        }
+        else if (m_controller)
+        {
+            m_controller->stopNodeEditorPreview();
+        }
+        refreshMixView();
+    }
+    refreshNodeEditor();
+    showStatus(muted ? QStringLiteral("Node lane muted.") : QStringLiteral("Node lane unmuted."));
+}
+
+void MainWindow::setNodeEditorLaneSoloed(const QString& laneId, const bool soloed)
+{
+    if (!m_controller || laneId.isEmpty())
+    {
+        return;
+    }
+
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    const auto nodeDocumentPath = selectedTrackId.isNull()
+        ? QString{}
+        : m_controller->trackNodeDocumentPath(selectedTrackId).trimmed();
+    if (nodeDocumentPath.isEmpty() || !QFileInfo::exists(nodeDocumentPath))
+    {
+        showStatus(QStringLiteral("Save or import audio into this node before soloing lanes."));
+        return;
+    }
+
+    QString errorMessage;
+    auto nodeDocument = dawg::node::loadDocument(nodeDocumentPath, &errorMessage);
+    if (!nodeDocument.has_value())
+    {
+        showStatus(errorMessage.isEmpty() ? QStringLiteral("Failed to load node lane.") : errorMessage);
+        return;
+    }
+
+    auto laneIt = std::find_if(
+        nodeDocument->node.lanes.begin(),
+        nodeDocument->node.lanes.end(),
+        [&laneId](const dawg::node::LaneData& lane)
+        {
+            return lane.id == laneId;
+        });
+    if (laneIt == nodeDocument->node.lanes.end())
+    {
+        showStatus(QStringLiteral("Selected node lane no longer exists."));
+        return;
+    }
+
+    bool changed = false;
+    if (m_controller->isMixSoloXorMode() && soloed)
+    {
+        for (auto& lane : nodeDocument->node.lanes)
+        {
+            const auto nextSoloed = lane.id == laneId;
+            if (lane.soloed != nextSoloed)
+            {
+                lane.soloed = nextSoloed;
+                changed = true;
+            }
+        }
+    }
+    else if (laneIt->soloed != soloed)
+    {
+        laneIt->soloed = soloed;
+        changed = true;
+    }
+    if (!changed)
+    {
+        return;
+    }
+
+    if (!dawg::node::saveDocument(nodeDocumentPath, *nodeDocument, &errorMessage))
+    {
+        showStatus(errorMessage.isEmpty() ? QStringLiteral("Failed to update node lane solo.") : errorMessage);
+        return;
+    }
+
+    if (!m_projectStateChangeInProgress && hasOpenProject())
+    {
+        setProjectDirty(true);
+    }
+    if (m_nodeEditorPreviewTimer.isActive())
+    {
+        const auto playheadMs = m_nodeEditorQuickController ? m_nodeEditorQuickController->playheadMs() : 0;
+        m_nodeEditorPreviewClips = nodePreviewClipsFromDocument(*nodeDocument);
+        m_nodeEditorPreviewActiveAudioSignature.clear();
+        m_lastNodeEditorPreviewAudioSyncMs = -1;
+        if (m_controller && !m_nodeEditorPreviewClips.empty())
+        {
+            static_cast<void>(m_controller->syncNodeEditorPreview(
+                m_nodeEditorPreviewClips,
+                m_nodeEditorPreviewNodeDurationMs,
+                playheadMs));
+        }
+        else if (m_controller)
+        {
+            m_controller->stopNodeEditorPreview();
+        }
+        refreshMixView();
+    }
+    refreshNodeEditor();
+    showStatus(soloed ? QStringLiteral("Node lane soloed.") : QStringLiteral("Node lane solo cleared."));
+}
+
+bool MainWindow::startNodeEditorPreview()
+{
+    if (!m_controller || !m_nodeEditorQuickController || !m_controller->hasSelection())
+    {
+        return false;
+    }
+
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    const auto nodeDocumentPath = m_controller->trackNodeDocumentPath(selectedTrackId);
+    if (nodeDocumentPath.isEmpty() || !QFileInfo::exists(nodeDocumentPath))
+    {
+        showStatus(QStringLiteral("Save or import audio into this node before previewing it."));
+        return false;
+    }
+
+    QString errorMessage;
+    const auto nodeDocument = dawg::node::loadDocument(nodeDocumentPath, &errorMessage);
+    if (!nodeDocument.has_value())
+    {
+        showStatus(errorMessage.isEmpty() ? QStringLiteral("Failed to load node preview.") : errorMessage);
+        return false;
+    }
+
+    m_nodeEditorPreviewClips = nodePreviewClipsFromDocument(*nodeDocument);
+    if (m_nodeEditorPreviewClips.empty())
+    {
+        showStatus(QStringLiteral("This node has no audio clips to preview."));
+        return false;
+    }
+
+    m_nodeEditorPreviewNodeDurationMs = std::max(1, m_nodeEditorQuickController->nodeDurationMs());
+    m_lastNodeEditorSyncedProjectFrame = -1;
+    m_lastNodeEditorPreviewProjectSyncMs = -1;
+    m_lastNodeEditorPreviewMeterUpdateMs = -1;
+    m_nodeEditorPreviewActiveAudioSignature.clear();
+    m_lastNodeEditorPreviewAudioSyncMs = -1;
+    auto playheadMs = std::clamp(
+        m_nodeEditorQuickController->playheadMs(),
+        0,
+        m_nodeEditorPreviewNodeDurationMs);
+    if (playheadMs >= m_nodeEditorPreviewNodeDurationMs)
+    {
+        playheadMs = 0;
+        m_nodeEditorQuickController->setPlayheadMs(playheadMs);
+    }
+
+    if (!m_controller->startNodeEditorPreview(
+            m_nodeEditorPreviewClips,
+            m_nodeEditorPreviewNodeDurationMs,
+            playheadMs))
+    {
+        showStatus(QStringLiteral("Failed to start node preview."));
+        return false;
+    }
+
+    m_nodeEditorPreviewAnchorMs = playheadMs;
+    m_nodeEditorPreviewStartMs = playheadMs;
+    m_nodeEditorPreviewActiveAudioSignature = nodeEditorPreviewActiveAudioSignature(playheadMs);
+    m_lastNodeEditorPreviewAudioSyncMs = playheadMs;
+    m_lastNodeEditorPreviewProjectSyncMs = playheadMs;
+    m_lastNodeEditorPreviewMeterUpdateMs = playheadMs;
+    m_nodeEditorQuickController->setInsertionMarkerMs(playheadMs);
+    m_nodeEditorPreviewElapsedTimer.restart();
+    m_nodeEditorPreviewTimer.start();
+    m_nodeEditorQuickController->setPlaybackActive(true);
+    syncThumbnailStripMarkerToNodeEditor(playheadMs);
+    QTimer::singleShot(50, this, [this]()
+    {
+        if (m_nodeEditorPreviewTimer.isActive())
+        {
+            refreshMixView();
+        }
+    });
+    showStatus(QStringLiteral("Playing node preview."));
+    return true;
+}
+
+void MainWindow::stopNodeEditorPreview(const bool restorePlaybackAnchor)
+{
+    const auto wasPlaying = m_nodeEditorPreviewTimer.isActive();
+    if (m_nodeEditorPreviewTimer.isActive())
+    {
+        m_nodeEditorPreviewTimer.stop();
+    }
+    if (m_controller)
+    {
+        m_controller->stopNodeEditorPreview();
+    }
+    m_nodeEditorPreviewClips.clear();
+    m_nodeEditorPreviewNodeDurationMs = 0;
+    m_lastNodeEditorSyncedProjectFrame = -1;
+    m_lastNodeEditorPreviewProjectSyncMs = -1;
+    m_lastNodeEditorPreviewMeterUpdateMs = -1;
+    m_nodeEditorPreviewActiveAudioSignature.clear();
+    m_lastNodeEditorPreviewAudioSyncMs = -1;
+    if (m_nodeEditorQuickController)
+    {
+        if (wasPlaying
+            && restorePlaybackAnchor
+            && m_controller
+            && !m_controller->isInsertionFollowsPlayback())
+        {
+            const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
+            m_nodeEditorQuickController->setPlayheadMs(m_nodeEditorPreviewAnchorMs);
+        }
+        m_nodeEditorQuickController->setPlaybackActive(false);
+    }
+    m_nodeEditorPreviewAnchorMs = 0;
+    m_nodeEditorPreviewStartMs = 0;
+    if (wasPlaying)
+    {
+        refreshMixView();
+    }
+}
+
+void MainWindow::toggleNodeEditorPreview()
+{
+    if (m_nodeEditorPreviewTimer.isActive())
+    {
+        stopNodeEditorPreview();
+        showStatus(QStringLiteral("Stopped node preview."));
+        return;
+    }
+
+    static_cast<void>(startNodeEditorPreview());
+}
+
+void MainWindow::updateNodeEditorPreview()
+{
+    constexpr int kNodePreviewProjectSyncIntervalMs = 33;
+    constexpr int kNodePreviewMeterUpdateIntervalMs = 33;
+
+    if (!m_nodeEditorQuickController || m_nodeEditorPreviewNodeDurationMs <= 0)
+    {
+        stopNodeEditorPreview();
+        return;
+    }
+
+    const auto elapsedMs = m_nodeEditorPreviewElapsedTimer.isValid()
+        ? static_cast<int>(m_nodeEditorPreviewElapsedTimer.elapsed())
+        : 0;
+    const auto nextPlayheadMs = m_nodeEditorPreviewStartMs + std::max(0, elapsedMs);
+    if (nextPlayheadMs >= m_nodeEditorPreviewNodeDurationMs)
+    {
+        const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
+        m_nodeEditorQuickController->setPlayheadMs(m_nodeEditorPreviewNodeDurationMs);
+        syncProjectMarkersToNodeEditor(m_nodeEditorPreviewNodeDurationMs);
+        updateMixMeterLevels();
+        stopNodeEditorPreview();
+        return;
+    }
+
+    {
+        const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
+        m_nodeEditorQuickController->setPlayheadMs(nextPlayheadMs);
+    }
+    syncThumbnailStripMarkerToNodeEditor(nextPlayheadMs);
+    if (m_lastNodeEditorPreviewProjectSyncMs < 0
+        || std::abs(nextPlayheadMs - m_lastNodeEditorPreviewProjectSyncMs) >= kNodePreviewProjectSyncIntervalMs)
+    {
+        syncProjectMarkersToNodeEditor(nextPlayheadMs);
+        m_lastNodeEditorPreviewProjectSyncMs = nextPlayheadMs;
+    }
+    if (m_controller && shouldSyncNodeEditorPreviewAudio(nextPlayheadMs))
+    {
+        static_cast<void>(m_controller->syncNodeEditorPreview(
+            m_nodeEditorPreviewClips,
+            m_nodeEditorPreviewNodeDurationMs,
+            nextPlayheadMs));
+    }
+    if (m_lastNodeEditorPreviewMeterUpdateMs < 0
+        || std::abs(nextPlayheadMs - m_lastNodeEditorPreviewMeterUpdateMs) >= kNodePreviewMeterUpdateIntervalMs)
+    {
+        updateMixMeterLevels();
+        m_lastNodeEditorPreviewMeterUpdateMs = nextPlayheadMs;
+    }
+}
+
+QString MainWindow::nodeEditorPreviewActiveAudioSignature(const int playheadMs) const
+{
+    QStringList activeClipIds;
+    activeClipIds.reserve(static_cast<int>(m_nodeEditorPreviewClips.size()));
+    const auto clampedPlayheadMs = std::clamp(playheadMs, 0, std::max(0, m_nodeEditorPreviewNodeDurationMs));
+    for (const auto& clip : m_nodeEditorPreviewClips)
+    {
+        if (clip.previewTrackId.isNull()
+            || clip.assetPath.isEmpty()
+            || clip.clipEndMs <= clip.clipStartMs)
+        {
+            continue;
+        }
+
+        const auto elapsedWithinClipMs = clampedPlayheadMs - std::max(0, clip.laneOffsetMs);
+        const auto clipDurationMs = std::max(1, clip.clipEndMs - clip.clipStartMs);
+        if (elapsedWithinClipMs < 0 || (!clip.loopEnabled && elapsedWithinClipMs >= clipDurationMs))
+        {
+            continue;
+        }
+
+        activeClipIds.push_back(clip.previewTrackId.toString(QUuid::WithoutBraces));
+    }
+    activeClipIds.sort();
+    return activeClipIds.join(QLatin1Char('|'));
+}
+
+bool MainWindow::shouldSyncNodeEditorPreviewAudio(const int playheadMs)
+{
+    constexpr int kNodePreviewAudioResyncIntervalMs = 5000;
+    const auto activeSignature = nodeEditorPreviewActiveAudioSignature(playheadMs);
+    const auto activeSetChanged = activeSignature != m_nodeEditorPreviewActiveAudioSignature;
+    const auto needsPeriodicResync = m_lastNodeEditorPreviewAudioSyncMs < 0
+        || std::abs(playheadMs - m_lastNodeEditorPreviewAudioSyncMs) >= kNodePreviewAudioResyncIntervalMs;
+    if (!activeSetChanged && !needsPeriodicResync)
+    {
+        return false;
+    }
+
+    m_nodeEditorPreviewActiveAudioSignature = activeSignature;
+    m_lastNodeEditorPreviewAudioSyncMs = playheadMs;
+    return true;
 }
 
 int MainWindow::timelineMinimumHeight() const
@@ -4522,7 +5431,6 @@ void MainWindow::buildUi()
     m_nodeEndShortcut = new QShortcut(QKeySequence(Qt::Key_S), this);
     m_selectNextNodeShortcut = new QShortcut(QKeySequence(Qt::Key_Tab), this);
     m_showTimelineShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+T")), this);
-    m_showClipEditorShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+-")), this);
     m_showMixShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl++")), this);
     m_trimNodeShortcut = new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_T), this);
     m_autoPanShortcut = new QShortcut(QKeySequence(Qt::Key_R), this);
@@ -4548,7 +5456,6 @@ void MainWindow::buildUi()
     m_nodeEndShortcut->setContext(Qt::ApplicationShortcut);
     m_selectNextNodeShortcut->setContext(Qt::ApplicationShortcut);
     m_showTimelineShortcut->setContext(Qt::ApplicationShortcut);
-    m_showClipEditorShortcut->setContext(Qt::ApplicationShortcut);
     m_showMixShortcut->setContext(Qt::ApplicationShortcut);
     m_trimNodeShortcut->setContext(Qt::ApplicationShortcut);
     m_autoPanShortcut->setContext(Qt::ApplicationShortcut);
@@ -4607,7 +5514,6 @@ void MainWindow::buildUi()
     m_timelineQuickController->setThumbnailsVisible(false);
     m_thumbnailStripQuickController = new ThumbnailStripQuickController(this);
     ensureQuickTypesRegistered();
-    m_clipEditorQuickController = new ClipEditorQuickController(this);
     m_nodeEditorQuickController = new NodeEditorQuickController(this);
     m_mixQuickController = new MixQuickController(this);
     m_audioPoolQuickController = new AudioPoolQuickController(*this, this);
@@ -4627,11 +5533,58 @@ void MainWindow::buildUi()
         &NodeEditorQuickController::audioActionRequested,
         this,
         &MainWindow::handleNodeEditorAudioAction);
+    connect(
+        m_nodeEditorQuickController,
+        &NodeEditorQuickController::laneMuteRequested,
+        this,
+        &MainWindow::setNodeEditorLaneMuted);
+    connect(
+        m_nodeEditorQuickController,
+        &NodeEditorQuickController::laneSoloRequested,
+        this,
+        &MainWindow::setNodeEditorLaneSoloed);
+    connect(
+        m_nodeEditorQuickController,
+        &NodeEditorQuickController::playheadChanged,
+        this,
+        [this](const int playheadMs)
+        {
+            if (m_nodeEditorPreviewUpdatingPlayhead)
+            {
+                return;
+            }
+
+            if (m_nodeEditorPreviewTimer.isActive())
+            {
+                syncProjectMarkersToNodeEditor(playheadMs);
+            }
+            else
+            {
+                syncProjectPlayheadToNodeEditor(playheadMs);
+            }
+            if (!m_nodeEditorPreviewTimer.isActive()
+                || m_nodeEditorPreviewNodeDurationMs <= 0)
+            {
+                return;
+            }
+
+            m_nodeEditorPreviewStartMs = std::clamp(playheadMs, 0, m_nodeEditorPreviewNodeDurationMs);
+            m_nodeEditorPreviewAnchorMs = m_nodeEditorPreviewStartMs;
+            m_nodeEditorQuickController->setInsertionMarkerMs(m_nodeEditorPreviewAnchorMs);
+            m_nodeEditorPreviewElapsedTimer.restart();
+            if (m_controller)
+            {
+                static_cast<void>(m_controller->syncNodeEditorPreview(
+                    m_nodeEditorPreviewClips,
+                    m_nodeEditorPreviewNodeDurationMs,
+                    m_nodeEditorPreviewStartMs,
+                    true));
+            }
+        });
 
     m_shellLayoutController->setPreferredSizes(
         m_audioPoolPreferredWidth,
         m_timelinePreferredHeight,
-        m_clipEditorPreferredHeight,
         m_nodeEditorPreferredHeight,
         m_mixPreferredHeight);
 
@@ -4650,7 +5603,6 @@ void MainWindow::buildUi()
     rootContext()->setContextProperty(QStringLiteral("videoViewportAllowNativePresentation"), false);
     rootContext()->setContextProperty(QStringLiteral("timelineController"), m_timelineQuickController);
     rootContext()->setContextProperty(QStringLiteral("thumbnailStripController"), m_thumbnailStripQuickController);
-    rootContext()->setContextProperty(QStringLiteral("clipEditorController"), m_clipEditorQuickController);
     rootContext()->setContextProperty(QStringLiteral("nodeEditorController"), m_nodeEditorQuickController);
     rootContext()->setContextProperty(QStringLiteral("mainWindowBridge"), this);
     rootContext()->setContextProperty(QStringLiteral("mixController"), m_mixQuickController);
@@ -4677,8 +5629,6 @@ void MainWindow::buildUi()
         m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("timelineScene")) : nullptr;
     m_thumbnailStripQuickWidget =
         m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("thumbnailStripScene")) : nullptr;
-    m_clipEditorQuickWidget =
-        m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("clipEditorScene")) : nullptr;
     m_nodeEditorQuickWidget =
         m_shellRootItem ? m_shellRootItem->findChild<QQuickItem*>(QStringLiteral("nodeEditorScene")) : nullptr;
     m_mixQuickWidget =
@@ -4707,11 +5657,10 @@ void MainWindow::buildUi()
         m_shellLayoutController,
         &ShellLayoutController::preferredSizesChanged,
         this,
-        [this](const int audioPoolWidth, const int timelineHeight, const int clipEditorHeight, const int nodeEditorHeight, const int mixHeight)
+        [this](const int audioPoolWidth, const int timelineHeight, const int nodeEditorHeight, const int mixHeight)
         {
             m_audioPoolPreferredWidth = std::max(240, audioPoolWidth);
             m_timelinePreferredHeight = std::max(timelineMinimumHeight(), timelineHeight);
-            m_clipEditorPreferredHeight = std::max(148, clipEditorHeight);
             m_nodeEditorPreferredHeight = std::max(148, nodeEditorHeight);
             m_mixPreferredHeight = std::max(132, mixHeight);
             if (!m_projectStateChangeInProgress && hasOpenProject())
@@ -4790,19 +5739,6 @@ void MainWindow::buildUi()
     m_detachedTimelineWindow->hide();
     m_detachedTimelineWindow->installEventFilter(this);
 
-    m_detachedClipEditorWindow = createDetachedPanelWindow(
-        QStringLiteral("Detached Clip Editor"),
-        QColor(QStringLiteral("#0f141b")));
-    m_detachedClipEditorWindow->rootContext()->setContextProperty(
-        QStringLiteral("clipEditorController"),
-        m_clipEditorQuickController);
-    m_detachedClipEditorWindow->setSource(clipEditorSceneUrl());
-#ifdef Q_OS_WIN
-    applyDarkTitleBar(m_detachedClipEditorWindow);
-#endif
-    m_detachedClipEditorWindow->hide();
-    m_detachedClipEditorWindow->installEventFilter(this);
-
     m_detachedMixWindow = createDetachedPanelWindow(
         QStringLiteral("Detached Mixer"),
         QColor(QStringLiteral("#080b10")));
@@ -4833,7 +5769,6 @@ void MainWindow::buildUi()
         m_shellLayoutController->setTimelineMinimumHeight(timelineMinimumHeight());
         m_shellLayoutController->setThumbnailsVisible(true);
         m_shellLayoutController->setTimelineVisible(true);
-        m_shellLayoutController->setClipEditorVisible(false);
         m_shellLayoutController->setNodeEditorVisible(false);
         m_shellLayoutController->setMixVisible(false);
         m_shellLayoutController->setAudioPoolVisible(false);
@@ -4841,7 +5776,6 @@ void MainWindow::buildUi()
         m_shellLayoutController->setPreferredSizes(
             m_audioPoolPreferredWidth,
             m_timelinePreferredHeight,
-            m_clipEditorPreferredHeight,
             m_nodeEditorPreferredHeight,
             m_mixPreferredHeight);
     }
@@ -5024,7 +5958,6 @@ void MainWindow::buildUi()
         },
         Qt::DirectConnection);
     handleTimelineQuickStatusChanged();
-    handleClipEditorQuickStatusChanged();
     handleMixQuickStatusChanged();
     updateOverlayPositions();
 }

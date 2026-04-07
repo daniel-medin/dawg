@@ -35,6 +35,7 @@ void ThumbnailStripQuickController::clear()
 {
     m_totalFrames = 0;
     m_currentFrame = 0;
+    m_currentFramePosition = 0.0;
     m_fps = 0.0;
     m_viewStartFrame = 0.0;
     m_visibleFrameSpan = 1.0;
@@ -45,6 +46,11 @@ void ThumbnailStripQuickController::clear()
     m_videoPath.clear();
     m_thumbnailFrames.clear();
     m_thumbnailManifest.reset();
+    m_selectedNodeStartFrame.reset();
+    m_selectedNodeEndFrame.reset();
+    m_hasSelectedNodeRange = false;
+    m_selectedNodeRangeX = 0.0;
+    m_selectedNodeRangeWidth = 0.0;
     m_hoveredStripX.reset();
     m_scrubRequestTimer.stop();
     refreshVisuals();
@@ -81,6 +87,10 @@ void ThumbnailStripQuickController::setTimeline(const int totalFrames, const dou
     m_totalFrames = std::max(0, totalFrames);
     m_fps = fps > 0.0 ? fps : 30.0;
     m_currentFrame = std::clamp(m_currentFrame, 0, std::max(0, m_totalFrames - 1));
+    m_currentFramePosition = std::clamp(
+        m_currentFramePosition,
+        0.0,
+        static_cast<double>(std::max(0, m_totalFrames - 1)));
     if (m_totalFrames <= 1)
     {
         m_viewStartFrame = 0.0;
@@ -122,13 +132,56 @@ void ThumbnailStripQuickController::setCurrentFrame(const int frameIndex)
 
     const auto previousMarkerX = m_markerX;
     m_currentFrame = clampedFrame;
+    m_currentFramePosition = static_cast<double>(clampedFrame);
     m_lastRequestedFrame = m_currentFrame;
     m_pendingRequestedFrame = -1;
-    m_markerX = xForFrame(m_currentFrame);
+    m_markerX = xForFramePosition(m_currentFramePosition);
     if (std::abs(m_markerX - previousMarkerX) > 0.001)
     {
-        emit overlayChanged();
+        emit markerChanged();
     }
+}
+
+void ThumbnailStripQuickController::setCurrentFramePosition(const double framePosition)
+{
+    const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
+    const auto clampedPosition = std::clamp(framePosition, 0.0, static_cast<double>(maxFrameIndex));
+    if (std::abs(m_currentFramePosition - clampedPosition) < 0.001)
+    {
+        return;
+    }
+
+    const auto previousMarkerX = m_markerX;
+    m_currentFramePosition = clampedPosition;
+    m_currentFrame = std::clamp(
+        static_cast<int>(std::lround(clampedPosition)),
+        0,
+        maxFrameIndex);
+    m_markerX = xForFramePosition(m_currentFramePosition);
+    if (std::abs(m_markerX - previousMarkerX) > 0.001)
+    {
+        emit markerChanged();
+    }
+}
+
+void ThumbnailStripQuickController::setSelectedNodeRange(
+    const std::optional<int> startFrame,
+    const std::optional<int> endFrame)
+{
+    const auto normalizedStart = startFrame.has_value()
+        ? std::optional<int>{std::max(0, *startFrame)}
+        : std::nullopt;
+    const auto normalizedEnd = endFrame.has_value()
+        ? std::optional<int>{std::max(0, *endFrame)}
+        : std::nullopt;
+    if (m_selectedNodeStartFrame == normalizedStart && m_selectedNodeEndFrame == normalizedEnd)
+    {
+        return;
+    }
+
+    m_selectedNodeStartFrame = normalizedStart;
+    m_selectedNodeEndFrame = normalizedEnd;
+    refreshVisuals();
 }
 
 void ThumbnailStripQuickController::setPlaybackActive(const bool active)
@@ -160,6 +213,21 @@ QVariantList ThumbnailStripQuickController::thumbnailTiles() const
 double ThumbnailStripQuickController::markerX() const
 {
     return m_markerX;
+}
+
+bool ThumbnailStripQuickController::hasSelectedNodeRange() const
+{
+    return m_hasSelectedNodeRange;
+}
+
+double ThumbnailStripQuickController::selectedNodeRangeX() const
+{
+    return m_selectedNodeRangeX;
+}
+
+double ThumbnailStripQuickController::selectedNodeRangeWidth() const
+{
+    return m_selectedNodeRangeWidth;
 }
 
 bool ThumbnailStripQuickController::hasHoverLine() const
@@ -253,6 +321,9 @@ void ThumbnailStripQuickController::handleHoverLeave()
 void ThumbnailStripQuickController::refreshVisuals()
 {
     const auto previousMarkerX = m_markerX;
+    const auto previousHasSelectedNodeRange = m_hasSelectedNodeRange;
+    const auto previousSelectedNodeRangeX = m_selectedNodeRangeX;
+    const auto previousSelectedNodeRangeWidth = m_selectedNodeRangeWidth;
     const auto previousHasHoverLine = m_hasHoverLine;
     const auto previousHoverX = m_hoverX;
 
@@ -284,18 +355,50 @@ void ThumbnailStripQuickController::refreshVisuals()
         }
     }
 
-    m_markerX = xForFrame(m_currentFrame);
+    m_markerX = xForFramePosition(m_currentFramePosition);
+    m_hasSelectedNodeRange = false;
+    m_selectedNodeRangeX = 0.0;
+    m_selectedNodeRangeWidth = 0.0;
+    if (m_selectedNodeStartFrame.has_value() && m_selectedNodeEndFrame.has_value() && m_totalFrames > 0)
+    {
+        const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
+        const auto startFrame = std::clamp(
+            std::min(*m_selectedNodeStartFrame, *m_selectedNodeEndFrame),
+            0,
+            maxFrameIndex);
+        const auto endFrame = std::clamp(
+            std::max(*m_selectedNodeStartFrame, *m_selectedNodeEndFrame),
+            startFrame,
+            maxFrameIndex);
+        const auto viewEndFrame = m_viewStartFrame + m_visibleFrameSpan;
+        if (static_cast<double>(endFrame) >= m_viewStartFrame && static_cast<double>(startFrame) <= viewEndFrame)
+        {
+            const auto unclippedStartX = xForFramePosition(static_cast<double>(startFrame));
+            const auto unclippedEndX = xForFramePosition(static_cast<double>(endFrame));
+            const auto clippedStartX = std::clamp(unclippedStartX, strip.left(), strip.right());
+            const auto clippedEndX = std::clamp(unclippedEndX, strip.left(), strip.right());
+            m_hasSelectedNodeRange = true;
+            m_selectedNodeRangeX = std::min(clippedStartX, clippedEndX);
+            m_selectedNodeRangeWidth = std::max(2.0, std::abs(clippedEndX - clippedStartX));
+        }
+    }
     m_hasHoverLine = !m_playbackActive && m_hoveredStripX.has_value();
     m_hoverX = m_hasHoverLine
         ? std::clamp(*m_hoveredStripX, strip.left(), strip.right())
         : 0.0;
 
     emit visualsChanged();
-    if (std::abs(m_markerX - previousMarkerX) > 0.001
+    if (m_hasSelectedNodeRange != previousHasSelectedNodeRange
+        || std::abs(m_selectedNodeRangeX - previousSelectedNodeRangeX) > 0.001
+        || std::abs(m_selectedNodeRangeWidth - previousSelectedNodeRangeWidth) > 0.001
         || m_hasHoverLine != previousHasHoverLine
         || std::abs(m_hoverX - previousHoverX) > 0.001)
     {
         emit overlayChanged();
+    }
+    if (std::abs(m_markerX - previousMarkerX) > 0.001)
+    {
+        emit markerChanged();
     }
 }
 
@@ -417,6 +520,11 @@ int ThumbnailStripQuickController::frameForPosition(const double x) const
 
 double ThumbnailStripQuickController::xForFrame(const int frameIndex) const
 {
+    return xForFramePosition(static_cast<double>(frameIndex));
+}
+
+double ThumbnailStripQuickController::xForFramePosition(const double framePosition) const
+{
     const auto strip = computeStripRect();
     if (m_totalFrames <= 1)
     {
@@ -424,7 +532,7 @@ double ThumbnailStripQuickController::xForFrame(const int frameIndex) const
     }
 
     const auto ratio =
-        (static_cast<double>(std::clamp(frameIndex, 0, m_totalFrames - 1)) - m_viewStartFrame)
+        (std::clamp(framePosition, 0.0, static_cast<double>(std::max(0, m_totalFrames - 1))) - m_viewStartFrame)
         / std::max(1.0, m_visibleFrameSpan);
     return strip.left() + strip.width() * ratio;
 }

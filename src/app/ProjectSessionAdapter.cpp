@@ -67,14 +67,14 @@ dawg::project::ControllerState ProjectSessionAdapter::snapshot(const SnapshotInp
         });
     }
 
-    state.clipEditorPlayheads.reserve(input.clipEditorPlayheads.size());
-    for (auto it = input.clipEditorPlayheads.cbegin(); it != input.clipEditorPlayheads.cend(); ++it)
+    state.trackAudioPlayheads.reserve(input.trackAudioPlayheads.size());
+    for (auto it = input.trackAudioPlayheads.cbegin(); it != input.trackAudioPlayheads.cend(); ++it)
     {
-        state.clipEditorPlayheads.emplace_back(it.key(), it.value());
+        state.trackAudioPlayheads.emplace_back(it.key(), it.value());
     }
     std::sort(
-        state.clipEditorPlayheads.begin(),
-        state.clipEditorPlayheads.end(),
+        state.trackAudioPlayheads.begin(),
+        state.trackAudioPlayheads.end(),
         [](const auto& left, const auto& right)
         {
             return left.first.toString(QUuid::WithoutBraces) < right.first.toString(QUuid::WithoutBraces);
@@ -181,11 +181,11 @@ ProjectSessionAdapter::RestorePayload ProjectSessionAdapter::buildRestorePayload
         }
     }
 
-    for (const auto& [trackId, playheadMs] : state.clipEditorPlayheads)
+    for (const auto& [trackId, playheadMs] : state.trackAudioPlayheads)
     {
         if (!trackId.isNull())
         {
-            payload.clipEditorPlayheads.insert(trackId, playheadMs);
+            payload.trackAudioPlayheads.insert(trackId, playheadMs);
         }
     }
 

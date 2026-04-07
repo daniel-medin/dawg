@@ -8,13 +8,31 @@ Rectangle {
     id: root
 
     color: "#0d1117"
+    property int laneHeaderWidth: 148
     property color menuPopupTextColor: "#eef2f6"
     property string activeMenuKind: ""
     property var activeMenuItems: []
     property var activeMenuAnchor: null
+    property bool editMarkerBlinkOn: true
+
+    function timelineContentWidth(viewportWidth) {
+        return Math.max(1, viewportWidth)
+    }
 
     AppTheme {
         id: theme
+    }
+
+    Timer {
+        interval: 500
+        repeat: true
+        running: nodeEditorController.showTimeline
+            && nodeEditorController.nodeTrackCount > 0
+        onTriggered: root.editMarkerBlinkOn = !root.editMarkerBlinkOn
+        onRunningChanged: {
+            if (running)
+                root.editMarkerBlinkOn = true
+        }
     }
 
     function closeMenu() {
@@ -51,7 +69,7 @@ Rectangle {
 
         if (menuKind === "file") {
             mainWindowBridge.requestNodeEditorFileAction(actionKey)
-        } else if (menuKind === "audio") {
+        } else if (menuKind === "audio" || menuKind === "track") {
             mainWindowBridge.requestNodeEditorAudioAction(actionKey)
         }
     }
@@ -68,6 +86,9 @@ Rectangle {
             return nodeEditorController.canSaveNodeAs
         case "export":
             return nodeEditorController.canExportNode
+        case "createTrack":
+        case "newLane":
+            return nodeEditorController.hasSelection
         case "import":
             return nodeEditorController.hasSelection
         default:
@@ -133,6 +154,33 @@ Rectangle {
                 }
 
                 ToolButton {
+                    id: trackMenuButton
+                    text: "Track"
+                    hoverEnabled: true
+
+                    onClicked: {
+                        root.openMenu("track", [
+                            { key: "createTrack", text: "Create Track" }
+                        ], trackMenuButton)
+                    }
+
+                    contentItem: Label {
+                        text: trackMenuButton.text
+                        color: theme.titleText
+                        font.pixelSize: 13
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    background: Rectangle {
+                        radius: 6
+                        color: trackMenuButton.down
+                            ? theme.pressedFill
+                            : (trackMenuButton.hovered ? theme.hoverFill : "transparent")
+                    }
+                }
+
+                ToolButton {
                     id: audioMenuButton
                     text: "Audio"
                     hoverEnabled: true
@@ -162,7 +210,7 @@ Rectangle {
 
             Label {
                 anchors.centerIn: parent
-                width: Math.max(120, parent.width - 220)
+                width: Math.max(120, parent.width - 300)
                 text: nodeEditorController.selectedNodeName
                 color: theme.titleText
                 font.pixelSize: 14
@@ -176,135 +224,350 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.margins: 12
-            spacing: 8
-
-            Label {
-                Layout.fillWidth: true
-                text: nodeEditorController.nodeContainerText
-                color: "#7f8b99"
-                font.pixelSize: 11
-                elide: Text.ElideRight
-            }
-
-            Label {
-                Layout.fillWidth: true
-                text: nodeEditorController.audioSummaryText
-                color: "#a8b3c0"
-                font.pixelSize: 12
-                elide: Text.ElideRight
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 112
-                radius: 8
-                color: "#121820"
-                border.width: 1
-                border.color: "#202936"
-
-                ClipWaveformQuickItem {
-                    id: nodeWaveform
-                    objectName: "nodeEditorWaveform"
-                    anchors.fill: parent
-                    anchors.margins: 1
-                    clipRangeHandlesVisible: false
-                    visible: nodeEditorController.hasAttachedAudio
-                }
-
-                Column {
-                    anchors.fill: parent
-                    anchors.margins: 14
-                    spacing: 6
-                    visible: !nodeEditorController.hasAttachedAudio
-
-                    Text {
-                        text: "Node Audio"
-                        color: "#eef2f6"
-                        font.pixelSize: 15
-                        font.weight: Font.DemiBold
-                    }
-
-                    Text {
-                        text: nodeEditorController.emptyBodyText
-                        color: "#94a3b3"
-                        font.pixelSize: 13
-                        wrapMode: Text.WordWrap
-                    }
-                }
-            }
+            spacing: 0
 
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.minimumHeight: 120
-                radius: 8
-                color: "#111720"
-                border.width: 1
-                border.color: "#202936"
+                color: "#0b1016"
 
                 ColumnLayout {
+                    id: lanesPanelColumn
                     anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 8
+                    spacing: 0
 
-                    Text {
+                    Rectangle {
                         Layout.fillWidth: true
-                        text: "Internal Tracks"
-                        color: "#eef2f6"
-                        font.pixelSize: 14
-                        font.weight: Font.DemiBold
-                    }
+                        Layout.preferredHeight: 28
+                        color: "#101720"
 
-                    ScrollView {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: root.laneHeaderWidth + 10
+                            anchors.rightMargin: 10
+                            spacing: 12
 
-                        Column {
-                            width: parent.width
-                            spacing: 6
+                            Text {
+                                Layout.alignment: Qt.AlignVCenter
+                                text: nodeEditorController.timelineStartText
+                                color: "#7f8b99"
+                                font.pixelSize: 11
+                            }
 
-                            Repeater {
-                                model: nodeEditorController.nodeTracks
-
-                                delegate: Rectangle {
-                                    required property var modelData
-                                    width: parent.width
-                                    height: 44
-                                    radius: 6
-                                    color: modelData.primary ? "#1a2430" : "#151c25"
-                                    border.width: 1
-                                    border.color: modelData.primary ? "#31455d" : "#263140"
-
-                                    Column {
-                                        anchors.fill: parent
-                                        anchors.margins: 8
-                                        spacing: 2
-
-                                        Text {
-                                            text: modelData.title
-                                            color: "#eef2f6"
-                                            font.pixelSize: 13
-                                            font.weight: modelData.primary ? Font.DemiBold : Font.Medium
-                                            elide: Text.ElideRight
-                                        }
-
-                                        Text {
-                                            text: modelData.subtitle
-                                            color: "#91a0b0"
-                                            font.pixelSize: 11
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-                                }
+                            Item {
+                                Layout.fillWidth: true
                             }
 
                             Text {
-                                visible: nodeEditorController.nodeTrackCount === 0
+                                Layout.alignment: Qt.AlignVCenter
+                                text: nodeEditorController.playheadText
+                                color: "#9ec7f0"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                            }
+
+                            Text {
+                                Layout.alignment: Qt.AlignVCenter
+                                text: nodeEditorController.timelineEndText
+                                color: "#7f8b99"
+                                font.pixelSize: 11
+                            }
+                        }
+
+                        MouseArea {
+                            x: root.laneHeaderWidth
+                            y: 0
+                            width: Math.max(1, parent.width - root.laneHeaderWidth)
+                            height: parent.height
+                            enabled: nodeEditorController.showTimeline
+                            onClicked: function(mouse) {
+                                root.forceActiveFocus()
+                                nodeEditorController.setPlayheadFromRatio(mouse.x / Math.max(1, width))
+                            }
+                        }
+                    }
+
+                    ScrollView {
+                        id: lanesScroll
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        contentWidth: root.timelineContentWidth(width)
+                        contentHeight: lanesContent.height
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                        Item {
+                            id: lanesContent
+                            width: lanesScroll.contentWidth
+                            height: lanesColumn.implicitHeight
+
+                            Column {
+                                id: lanesColumn
                                 width: parent.width
-                                text: "No internal tracks yet."
-                                color: "#94a3b3"
-                                font.pixelSize: 12
+                                spacing: 1
+
+                                Repeater {
+                                    model: nodeEditorController.nodeTracks
+
+                                    delegate: Rectangle {
+                                        id: laneDelegate
+                                        required property var modelData
+                                        width: parent.width
+                                        height: 72
+                                        color: modelData.primary ? "#17202a" : "#121922"
+
+                                        Row {
+                                            anchors.fill: parent
+                                            spacing: 0
+
+                                            Rectangle {
+                                                width: root.laneHeaderWidth
+                                                height: parent.height
+                                                color: modelData.primary ? "#1b2632" : "#151e28"
+                                                border.width: modelData.laneId === nodeEditorController.selectedLaneHeaderId ? 1 : 0
+                                                border.color: "#9ec7f0"
+
+                                                Text {
+                                                    anchors.left: parent.left
+                                                    anchors.right: parent.right
+                                                    anchors.top: parent.top
+                                                    anchors.leftMargin: 10
+                                                    anchors.rightMargin: 42
+                                                    anchors.topMargin: 12
+                                                    text: modelData.title
+                                                    color: "#eef2f6"
+                                                    font.pixelSize: 13
+                                                    font.weight: modelData.primary ? Font.DemiBold : Font.Medium
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Text {
+                                                    anchors.left: parent.left
+                                                    anchors.right: parent.right
+                                                    anchors.top: parent.top
+                                                    anchors.leftMargin: 10
+                                                    anchors.rightMargin: 42
+                                                    anchors.topMargin: 34
+                                                    text: modelData.subtitle
+                                                    color: "#91a0b0"
+                                                    font.pixelSize: 11
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Column {
+                                                    anchors.right: parent.right
+                                                    anchors.rightMargin: 8
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    spacing: 4
+                                                    z: 10
+
+                                                    Rectangle {
+                                                        id: laneSoloButton
+                                                        width: 22
+                                                        height: 18
+                                                        radius: 4
+                                                        color: modelData.soloed ? "#db7e26" : "#1b2129"
+                                                        border.width: 1
+                                                        border.color: modelData.soloed ? "#ffd7b4" : "#2c3540"
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "S"
+                                                            color: modelData.soloed ? "#fff4e9" : "#d6dfe9"
+                                                            font.pixelSize: 10
+                                                            font.bold: true
+                                                        }
+
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            preventStealing: true
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: function(mouse) {
+                                                                root.forceActiveFocus()
+                                                                nodeEditorController.setLaneSoloed(modelData.laneId, !modelData.soloed)
+                                                                mouse.accepted = true
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Rectangle {
+                                                        id: laneMuteButton
+                                                        width: 22
+                                                        height: 18
+                                                        radius: 4
+                                                        color: modelData.muted ? "#2f3741" : "#1b2129"
+                                                        border.width: 1
+                                                        border.color: modelData.muted ? "#4b5661" : "#2c3540"
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "M"
+                                                            color: modelData.muted ? "#9ba6b1" : "#d6dfe9"
+                                                            font.pixelSize: 10
+                                                            font.bold: true
+                                                        }
+
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            preventStealing: true
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: function(mouse) {
+                                                                root.forceActiveFocus()
+                                                                nodeEditorController.setLaneMuted(modelData.laneId, !modelData.muted)
+                                                                mouse.accepted = true
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    z: 5
+                                                    acceptedButtons: Qt.LeftButton
+                                                    onClicked: {
+                                                        root.forceActiveFocus()
+                                                        nodeEditorController.selectLaneHeader(modelData.laneId)
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                id: laneTimeline
+                                                width: parent.width - root.laneHeaderWidth
+                                                height: parent.height
+                                                color: "#0f151d"
+                                                clip: true
+
+                                                Rectangle {
+                                                    x: 0
+                                                    width: parent.width
+                                                    height: 1
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    color: "#273241"
+                                                }
+
+                                                Repeater {
+                                                    model: 5
+
+                                                    delegate: Rectangle {
+                                                        width: 1
+                                                        height: laneTimeline.height
+                                                        x: Math.round((laneTimeline.width - width) * (index / 4))
+                                                        color: "#1a2430"
+                                                    }
+                                                }
+
+                                                Repeater {
+                                                    model: modelData.clips || []
+
+                                                    delegate: ClipWaveformQuickItem {
+                                                        id: clipDelegate
+                                                        required property var modelData
+                                                        z: 10
+                                                        x: Math.round(laneTimeline.width * (modelData.clipOffsetRatio || 0))
+                                                        y: 0
+                                                        width: Math.max(72, Math.round(laneTimeline.width * (modelData.clipWidthRatio || 0.08)))
+                                                        height: laneTimeline.height
+                                                        clip: true
+                                                        clipRangeHandlesVisible: false
+                                                        playheadVisible: false
+                                                        contentMargin: 0
+                                                        textureSize: Qt.size(Math.max(1, width), Math.max(1, height))
+                                                        visible: modelData.hasWaveform && width > 1 && height > 1
+                                                        waveformState: modelData.waveformState
+
+                                                        Rectangle {
+                                                            anchors.fill: parent
+                                                            anchors.margins: 0
+                                                            color: "transparent"
+                                                            border.width: clipDelegate.modelData.clipId === nodeEditorController.selectedClipId ? 1 : 0
+                                                            border.color: "#9ec7f0"
+                                                            z: 2
+                                                        }
+
+                                                        Text {
+                                                            anchors.left: parent.left
+                                                            anchors.right: parent.right
+                                                            anchors.top: parent.top
+                                                            anchors.leftMargin: 8
+                                                            anchors.rightMargin: 8
+                                                            anchors.topMargin: 4
+                                                            text: clipDelegate.modelData.title
+                                                            color: "#eef2f6"
+                                                            font.pixelSize: 11
+                                                            font.weight: Font.Medium
+                                                            elide: Text.ElideRight
+                                                            z: 3
+                                                        }
+
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            acceptedButtons: Qt.LeftButton
+                                                            onClicked: function(mouse) {
+                                                                root.forceActiveFocus()
+                                                                nodeEditorController.selectLane(laneDelegate.modelData.laneId)
+                                                                nodeEditorController.setPlayheadFromRatio((clipDelegate.x + mouse.x) / Math.max(1, laneTimeline.width))
+                                                            }
+                                                            onDoubleClicked: {
+                                                                root.forceActiveFocus()
+                                                                nodeEditorController.selectClip(laneDelegate.modelData.laneId, clipDelegate.modelData.clipId)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    z: 1
+                                                    onClicked: function(mouse) {
+                                                        root.forceActiveFocus()
+                                                        nodeEditorController.selectLane(modelData.laneId)
+                                                        nodeEditorController.setPlayheadFromRatio(mouse.x / Math.max(1, width))
+                                                    }
+                                                }
+
+                                                Rectangle {
+                                                    visible: nodeEditorController.showTimeline
+                                                        && root.editMarkerBlinkOn
+                                                        && nodeEditorController.insertionMarkerStationary
+                                                        && modelData.laneId === nodeEditorController.selectedLaneId
+                                                    x: laneTimeline.width * nodeEditorController.insertionMarkerRatio
+                                                    y: 0
+                                                    width: 1
+                                                    height: laneTimeline.height
+                                                    color: "#9ec7f0"
+                                                    z: 20
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    visible: nodeEditorController.nodeTrackCount === 0
+                                    width: parent.width
+                                    text: "No lanes yet."
+                                    color: "#94a3b3"
+                                    font.pixelSize: 12
+                                }
+                            }
+
+                            Rectangle {
+                                visible: nodeEditorController.showTimeline
+                                    && nodeEditorController.nodeTrackCount > 0
+                                    && nodeEditorController.playbackActive
+                                x: root.laneHeaderWidth + ((parent.width - root.laneHeaderWidth) * nodeEditorController.playheadRatio)
+                                y: 0
+                                width: 1
+                                height: parent.height
+                                color: "#9ec7f0"
+                                z: 20
                             }
                         }
                     }

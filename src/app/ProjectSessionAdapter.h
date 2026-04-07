@@ -36,7 +36,7 @@ public:
         const std::unordered_map<int, float>& mixLaneGainDbByLane;
         const std::unordered_map<int, bool>& mixLaneMutedByLane;
         const std::unordered_map<int, bool>& mixLaneSoloByLane;
-        const QHash<QUuid, int>& clipEditorPlayheads;
+        const QHash<QUuid, int>& trackAudioPlayheads;
     };
 
     struct RestorePayload
@@ -56,7 +56,7 @@ public:
         std::unordered_map<int, float> mixLaneGainDbByLane;
         std::unordered_map<int, bool> mixLaneMutedByLane;
         std::unordered_map<int, bool> mixLaneSoloByLane;
-        QHash<QUuid, int> clipEditorPlayheads;
+        QHash<QUuid, int> trackAudioPlayheads;
     };
 
     [[nodiscard]] static dawg::project::ControllerState snapshot(const SnapshotInput& input);

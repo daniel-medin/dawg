@@ -3,6 +3,7 @@ import QtQuick 2.15
 Item {
     id: thumbnailRoot
     objectName: "thumbnailStripScene"
+    focus: true
 
     function rectValue(mapValue, key) {
         return mapValue && mapValue[key] !== undefined ? mapValue[key] : 0
@@ -62,6 +63,16 @@ Item {
         }
 
         Rectangle {
+            visible: thumbnailStripController.hasSelectedNodeRange
+            x: thumbnailStripController.selectedNodeRangeX - parent.x
+            y: 0
+            width: Math.max(1, thumbnailStripController.selectedNodeRangeWidth)
+            height: parent.height
+            color: "#000000"
+            opacity: 0.5
+        }
+
+        Rectangle {
             x: thumbnailStripController.markerX - parent.x - 1
             y: 0
             width: 2
@@ -87,6 +98,7 @@ Item {
         cursorShape: thumbnailStripController.playbackActive ? Qt.ArrowCursor : Qt.PointingHandCursor
 
         onPressed: function(mouse) {
+            thumbnailRoot.forceActiveFocus()
             thumbnailStripController.handleMousePress(mouse.button, mouse.x, mouse.y)
             mouse.accepted = true
         }

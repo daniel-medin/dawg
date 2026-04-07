@@ -53,17 +53,14 @@ void MainWindowActions::buildMenus()
     m_window.m_moveNodeRightAction = new QAction(QStringLiteral("Move Right (Right)"), &m_window);
     m_window.m_trimNodeAction = new QAction(QStringLiteral("Trim Node (Shift+T)"), &m_window);
     m_window.m_autoPanAction = new QAction(QStringLiteral("Auto Pan (R)"), &m_window);
-    m_window.m_loopSoundAction = new QAction(QStringLiteral("Loop Sound"), &m_window);
     m_window.m_toggleNodeNameAction = new QAction(QStringLiteral("Toggle Node Name (E)"), &m_window);
     m_window.m_showAllNodeNamesAction = new QAction(QStringLiteral("Node Name Always On"), &m_window);
     m_window.m_useProxyVideoAction = new QAction(QStringLiteral("Use Proxy Video"), &m_window);
     m_window.m_importSoundAction = new QAction(QStringLiteral("Import Audio..."), &m_window);
     m_window.m_detachVideoAction = new QAction(QStringLiteral("Detach Video"), &m_window);
     m_window.m_detachTimelineAction = new QAction(QStringLiteral("Detach Timeline"), &m_window);
-    m_window.m_detachClipEditorAction = new QAction(QStringLiteral("Detach Clip Editor"), &m_window);
     m_window.m_detachMixAction = new QAction(QStringLiteral("Detach Mixer"), &m_window);
     m_window.m_detachAudioPoolAction = new QAction(QStringLiteral("Detach Audio Pool"), &m_window);
-    m_window.m_showClipEditorAction = new QAction(QStringLiteral("Show Clip Editor"), &m_window);
     m_window.m_showNodeEditorAction = new QAction(QStringLiteral("Show Node Editor"), &m_window);
     m_window.m_showTimelineAction = new QAction(QStringLiteral("Hide Timeline"), &m_window);
     m_window.m_showMixAction = new QAction(QStringLiteral("Show Mixer"), &m_window);
@@ -78,15 +75,12 @@ void MainWindowActions::buildMenus()
     m_window.m_motionTrackingAction = new QAction(QStringLiteral("Motion Tracking"), &m_window);
     m_window.m_motionTrackingAction->setCheckable(true);
     m_window.m_autoPanAction->setCheckable(true);
-    m_window.m_loopSoundAction->setCheckable(true);
     m_window.m_insertionFollowsPlaybackAction->setCheckable(true);
     m_window.m_insertionFollowsPlaybackAction->setChecked(false);
     m_window.m_showAllNodeNamesAction->setCheckable(true);
     m_window.m_showAllNodeNamesAction->setChecked(true);
     m_window.m_useProxyVideoAction->setCheckable(true);
     m_window.m_useProxyVideoAction->setChecked(false);
-    m_window.m_showClipEditorAction->setCheckable(true);
-    m_window.m_showClipEditorAction->setChecked(false);
     m_window.m_showNodeEditorAction->setCheckable(true);
     m_window.m_showNodeEditorAction->setChecked(false);
     m_window.m_showTimelineAction->setCheckable(true);
@@ -102,7 +96,6 @@ void MainWindowActions::buildMenus()
     m_window.m_audioPoolAction->setCheckable(true);
     m_window.m_audioPoolAction->setChecked(false);
     m_window.m_showTimelineAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+T")));
-    m_window.m_showClipEditorAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+-")));
     m_window.m_showMixAction->setShortcut(QKeySequence(QStringLiteral("Ctrl++")));
     m_window.m_audioPoolAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+P")));
     m_window.m_importSoundAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
@@ -123,7 +116,6 @@ void MainWindowActions::buildMenus()
     m_window.m_moveNodeRightAction->setEnabled(false);
     m_window.m_trimNodeAction->setEnabled(false);
     m_window.m_autoPanAction->setEnabled(false);
-    m_window.m_loopSoundAction->setEnabled(false);
     m_window.m_toggleNodeNameAction->setEnabled(false);
     m_window.m_importSoundAction->setEnabled(false);
     m_window.m_copyAction->setEnabled(false);
@@ -163,7 +155,6 @@ void MainWindowActions::updateSelectionState(const bool hasSelection)
     m_window.m_importSoundAction->setEnabled(hasSelection);
     m_window.m_deleteNodeAction->setEnabled(hasSelection);
     m_window.m_showNodeEditorAction->setEnabled(hasSelection);
-    m_window.refreshClipEditor();
     m_window.refreshNodeEditor();
     updateEditActionState();
     m_window.updateDebugText();
@@ -194,16 +185,6 @@ void MainWindowActions::updateEditActionState()
     if (m_window.m_showNodeEditorAction)
     {
         m_window.m_showNodeEditorAction->setEnabled(m_window.m_controller->hasSelection());
-    }
-    if (m_window.m_loopSoundAction)
-    {
-        const auto selectedTrackId = m_window.m_controller->selectedTrackId();
-        const auto hasSelectedTrackAudio =
-            !selectedTrackId.isNull() && m_window.m_controller->trackHasAttachedAudio(selectedTrackId);
-        const QSignalBlocker blocker{m_window.m_loopSoundAction};
-        m_window.m_loopSoundAction->setEnabled(hasSelectedTrackAudio);
-        m_window.m_loopSoundAction->setChecked(
-            hasSelectedTrackAudio && m_window.m_controller->selectedTrackLoopEnabled());
     }
     if (m_window.m_copyAction)
     {

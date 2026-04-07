@@ -1,4 +1,4 @@
-#include "app/ClipEditorSession.h"
+#include "app/TrackAudioSession.h"
 
 #include <algorithm>
 #include <cmath>
@@ -62,7 +62,7 @@ int trackEndFrame(const TrackPoint& track, const int totalFrames)
 }
 }
 
-ClipEditorSession::ClipEditorSession(
+TrackAudioSession::TrackAudioSession(
     MotionTracker& tracker,
     AudioEngine& audioEngine,
     AudioPlaybackCoordinator& audioPlaybackCoordinator,
@@ -74,23 +74,23 @@ ClipEditorSession::ClipEditorSession(
 {
 }
 
-void ClipEditorSession::reset()
+void TrackAudioSession::reset()
 {
     m_playheadMsByTrack.clear();
     m_previewStopTimer.stop();
 }
 
-const QHash<QUuid, int>& ClipEditorSession::playheads() const
+const QHash<QUuid, int>& TrackAudioSession::playheads() const
 {
     return m_playheadMsByTrack;
 }
 
-void ClipEditorSession::setPlayheads(const QHash<QUuid, int>& playheads)
+void TrackAudioSession::setPlayheads(const QHash<QUuid, int>& playheads)
 {
     m_playheadMsByTrack = playheads;
 }
 
-bool ClipEditorSession::setSelectedTrackClipPlayheadMs(
+bool TrackAudioSession::setSelectedTrackClipPlayheadMs(
     const bool hasVideoLoaded,
     const QUuid& selectedTrackId,
     const int playheadMs,
@@ -146,7 +146,7 @@ bool ClipEditorSession::setSelectedTrackClipPlayheadMs(
     return changed || previewDurationMs.has_value();
 }
 
-bool ClipEditorSession::setSelectedTrackAudioGainDb(
+bool TrackAudioSession::setSelectedTrackAudioGainDb(
     const bool hasVideoLoaded,
     const QUuid& selectedTrackId,
     const float gainDb,
@@ -189,7 +189,7 @@ bool ClipEditorSession::setSelectedTrackAudioGainDb(
     return true;
 }
 
-bool ClipEditorSession::setSelectedTrackLoopEnabled(
+bool TrackAudioSession::setSelectedTrackLoopEnabled(
     const bool hasVideoLoaded,
     const QUuid& selectedTrackId,
     const bool enabled,
@@ -225,7 +225,7 @@ bool ClipEditorSession::setSelectedTrackLoopEnabled(
     return true;
 }
 
-bool ClipEditorSession::startSelectedTrackClipPreview(
+bool TrackAudioSession::startSelectedTrackClipPreview(
     const bool hasVideoLoaded,
     const QUuid& selectedTrackId,
     const bool timelinePlaying,
@@ -280,7 +280,7 @@ bool ClipEditorSession::startSelectedTrackClipPreview(
     return true;
 }
 
-void ClipEditorSession::handlePreviewTimeout(
+void TrackAudioSession::handlePreviewTimeout(
     const std::function<std::optional<int>(const QString&)>& audioDurationMsForPath)
 {
     const auto previewSourceTrackId = m_audioPlaybackCoordinator.clipPreviewSourceTrackId();
@@ -328,7 +328,7 @@ void ClipEditorSession::handlePreviewTimeout(
     m_playheadMsByTrack.insert(track->id, clipStartMs);
 }
 
-void ClipEditorSession::stopSelectedTrackClipPreview()
+void TrackAudioSession::stopSelectedTrackClipPreview()
 {
     const auto previewSourceTrackId = m_audioPlaybackCoordinator.clipPreviewSourceTrackId();
     if (!previewSourceTrackId.isNull())
@@ -343,7 +343,7 @@ void ClipEditorSession::stopSelectedTrackClipPreview()
     m_audioPlaybackCoordinator.stopClipPreview();
 }
 
-bool ClipEditorSession::setSelectedTrackClipRangeMs(
+bool TrackAudioSession::setSelectedTrackClipRangeMs(
     const bool hasVideoLoaded,
     const QUuid& selectedTrackId,
     const int clipStartMs,
@@ -419,7 +419,7 @@ bool ClipEditorSession::setSelectedTrackClipRangeMs(
     return true;
 }
 
-bool ClipEditorSession::selectedTrackLoopEnabled(
+bool TrackAudioSession::selectedTrackLoopEnabled(
     const bool hasVideoLoaded,
     const QUuid& selectedTrackId) const
 {
@@ -432,7 +432,7 @@ bool ClipEditorSession::selectedTrackLoopEnabled(
     return track != nullptr && track->attachedAudio->loopEnabled;
 }
 
-std::optional<ClipEditorState> ClipEditorSession::selectedClipEditorState(
+std::optional<AudioClipPreviewState> TrackAudioSession::selectedAudioClipPreviewState(
     const bool hasVideoLoaded,
     const QUuid& selectedTrackId,
     const int currentFrameIndex,
@@ -452,7 +452,7 @@ std::optional<ClipEditorState> ClipEditorSession::selectedClipEditorState(
         return std::nullopt;
     }
 
-    ClipEditorState state;
+    AudioClipPreviewState state;
     state.trackId = track->id;
     state.label = track->label;
     state.color = track->color;
@@ -514,17 +514,17 @@ std::optional<ClipEditorState> ClipEditorSession::selectedClipEditorState(
     return state;
 }
 
-std::optional<int> ClipEditorSession::currentSelectedTrackClipPreviewPlayheadMs() const
+std::optional<int> TrackAudioSession::currentSelectedTrackClipPreviewPlayheadMs() const
 {
     return m_audioPlaybackCoordinator.currentClipPreviewPlayheadMs();
 }
 
-float ClipEditorSession::clampGainDb(const float gainDb)
+float TrackAudioSession::clampGainDb(const float gainDb)
 {
     return std::clamp(gainDb, kMinMixGainDb, kMaxMixGainDb);
 }
 
-const TrackPoint* ClipEditorSession::findTrack(const QUuid& trackId) const
+const TrackPoint* TrackAudioSession::findTrack(const QUuid& trackId) const
 {
     if (trackId.isNull())
     {
@@ -542,13 +542,13 @@ const TrackPoint* ClipEditorSession::findTrack(const QUuid& trackId) const
     return trackIt != tracks.cend() ? &(*trackIt) : nullptr;
 }
 
-const TrackPoint* ClipEditorSession::findTrackWithAudio(const QUuid& trackId) const
+const TrackPoint* TrackAudioSession::findTrackWithAudio(const QUuid& trackId) const
 {
     const auto* track = findTrack(trackId);
     return track != nullptr && track->attachedAudio.has_value() ? track : nullptr;
 }
 
-std::optional<int> ClipEditorSession::restartPreview(
+std::optional<int> TrackAudioSession::restartPreview(
     const QUuid& trackId,
     const QString& assetPath,
     const int previewStartMs,

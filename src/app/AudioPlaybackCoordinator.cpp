@@ -13,6 +13,11 @@ namespace
 {
 constexpr float kSilentMixGainDb = -100.0F;
 
+bool containsTrackId(const std::vector<QUuid>& trackIds, const QUuid& trackId)
+{
+    return std::find(trackIds.cbegin(), trackIds.cend(), trackId) != trackIds.cend();
+}
+
 int audioClipStartMs(const AudioAttachment& attachment)
 {
     return std::max(0, attachment.clipStartMs);
@@ -44,12 +49,7 @@ int audioClipPlaybackOffsetMs(
     const int elapsedWithinNodeMs)
 {
     const auto clipStartMs = audioClipStartMs(attachment);
-    const auto clipDurationMs = audioClipDurationMs(attachment, sourceDurationMs);
-    if (attachment.loopEnabled && clipDurationMs > 0)
-    {
-        return clipStartMs + (std::max(0, elapsedWithinNodeMs) % clipDurationMs);
-    }
-
+    Q_UNUSED(sourceDurationMs);
     return clipStartMs + std::max(0, elapsedWithinNodeMs);
 }
 
@@ -247,6 +247,113 @@ void AudioPlaybackCoordinator::stopClipPreview()
     m_clipPreviewClipEndMs = 0;
 }
 
+bool AudioPlaybackCoordinator::syncNodePreview(
+    const std::vector<NodePreviewClip>& clips,
+    const int nodeDurationMs,
+    const int playheadMs,
+    const bool forceRepositionActiveTracks)
+{
+    if (clips.empty() || nodeDurationMs <= 0)
+    {
+        stopNodePreview();
+        return false;
+    }
+
+    m_nodePreviewActive = true;
+    std::vector<QUuid> previewTrackIds;
+    std::vector<QUuid> activeTrackIds;
+    previewTrackIds.reserve(clips.size());
+    activeTrackIds.reserve(clips.size());
+    const auto clampedPlayheadMs = std::clamp(playheadMs, 0, nodeDurationMs);
+    bool anyClipStarted = false;
+
+    for (const auto& clip : clips)
+    {
+        if (clip.previewTrackId.isNull()
+            || clip.assetPath.isEmpty()
+            || clip.clipEndMs <= clip.clipStartMs)
+        {
+            continue;
+        }
+
+        previewTrackIds.push_back(clip.previewTrackId);
+        const auto elapsedWithinClipMs = clampedPlayheadMs - std::max(0, clip.laneOffsetMs);
+        if (elapsedWithinClipMs < 0)
+        {
+            continue;
+        }
+
+        const auto clipDurationMs = std::max(1, clip.clipEndMs - clip.clipStartMs);
+        if (!clip.loopEnabled && elapsedWithinClipMs >= clipDurationMs)
+        {
+            continue;
+        }
+
+        activeTrackIds.push_back(clip.previewTrackId);
+        AudioEngine::TrackPlaybackOptions options;
+        options.offsetMs = clip.loopEnabled
+            ? clip.clipStartMs + (elapsedWithinClipMs % clipDurationMs)
+            : clip.clipStartMs + elapsedWithinClipMs;
+        options.clipStartMs = clip.clipStartMs;
+        options.clipEndMs = clip.clipEndMs;
+        options.loopEnabled = clip.loopEnabled;
+
+        const auto wasActive = containsTrackId(m_nodePreviewActiveTrackIds, clip.previewTrackId);
+        const auto shouldStartOrReposition = forceRepositionActiveTracks
+            || !wasActive
+            || !m_audioEngine.isTrackPlaying(clip.previewTrackId);
+        if (shouldStartOrReposition
+            && !m_audioEngine.playTrack(clip.previewTrackId, clip.assetPath, options))
+        {
+            activeTrackIds.pop_back();
+            continue;
+        }
+
+        m_audioEngine.setTrackGain(clip.previewTrackId, clip.gainDb);
+        m_audioEngine.setTrackPan(clip.previewTrackId, 0.0F);
+        anyClipStarted = true;
+    }
+
+    for (const auto& previousTrackId : m_nodePreviewTrackIds)
+    {
+        if (!containsTrackId(previewTrackIds, previousTrackId))
+        {
+            m_audioEngine.stopTrack(previousTrackId);
+        }
+    }
+    m_nodePreviewTrackIds = std::move(previewTrackIds);
+    m_nodePreviewActiveTrackIds = std::move(activeTrackIds);
+    return anyClipStarted || !m_nodePreviewTrackIds.empty();
+}
+
+void AudioPlaybackCoordinator::stopNodePreview()
+{
+    for (const auto& trackId : m_nodePreviewTrackIds)
+    {
+        m_audioEngine.stopTrack(trackId);
+    }
+    m_nodePreviewTrackIds.clear();
+    m_nodePreviewActiveTrackIds.clear();
+    m_nodePreviewActive = false;
+}
+
+bool AudioPlaybackCoordinator::isNodePreviewPlaying() const
+{
+    return m_nodePreviewActive;
+}
+
+AudioEngine::StereoLevels AudioPlaybackCoordinator::nodePreviewStereoLevels() const
+{
+    AudioEngine::StereoLevels levels;
+    for (const auto& trackId : m_nodePreviewTrackIds)
+    {
+        const auto trackLevels = m_audioEngine.trackStereoLevels(trackId);
+        levels.left = std::max(levels.left, trackLevels.left);
+        levels.right = std::max(levels.right, trackLevels.right);
+    }
+    return levels;
+}
+
 void AudioPlaybackCoordinator::applyLiveMixStateToCurrentPlayback(
     const PlaybackSyncRequest& request,
     const std::vector<TimelineTrackSpan>& spans,
@@ -358,7 +465,7 @@ void AudioPlaybackCoordinator::syncAttachedAudioForCurrentFrame(
         const auto clipStartMs = audioClipStartMs(*track.attachedAudio);
         const auto clipEndMs = audioClipEndMs(*track.attachedAudio, sourceDurationMs);
         const auto clipDurationMs = std::max(1, clipEndMs - clipStartMs);
-        if (!track.attachedAudio->loopEnabled && elapsedWithinNodeMs >= clipDurationMs)
+        if (elapsedWithinNodeMs >= clipDurationMs)
         {
             m_audioEngine.stopTrack(track.id);
             continue;
@@ -371,7 +478,7 @@ void AudioPlaybackCoordinator::syncAttachedAudioForCurrentFrame(
             elapsedWithinNodeMs);
         playbackOptions.clipStartMs = clipStartMs;
         playbackOptions.clipEndMs = clipEndMs;
-        playbackOptions.loopEnabled = track.attachedAudio->loopEnabled;
+        playbackOptions.loopEnabled = false;
         m_audioEngine.playTrack(track.id, track.attachedAudio->assetPath, playbackOptions);
 
         const auto laneIt = lanes.find(track.id);
@@ -398,4 +505,5 @@ void AudioPlaybackCoordinator::reset()
 {
     stopAudioPoolPreview();
     stopClipPreview();
+    stopNodePreview();
 }

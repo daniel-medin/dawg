@@ -10,7 +10,8 @@
 #include <QString>
 #include <QUuid>
 
-class AudioEngine;
+#include "core/audio/AudioEngine.h"
+
 struct TrackPoint;
 struct TimelineTrackSpan;
 
@@ -40,6 +41,17 @@ public:
         float gainDb = 0.0F;
     };
 
+    struct NodePreviewClip
+    {
+        QUuid previewTrackId;
+        QString assetPath;
+        int laneOffsetMs = 0;
+        int clipStartMs = 0;
+        int clipEndMs = 0;
+        float gainDb = 0.0F;
+        bool loopEnabled = false;
+    };
+
     explicit AudioPlaybackCoordinator(AudioEngine& audioEngine);
 
     [[nodiscard]] const QUuid& audioPoolPreviewTrackId() const;
@@ -56,6 +68,14 @@ public:
     [[nodiscard]] std::optional<int> playClipPreview(const ClipPreviewRequest& request);
     void setClipPreviewGain(float gainDb);
     void stopClipPreview();
+    bool syncNodePreview(
+        const std::vector<NodePreviewClip>& clips,
+        int nodeDurationMs,
+        int playheadMs,
+        bool forceRepositionActiveTracks = false);
+    void stopNodePreview();
+    [[nodiscard]] bool isNodePreviewPlaying() const;
+    [[nodiscard]] AudioEngine::StereoLevels nodePreviewStereoLevels() const;
     void applyLiveMixStateToCurrentPlayback(
         const PlaybackSyncRequest& request,
         const std::vector<TimelineTrackSpan>& spans,
@@ -84,4 +104,7 @@ private:
     int m_clipPreviewStartMs = 0;
     int m_clipPreviewClipStartMs = 0;
     int m_clipPreviewClipEndMs = 0;
+    bool m_nodePreviewActive = false;
+    std::vector<QUuid> m_nodePreviewTrackIds;
+    std::vector<QUuid> m_nodePreviewActiveTrackIds;
 };
