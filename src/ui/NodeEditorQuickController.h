@@ -26,6 +26,7 @@ class NodeEditorQuickController final : public QObject
     Q_PROPERTY(QString selectedLaneId READ selectedLaneId NOTIFY stateChanged)
     Q_PROPERTY(QString selectedLaneHeaderId READ selectedLaneHeaderId NOTIFY stateChanged)
     Q_PROPERTY(QString selectedClipId READ selectedClipId NOTIFY stateChanged)
+    Q_PROPERTY(bool canPasteClip READ canPasteClip NOTIFY stateChanged)
     Q_PROPERTY(QString audioSummaryText READ audioSummaryText NOTIFY stateChanged)
     Q_PROPERTY(QString emptyBodyText READ emptyBodyText NOTIFY stateChanged)
     Q_PROPERTY(bool showTimeline READ showTimeline NOTIFY stateChanged)
@@ -71,6 +72,7 @@ public:
     [[nodiscard]] QString selectedLaneId() const;
     [[nodiscard]] QString selectedLaneHeaderId() const;
     [[nodiscard]] QString selectedClipId() const;
+    [[nodiscard]] bool canPasteClip() const;
     [[nodiscard]] QString audioSummaryText() const;
     [[nodiscard]] QString emptyBodyText() const;
     [[nodiscard]] bool showTimeline() const;
@@ -93,10 +95,18 @@ public:
 
     Q_INVOKABLE void triggerFileAction(const QString& actionKey);
     Q_INVOKABLE void triggerAudioAction(const QString& actionKey);
+    Q_INVOKABLE void triggerEditAction(const QString& actionKey);
     Q_INVOKABLE void selectLane(const QString& laneId);
     Q_INVOKABLE void selectLaneHeader(const QString& laneId);
     Q_INVOKABLE void selectClip(const QString& laneId, const QString& clipId);
     Q_INVOKABLE void moveClipToRatio(const QString& laneId, const QString& clipId, qreal offsetRatio);
+    Q_INVOKABLE void copyClipToRatio(const QString& laneId, const QString& clipId, qreal offsetRatio);
+    Q_INVOKABLE void dropClipToRatio(
+        const QString& sourceLaneId,
+        const QString& clipId,
+        const QString& targetLaneId,
+        qreal offsetRatio,
+        bool copyClip);
     Q_INVOKABLE void trimClipToRatio(const QString& laneId, const QString& clipId, bool trimStart, qreal targetRatio);
     Q_INVOKABLE void setLaneMuted(const QString& laneId, bool muted);
     Q_INVOKABLE void setLaneSoloed(const QString& laneId, bool soloed);
@@ -109,6 +119,7 @@ public:
     void setInsertionMarkerMs(int markerMs);
     void setInsertionFollowsPlayback(bool enabled);
     void setPlaybackActive(bool active);
+    void setCanPasteClip(bool canPasteClip);
     void setLaneMeterStates(const QVariantList& meterStates);
 
 signals:
@@ -121,9 +132,17 @@ signals:
     void laneMuteRequested(const QString& laneId, bool muted);
     void laneSoloRequested(const QString& laneId, bool soloed);
     void clipMoveRequested(const QString& laneId, const QString& clipId, int laneOffsetMs);
+    void clipCopyRequested(const QString& laneId, const QString& clipId, int laneOffsetMs);
+    void clipDropRequested(
+        const QString& sourceLaneId,
+        const QString& clipId,
+        const QString& targetLaneId,
+        int laneOffsetMs,
+        bool copyClip);
     void clipTrimRequested(const QString& laneId, const QString& clipId, int targetMs, bool trimStart);
     void fileActionRequested(const QString& actionKey);
     void audioActionRequested(const QString& actionKey);
+    void editActionRequested(const QString& actionKey);
 
 private:
     struct LaneMeterState
@@ -150,6 +169,7 @@ private:
     int m_insertionMarkerMs = 0;
     bool m_insertionFollowsPlayback = false;
     bool m_playbackActive = false;
+    bool m_canPasteClip = false;
     QHash<QString, LaneMeterState> m_laneMeterStates;
     int m_laneMeterToken = 0;
     int m_meterResetToken = 0;

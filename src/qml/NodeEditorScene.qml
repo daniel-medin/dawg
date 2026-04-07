@@ -19,6 +19,14 @@ Rectangle {
     property real timelineZoom: 1.0
     property real timelineStartRatio: 0.0
     property var clipVerticalZooms: ({})
+    property bool clipDragGhostVisible: false
+    property real clipDragGhostX: 0.0
+    property real clipDragGhostY: 0.0
+    property real clipDragGhostWidth: 1.0
+    property real clipDragGhostHeight: 1.0
+    property real clipDragGhostVerticalZoom: 1.0
+    property string clipDragGhostTitle: ""
+    property var clipDragGhostWaveformState: null
 
     readonly property real meterFloorDb: -72.0
     readonly property real meterZeroNormalized: 2.0 / 3.0
@@ -30,6 +38,7 @@ Rectangle {
     readonly property real timelineMaxZoom: 64.0
     readonly property real timelineVisibleRatio: 1.0 / Math.max(timelineMinZoom, timelineZoom)
     readonly property real clipEdgeHandleWidth: 7.0
+    readonly property int laneHeight: 72
 
     function timelineContentWidth(viewportWidth) {
         return Math.max(1, viewportWidth)
@@ -88,6 +97,45 @@ Rectangle {
         if (localX >= clipWidth - edgeWidth)
             return 1
         return 0
+    }
+
+    function laneIdForRootY(rootY, fallbackLaneId) {
+        var index = laneIndexForRootY(rootY)
+        var tracks = nodeEditorController.nodeTracks || []
+        if (index >= 0 && index < tracks.length && tracks[index].laneId !== undefined)
+            return tracks[index].laneId
+        return fallbackLaneId
+    }
+
+    function laneIndexForRootY(rootY) {
+        if (!lanesColumn)
+            return -1
+
+        var local = root.mapToItem(lanesColumn, 0, rootY)
+        var tracks = nodeEditorController.nodeTracks || []
+        var laneStep = laneHeight + lanesColumn.spacing
+        var index = Math.floor(local.y / Math.max(1, laneStep))
+        return index >= 0 && index < tracks.length ? index : -1
+    }
+
+    function laneTopForIndex(index) {
+        return index * (laneHeight + lanesColumn.spacing)
+    }
+
+    function hideClipDragGhost() {
+        clipDragGhostVisible = false
+        clipDragGhostWaveformState = null
+    }
+
+    function showClipDragGhost(x, y, width, height, title, waveformState, verticalZoom) {
+        clipDragGhostX = x
+        clipDragGhostY = y
+        clipDragGhostWidth = Math.max(1, width)
+        clipDragGhostHeight = Math.max(1, height)
+        clipDragGhostTitle = title || ""
+        clipDragGhostWaveformState = waveformState
+        clipDragGhostVerticalZoom = verticalZoom
+        clipDragGhostVisible = true
     }
 
     function clipZoomKey(laneId, clipId) {
@@ -243,6 +291,8 @@ Rectangle {
 
         if (menuKind === "file") {
             mainWindowBridge.requestNodeEditorFileAction(actionKey)
+        } else if (menuKind === "edit") {
+            mainWindowBridge.requestNodeEditorEditAction(actionKey)
         } else if (menuKind === "audio" || menuKind === "track") {
             mainWindowBridge.requestNodeEditorAudioAction(actionKey)
         }
@@ -260,6 +310,11 @@ Rectangle {
             return nodeEditorController.canSaveNodeAs
         case "export":
             return nodeEditorController.canExportNode
+        case "copyClip":
+        case "cutClip":
+            return nodeEditorController.selectedClipId !== ""
+        case "pasteClip":
+            return nodeEditorController.canPasteClip
         case "createTrack":
         case "newLane":
             return nodeEditorController.hasSelection
@@ -324,6 +379,35 @@ Rectangle {
                         color: fileMenuButton.down
                             ? theme.pressedFill
                             : (fileMenuButton.hovered ? theme.hoverFill : "transparent")
+                    }
+                }
+
+                ToolButton {
+                    id: editMenuButton
+                    text: "Edit"
+                    hoverEnabled: true
+
+                    onClicked: {
+                        root.openMenu("edit", [
+                            { key: "copyClip", text: "Copy Clip    Ctrl+C" },
+                            { key: "cutClip", text: "Cut Clip    Ctrl+X" },
+                            { key: "pasteClip", text: "Paste Clip    Ctrl+V" }
+                        ], editMenuButton)
+                    }
+
+                    contentItem: Label {
+                        text: editMenuButton.text
+                        color: theme.titleText
+                        font.pixelSize: 13
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    background: Rectangle {
+                        radius: 6
+                        color: editMenuButton.down
+                            ? theme.pressedFill
+                            : (editMenuButton.hovered ? theme.hoverFill : "transparent")
                     }
                 }
 
@@ -499,7 +583,7 @@ Rectangle {
                                         id: laneDelegate
                                         required property var modelData
                                         width: parent.width
-                                        height: 72
+                                        height: root.laneHeight
                                         color: modelData.primary ? "#17202a" : "#121922"
 
                                         Row {
@@ -809,6 +893,7 @@ Rectangle {
                                                         readonly property real visualBaseX: Math.round(root.timelineXForRatio(visualStartRatio, laneTimeline.width))
                                                         readonly property real maxOffsetRatio: Math.max(0.0, 1.0 - clipWidthRatio)
                                                         property bool dragPreviewActive: false
+                                                        property bool copyDragPreviewActive: false
                                                         property bool clipDragMoved: false
                                                         property bool ignoreNextClick: false
                                                         property bool trimPreviewActive: false
@@ -819,8 +904,9 @@ Rectangle {
                                                         property real dragX: baseX
                                                         property real dragStartClipX: 0
                                                         property real dragStartPointerX: 0
+                                                        property real dragStartRootY: 0
                                                         z: 10
-                                                        x: dragPreviewActive ? dragX : visualBaseX
+                                                        x: dragPreviewActive && !copyDragPreviewActive ? dragX : visualBaseX
                                                         y: 0
                                                         width: Math.max(
                                                             root.clipEdgeHandleWidth * 2,
@@ -900,9 +986,11 @@ Rectangle {
                                                                     laneDelegate.modelData.laneId,
                                                                     clipDelegate.modelData.clipId)
                                                                 clipDelegate.trimDragMode = root.clipTrimEdgeAt(mouse.x, width)
+                                                                root.hideClipDragGhost()
                                                                 clipDelegate.trimPreviewStartRatio = clipDelegate.clipStartRatio
                                                                 clipDelegate.trimPreviewEndRatio = clipDelegate.clipEndRatio
                                                                 clipDelegate.dragStartPointerX = pointer.x
+                                                                clipDelegate.dragStartRootY = mapToItem(root, mouse.x, mouse.y).y
                                                                 clipDelegate.dragStartClipX = clipDelegate.x
                                                                 clipDelegate.dragX = clipDelegate.x
                                                                 clipDelegate.clipDragMoved = false
@@ -938,17 +1026,35 @@ Rectangle {
                                                                 }
 
                                                                 var dragDelta = pointer.x - clipDelegate.dragStartPointerX
-                                                                if (!clipDelegate.clipDragMoved && Math.abs(dragDelta) < 3)
+                                                                var rootPointer = mapToItem(root, mouse.x, mouse.y)
+                                                                var laneDragDelta = rootPointer.y - clipDelegate.dragStartRootY
+                                                                if (!clipDelegate.clipDragMoved
+                                                                    && Math.abs(dragDelta) < 3
+                                                                    && Math.abs(laneDragDelta) < 3)
                                                                     return
 
                                                                 clipDelegate.clipDragMoved = true
                                                                 clipDelegate.dragPreviewActive = true
+                                                                clipDelegate.copyDragPreviewActive = (mouse.modifiers & Qt.ControlModifier) !== 0
                                                                 var minDragX = root.timelineXForRatio(0.0, laneTimeline.width)
                                                                 var maxDragX = root.timelineXForRatio(clipDelegate.maxOffsetRatio, laneTimeline.width)
                                                                 clipDelegate.dragX = root.clamp(
                                                                     clipDelegate.dragStartClipX + dragDelta,
                                                                     Math.min(minDragX, maxDragX),
                                                                     Math.max(minDragX, maxDragX))
+                                                                if (clipDelegate.copyDragPreviewActive) {
+                                                                    var targetLaneIndex = root.laneIndexForRootY(rootPointer.y)
+                                                                    root.showClipDragGhost(
+                                                                        root.laneHeaderWidth + clipDelegate.dragX,
+                                                                        targetLaneIndex >= 0 ? root.laneTopForIndex(targetLaneIndex) : laneDelegate.y,
+                                                                        clipDelegate.width,
+                                                                        laneTimeline.height,
+                                                                        clipDelegate.modelData.title,
+                                                                        clipDelegate.modelData.waveformState,
+                                                                        clipDelegate.verticalZoom)
+                                                                } else {
+                                                                    root.hideClipDragGhost()
+                                                                }
                                                                 mouse.accepted = true
                                                             }
                                                             onReleased: function(mouse) {
@@ -962,26 +1068,37 @@ Rectangle {
                                                                     clipDelegate.ignoreNextClick = true
                                                                     clearClipClickGuardTimer.restart()
                                                                 } else if (clipDelegate.clipDragMoved) {
-                                                                    nodeEditorController.moveClipToRatio(
+                                                                    var nextRatio = root.timelineRatioForX(clipDelegate.dragX, laneTimeline.width)
+                                                                    var releasePoint = mapToItem(root, mouse.x, mouse.y)
+                                                                    var targetLaneId = root.laneIdForRootY(
+                                                                        releasePoint.y,
+                                                                        laneDelegate.modelData.laneId)
+                                                                    nodeEditorController.dropClipToRatio(
                                                                         laneDelegate.modelData.laneId,
                                                                         clipDelegate.modelData.clipId,
-                                                                        root.timelineRatioForX(clipDelegate.dragX, laneTimeline.width))
+                                                                        targetLaneId,
+                                                                        nextRatio,
+                                                                        (mouse.modifiers & Qt.ControlModifier) !== 0)
                                                                     clipDelegate.ignoreNextClick = true
                                                                     clearClipClickGuardTimer.restart()
                                                                 } else {
                                                                     clipDelegate.clipDragMoved = false
                                                                 }
                                                                 clipDelegate.dragPreviewActive = false
+                                                                clipDelegate.copyDragPreviewActive = false
                                                                 clipDelegate.trimPreviewActive = false
                                                                 clipDelegate.trimDragMode = 0
+                                                                root.hideClipDragGhost()
                                                                 mouse.accepted = true
                                                             }
                                                             onCanceled: {
                                                                 clipDelegate.dragPreviewActive = false
+                                                                clipDelegate.copyDragPreviewActive = false
                                                                 clipDelegate.clipDragMoved = false
                                                                 clipDelegate.trimPreviewActive = false
                                                                 clipDelegate.clipTrimMoved = false
                                                                 clipDelegate.trimDragMode = 0
+                                                                root.hideClipDragGhost()
                                                             }
                                                             onClicked: function(mouse) {
                                                                 if (clipDelegate.ignoreNextClick) {
@@ -1041,6 +1158,62 @@ Rectangle {
                                     text: "No lanes yet."
                                     color: "#94a3b3"
                                     font.pixelSize: 12
+                                }
+                            }
+
+                            ClipWaveformQuickItem {
+                                id: clipDragGhost
+
+                                x: root.clipDragGhostX
+                                y: root.clipDragGhostY
+                                width: root.clipDragGhostWidth
+                                height: root.clipDragGhostHeight
+                                z: 19
+                                opacity: 0.62
+                                visible: root.clipDragGhostVisible
+                                    && root.clipDragGhostWaveformState !== null
+                                    && width > 1
+                                    && height > 1
+                                clip: true
+                                enabled: false
+                                clipRangeOnly: true
+                                clipRangeHandlesVisible: false
+                                playheadVisible: false
+                                contentMargin: 0
+                                textureSize: Qt.size(Math.max(1, width), Math.max(1, height))
+                                waveformState: root.clipDragGhostWaveformState
+                                previewWaveformState: ({ "active": false })
+                                verticalZoom: root.clipDragGhostVerticalZoom
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "#9ec7f0"
+                                    opacity: 0.10
+                                    z: 2
+                                }
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "transparent"
+                                    border.width: 1
+                                    border.color: "#d1e7ff"
+                                    opacity: 0.95
+                                    z: 3
+                                }
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    anchors.topMargin: 4
+                                    text: root.clipDragGhostTitle
+                                    color: "#f5f9ff"
+                                    font.pixelSize: 11
+                                    font.weight: Font.Medium
+                                    elide: Text.ElideRight
+                                    z: 4
                                 }
                             }
 

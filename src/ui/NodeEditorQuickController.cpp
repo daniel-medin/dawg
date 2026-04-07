@@ -255,6 +255,11 @@ QString NodeEditorQuickController::selectedClipId() const
     return m_selectedClipId;
 }
 
+bool NodeEditorQuickController::canPasteClip() const
+{
+    return m_canPasteClip && hasSelection();
+}
+
 QString NodeEditorQuickController::audioSummaryText() const
 {
     if (!hasSelection())
@@ -434,6 +439,14 @@ void NodeEditorQuickController::triggerAudioAction(const QString& actionKey)
     });
 }
 
+void NodeEditorQuickController::triggerEditAction(const QString& actionKey)
+{
+    QTimer::singleShot(0, this, [this, actionKey]()
+    {
+        emit editActionRequested(actionKey);
+    });
+}
+
 void NodeEditorQuickController::selectLane(const QString& laneId)
 {
     if (m_selectedLaneId == laneId && m_selectedClipId.isEmpty() && m_selectedLaneHeaderId.isEmpty())
@@ -505,6 +518,56 @@ void NodeEditorQuickController::moveClipToRatio(
         0,
         durationMs);
     emit clipMoveRequested(laneId, clipId, laneOffsetMs);
+}
+
+void NodeEditorQuickController::copyClipToRatio(
+    const QString& laneId,
+    const QString& clipId,
+    const qreal offsetRatio)
+{
+    if (laneId.isEmpty() || clipId.isEmpty())
+    {
+        return;
+    }
+
+    selectClip(laneId, clipId);
+    const auto durationMs = nodeDurationMs();
+    if (durationMs <= 0)
+    {
+        return;
+    }
+
+    const auto laneOffsetMs = std::clamp(
+        static_cast<int>(std::lround(std::clamp(offsetRatio, 0.0, 1.0) * static_cast<qreal>(durationMs))),
+        0,
+        durationMs);
+    emit clipCopyRequested(laneId, clipId, laneOffsetMs);
+}
+
+void NodeEditorQuickController::dropClipToRatio(
+    const QString& sourceLaneId,
+    const QString& clipId,
+    const QString& targetLaneId,
+    const qreal offsetRatio,
+    const bool copyClip)
+{
+    if (sourceLaneId.isEmpty() || clipId.isEmpty() || targetLaneId.isEmpty())
+    {
+        return;
+    }
+
+    selectClip(sourceLaneId, clipId);
+    const auto durationMs = nodeDurationMs();
+    if (durationMs <= 0)
+    {
+        return;
+    }
+
+    const auto laneOffsetMs = std::clamp(
+        static_cast<int>(std::lround(std::clamp(offsetRatio, 0.0, 1.0) * static_cast<qreal>(durationMs))),
+        0,
+        durationMs);
+    emit clipDropRequested(sourceLaneId, clipId, targetLaneId, laneOffsetMs, copyClip);
 }
 
 void NodeEditorQuickController::trimClipToRatio(
@@ -661,6 +724,17 @@ void NodeEditorQuickController::setPlaybackActive(const bool active)
         emit meterResetTokenChanged();
     }
     emit playbackStateChanged();
+}
+
+void NodeEditorQuickController::setCanPasteClip(const bool canPasteClip)
+{
+    if (m_canPasteClip == canPasteClip)
+    {
+        return;
+    }
+
+    m_canPasteClip = canPasteClip;
+    emit stateChanged();
 }
 
 void NodeEditorQuickController::setLaneMeterStates(const QVariantList& meterStates)

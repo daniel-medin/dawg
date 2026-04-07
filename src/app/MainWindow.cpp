@@ -1048,6 +1048,36 @@ std::vector<AudioPlaybackCoordinator::NodePreviewClip> nodePreviewClipsFromDocum
     return clips;
 }
 
+int nodeAudioClipDurationMs(const dawg::node::AudioClipData& clip)
+{
+    if (!clip.attachedAudio.has_value())
+    {
+        return 1;
+    }
+
+    const auto sourceDurationMs = !clip.attachedAudio->assetPath.isEmpty()
+        ? dawg::audio::probeAudioDurationMs(clip.attachedAudio->assetPath)
+        : std::optional<int>{};
+    const auto clipStartMs = std::clamp(
+        clip.attachedAudio->clipStartMs,
+        0,
+        std::max(0, sourceDurationMs.value_or(clip.attachedAudio->clipEndMs.value_or(clip.attachedAudio->clipStartMs + 1)) - 1));
+    const auto clipEndMs = std::clamp(
+        clip.attachedAudio->clipEndMs.value_or(sourceDurationMs.value_or(clipStartMs + 1)),
+        clipStartMs + 1,
+        std::max(clipStartMs + 1, sourceDurationMs.value_or(clipStartMs + 1)));
+    return std::max(1, clipEndMs - clipStartMs);
+}
+
+int clampedNodeAudioClipOffsetMs(
+    const dawg::node::AudioClipData& clip,
+    const int desiredOffsetMs,
+    const int nodeDurationMs)
+{
+    const auto maxOffsetMs = std::max(0, nodeDurationMs - nodeAudioClipDurationMs(clip));
+    return std::clamp(desiredOffsetMs, 0, maxOffsetMs);
+}
+
 bool materializeNodeClipAudio(
     dawg::node::AudioClipData& clip,
     const QString& audioDirectoryPath,
@@ -1406,9 +1436,33 @@ MainWindow::MainWindow(QWindow* parent)
     connect(m_stepBackAction, &QAction::triggered, m_controller, &PlayerController::stepBackward);
     connect(m_stepFastForwardAction, &QAction::triggered, m_controller, &PlayerController::stepFastForward);
     connect(m_stepFastBackAction, &QAction::triggered, m_controller, &PlayerController::stepFastBackward);
-    connect(m_copyAction, &QAction::triggered, this, &MainWindow::copySelectedNode);
-    connect(m_pasteAction, &QAction::triggered, this, &MainWindow::pasteNode);
-    connect(m_cutAction, &QAction::triggered, this, &MainWindow::cutSelectedNode);
+    connect(m_copyAction, &QAction::triggered, this, [this]()
+    {
+        if (nodeEditorHasFocus())
+        {
+            static_cast<void>(copySelectedNodeEditorClip());
+            return;
+        }
+        copySelectedNode();
+    });
+    connect(m_pasteAction, &QAction::triggered, this, [this]()
+    {
+        if (nodeEditorHasFocus())
+        {
+            static_cast<void>(pasteNodeEditorClip());
+            return;
+        }
+        pasteNode();
+    });
+    connect(m_cutAction, &QAction::triggered, this, [this]()
+    {
+        if (nodeEditorHasFocus())
+        {
+            static_cast<void>(cutSelectedNodeEditorClip());
+            return;
+        }
+        cutSelectedNode();
+    });
     connect(m_undoAction, &QAction::triggered, this, &MainWindow::undoNodeEdit);
     connect(m_redoAction, &QAction::triggered, this, &MainWindow::redoNodeEdit);
     connect(m_selectNextNodeAction, &QAction::triggered, this, &MainWindow::selectNextVisibleNode);
@@ -1585,9 +1639,33 @@ MainWindow::MainWindow(QWindow* parent)
     connect(m_stepForwardShortcut, &QShortcut::activated, m_controller, &PlayerController::stepForward);
     connect(m_stepFastForwardShortcut, &QShortcut::activated, m_controller, &PlayerController::stepFastForward);
     connect(m_stepFastBackShortcut, &QShortcut::activated, m_controller, &PlayerController::stepFastBackward);
-    connect(m_copyShortcut, &QShortcut::activated, this, &MainWindow::copySelectedNode);
-    connect(m_pasteShortcut, &QShortcut::activated, this, &MainWindow::pasteNode);
-    connect(m_cutShortcut, &QShortcut::activated, this, &MainWindow::cutSelectedNode);
+    connect(m_copyShortcut, &QShortcut::activated, this, [this]()
+    {
+        if (nodeEditorHasFocus())
+        {
+            static_cast<void>(copySelectedNodeEditorClip());
+            return;
+        }
+        copySelectedNode();
+    });
+    connect(m_pasteShortcut, &QShortcut::activated, this, [this]()
+    {
+        if (nodeEditorHasFocus())
+        {
+            static_cast<void>(pasteNodeEditorClip());
+            return;
+        }
+        pasteNode();
+    });
+    connect(m_cutShortcut, &QShortcut::activated, this, [this]()
+    {
+        if (nodeEditorHasFocus())
+        {
+            static_cast<void>(cutSelectedNodeEditorClip());
+            return;
+        }
+        cutSelectedNode();
+    });
     connect(m_undoShortcut, &QShortcut::activated, this, &MainWindow::undoNodeEdit);
     connect(m_redoShortcut, &QShortcut::activated, this, &MainWindow::redoNodeEdit);
     connect(m_selectNextNodeShortcut, &QShortcut::activated, this, &MainWindow::selectNextVisibleNode);
@@ -1903,6 +1981,14 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             return true;
         }
         if (!keyEvent->isAutoRepeat()
+            && (keyEvent->key() == Qt::Key_C || keyEvent->key() == Qt::Key_X || keyEvent->key() == Qt::Key_V)
+            && keyEvent->modifiers() == Qt::ControlModifier
+            && nodeEditorFocused())
+        {
+            event->accept();
+            return true;
+        }
+        if (!keyEvent->isAutoRepeat()
             && keyEvent->key() == Qt::Key_Tab
             && keyEvent->modifiers() == Qt::NoModifier
             && timelineHasFocus())
@@ -1965,6 +2051,25 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             && nodeEditorFocused())
         {
             static_cast<void>(trimSelectedNodeEditorClipToPlayhead(keyEvent->key() == Qt::Key_A));
+            return true;
+        }
+        if (!keyEvent->isAutoRepeat()
+            && (keyEvent->key() == Qt::Key_C || keyEvent->key() == Qt::Key_X || keyEvent->key() == Qt::Key_V)
+            && keyEvent->modifiers() == Qt::ControlModifier
+            && nodeEditorFocused())
+        {
+            if (keyEvent->key() == Qt::Key_C)
+            {
+                static_cast<void>(copySelectedNodeEditorClip());
+            }
+            else if (keyEvent->key() == Qt::Key_X)
+            {
+                static_cast<void>(cutSelectedNodeEditorClip());
+            }
+            else
+            {
+                static_cast<void>(pasteNodeEditorClip());
+            }
             return true;
         }
     }
@@ -2449,6 +2554,11 @@ void MainWindow::requestNodeEditorAudioAction(const QString& actionKey)
     handleNodeEditorAudioAction(actionKey);
 }
 
+void MainWindow::requestNodeEditorEditAction(const QString& actionKey)
+{
+    handleNodeEditorEditAction(actionKey);
+}
+
 void MainWindow::requestTrackGainPopup(const QString& trackId, const double localX, const double localY)
 {
     const QUuid uuid(trackId);
@@ -2816,6 +2926,24 @@ void MainWindow::handleNodeEditorAudioAction(const QString& actionKey)
     else
     {
         showStatus(QStringLiteral("Created %1.").arg(laneIt->label));
+    }
+}
+
+void MainWindow::handleNodeEditorEditAction(const QString& actionKey)
+{
+    if (actionKey == QStringLiteral("copyClip"))
+    {
+        static_cast<void>(copySelectedNodeEditorClip());
+        return;
+    }
+    if (actionKey == QStringLiteral("cutClip"))
+    {
+        static_cast<void>(cutSelectedNodeEditorClip());
+        return;
+    }
+    if (actionKey == QStringLiteral("pasteClip"))
+    {
+        static_cast<void>(pasteNodeEditorClip());
     }
 }
 
@@ -3923,6 +4051,7 @@ void MainWindow::refreshNodeEditor()
         m_controller ? m_controller->fps() : 0.0,
         m_nodeEditorState,
         nodeTrackItems);
+    m_nodeEditorQuickController->setCanPasteClip(m_nodeEditorClipClipboard.has_value());
     syncNodeWaveformItem();
     syncNodeEditorActionAvailability();
 }
@@ -3953,6 +4082,10 @@ void MainWindow::syncNodeEditorActionAvailability()
     if (previousEnabled != enabled && m_actionRegistry)
     {
         m_actionRegistry->rebuild();
+    }
+    if (m_nodeEditorQuickController)
+    {
+        m_nodeEditorQuickController->setCanPasteClip(m_nodeEditorClipClipboard.has_value());
     }
 }
 
@@ -4651,6 +4784,412 @@ void MainWindow::resetNodeEditorPlayheadToStart()
             m_transportUiSyncController->syncProjectPlayheadToNodeEditor(0);
         }
     }
+    if (m_nodeEditorQuickController)
+    {
+        m_nodeEditorQuickController->setCanPasteClip(m_nodeEditorClipClipboard.has_value());
+    }
+}
+
+bool MainWindow::writeSelectedNodeEditorDocument(
+    const QUuid& selectedTrackId,
+    const QString& nodeDocumentPath,
+    const dawg::node::Document& nodeDocument,
+    const QString& failureStatus,
+    const bool forcePreviewSync)
+{
+    if (!m_controller || selectedTrackId.isNull() || nodeDocumentPath.isEmpty())
+    {
+        return false;
+    }
+
+    QString errorMessage;
+    if (!dawg::node::saveDocument(nodeDocumentPath, nodeDocument, &errorMessage))
+    {
+        showStatus(errorMessage.isEmpty() ? failureStatus : errorMessage);
+        return false;
+    }
+
+    static_cast<void>(m_controller->setTrackNodeDocument(
+        selectedTrackId,
+        QDir::cleanPath(nodeDocumentPath),
+        nodeDocument.node.timelineFrameCount,
+        nodeDocument.node.timelineFps));
+    if (!m_projectStateChangeInProgress && hasOpenProject())
+    {
+        setProjectDirty(true);
+    }
+
+    if (m_nodeEditorPreviewActive)
+    {
+        const auto playheadMs = m_nodeEditorQuickController ? m_nodeEditorQuickController->playheadMs() : 0;
+        m_nodeEditorPreviewClips = nodePreviewClipsFromDocument(
+            nodeDocument,
+            [this](const QString& filePath) -> std::optional<int>
+            {
+                return m_controller ? m_controller->audioFileChannelCount(filePath) : std::nullopt;
+            });
+        m_nodeEditorPreviewActiveAudioSignature.clear();
+        m_lastNodeEditorPreviewAudioSyncMs = -1;
+        static_cast<void>(m_controller->syncNodeEditorPreview(
+            m_nodeEditorPreviewClips,
+            m_nodeEditorPreviewNodeDurationMs,
+            playheadMs,
+            forcePreviewSync));
+    }
+    return true;
+}
+
+bool MainWindow::copySelectedNodeEditorClip()
+{
+    if (!m_controller || !m_nodeEditorQuickController || !m_controller->hasSelection())
+    {
+        return false;
+    }
+
+    const auto selectedLaneId = m_nodeEditorQuickController->selectedLaneId();
+    const auto selectedClipId = m_nodeEditorQuickController->selectedClipId();
+    if (selectedLaneId.isEmpty() || selectedClipId.isEmpty())
+    {
+        showStatus(QStringLiteral("Select an audio clip before copying."));
+        return false;
+    }
+
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    const auto nodeDocumentPath = selectedTrackId.isNull()
+        ? QString{}
+        : m_controller->trackNodeDocumentPath(selectedTrackId).trimmed();
+    if (nodeDocumentPath.isEmpty() || !QFileInfo::exists(nodeDocumentPath))
+    {
+        showStatus(QStringLiteral("Save or import audio into this node before copying clips."));
+        return false;
+    }
+
+    QString errorMessage;
+    const auto nodeDocument = dawg::node::loadDocument(nodeDocumentPath, &errorMessage);
+    if (!nodeDocument.has_value())
+    {
+        showStatus(errorMessage.isEmpty() ? QStringLiteral("Failed to load node clip.") : errorMessage);
+        return false;
+    }
+
+    const auto laneIt = std::find_if(
+        nodeDocument->node.lanes.cbegin(),
+        nodeDocument->node.lanes.cend(),
+        [&selectedLaneId](const dawg::node::LaneData& lane)
+        {
+            return lane.id == selectedLaneId;
+        });
+    if (laneIt == nodeDocument->node.lanes.cend())
+    {
+        showStatus(QStringLiteral("Selected node lane no longer exists."));
+        return false;
+    }
+
+    const auto clipIt = std::find_if(
+        laneIt->audioClips.cbegin(),
+        laneIt->audioClips.cend(),
+        [&selectedClipId](const dawg::node::AudioClipData& clip)
+        {
+            return clip.id == selectedClipId;
+        });
+    if (clipIt == laneIt->audioClips.cend())
+    {
+        showStatus(QStringLiteral("Selected audio clip no longer exists."));
+        return false;
+    }
+
+    m_nodeEditorClipClipboard = *clipIt;
+    if (m_nodeEditorQuickController)
+    {
+        m_nodeEditorQuickController->setCanPasteClip(true);
+    }
+    showStatus(QStringLiteral("Copied audio clip."));
+    return true;
+}
+
+bool MainWindow::cutSelectedNodeEditorClip()
+{
+    if (!m_controller || !m_nodeEditorQuickController || !m_controller->hasSelection())
+    {
+        return false;
+    }
+
+    const auto selectedLaneId = m_nodeEditorQuickController->selectedLaneId();
+    const auto selectedClipId = m_nodeEditorQuickController->selectedClipId();
+    if (selectedLaneId.isEmpty() || selectedClipId.isEmpty())
+    {
+        showStatus(QStringLiteral("Select an audio clip before cutting."));
+        return false;
+    }
+
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    const auto nodeDocumentPath = selectedTrackId.isNull()
+        ? QString{}
+        : m_controller->trackNodeDocumentPath(selectedTrackId).trimmed();
+    if (nodeDocumentPath.isEmpty() || !QFileInfo::exists(nodeDocumentPath))
+    {
+        showStatus(QStringLiteral("Save or import audio into this node before cutting clips."));
+        return false;
+    }
+
+    QString errorMessage;
+    auto nodeDocument = dawg::node::loadDocument(nodeDocumentPath, &errorMessage);
+    if (!nodeDocument.has_value())
+    {
+        showStatus(errorMessage.isEmpty() ? QStringLiteral("Failed to load node clip.") : errorMessage);
+        return false;
+    }
+
+    auto laneIt = std::find_if(
+        nodeDocument->node.lanes.begin(),
+        nodeDocument->node.lanes.end(),
+        [&selectedLaneId](const dawg::node::LaneData& lane)
+        {
+            return lane.id == selectedLaneId;
+        });
+    if (laneIt == nodeDocument->node.lanes.end())
+    {
+        showStatus(QStringLiteral("Selected node lane no longer exists."));
+        return false;
+    }
+
+    const auto clipIt = std::find_if(
+        laneIt->audioClips.begin(),
+        laneIt->audioClips.end(),
+        [&selectedClipId](const dawg::node::AudioClipData& clip)
+        {
+            return clip.id == selectedClipId;
+        });
+    if (clipIt == laneIt->audioClips.end())
+    {
+        showStatus(QStringLiteral("Selected audio clip no longer exists."));
+        return false;
+    }
+
+    m_nodeEditorClipClipboard = *clipIt;
+    laneIt->audioClips.erase(clipIt);
+    if (!writeSelectedNodeEditorDocument(
+            selectedTrackId,
+            nodeDocumentPath,
+            *nodeDocument,
+            QStringLiteral("Failed to cut node audio clip."),
+            true))
+    {
+        return false;
+    }
+
+    m_nodeEditorQuickController->setCanPasteClip(true);
+    m_nodeEditorQuickController->selectLane(selectedLaneId);
+    refreshNodeEditor();
+    showStatus(QStringLiteral("Cut audio clip."));
+    return true;
+}
+
+bool MainWindow::pasteNodeEditorClip()
+{
+    if (!m_controller || !m_nodeEditorQuickController || !m_controller->hasSelection())
+    {
+        return false;
+    }
+    if (!m_nodeEditorClipClipboard.has_value())
+    {
+        showStatus(QStringLiteral("Copy or cut an audio clip before pasting."));
+        return false;
+    }
+
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    const auto nodeDocumentPath = selectedTrackId.isNull()
+        ? QString{}
+        : m_controller->trackNodeDocumentPath(selectedTrackId).trimmed();
+    if (nodeDocumentPath.isEmpty() || !QFileInfo::exists(nodeDocumentPath))
+    {
+        showStatus(QStringLiteral("Save or import audio into this node before pasting clips."));
+        return false;
+    }
+
+    QString errorMessage;
+    auto nodeDocument = dawg::node::loadDocument(nodeDocumentPath, &errorMessage);
+    if (!nodeDocument.has_value())
+    {
+        showStatus(errorMessage.isEmpty() ? QStringLiteral("Failed to load node clip.") : errorMessage);
+        return false;
+    }
+
+    if (nodeDocument->node.lanes.empty())
+    {
+        nodeDocument->node.lanes.push_back(dawg::node::LaneData{.label = QStringLiteral("Track 1")});
+    }
+
+    auto targetLaneId = m_nodeEditorQuickController->selectedLaneId();
+    auto laneIt = targetLaneId.isEmpty()
+        ? nodeDocument->node.lanes.end()
+        : std::find_if(
+            nodeDocument->node.lanes.begin(),
+            nodeDocument->node.lanes.end(),
+            [&targetLaneId](const dawg::node::LaneData& lane)
+            {
+                return lane.id == targetLaneId;
+            });
+    if (laneIt == nodeDocument->node.lanes.end())
+    {
+        laneIt = nodeDocument->node.lanes.begin();
+        targetLaneId = laneIt->id;
+    }
+
+    auto pastedClip = *m_nodeEditorClipClipboard;
+    pastedClip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    pastedClip.laneOffsetMs = clampedNodeAudioClipOffsetMs(
+        pastedClip,
+        m_nodeEditorQuickController->playheadMs(),
+        std::max(1, m_nodeEditorQuickController->nodeDurationMs()));
+    if (pastedClip.attachedAudio.has_value())
+    {
+        pastedClip.attachedAudio->loopEnabled = false;
+    }
+
+    const auto pastedClipId = pastedClip.id;
+    laneIt->audioClips.push_back(std::move(pastedClip));
+    if (!writeSelectedNodeEditorDocument(
+            selectedTrackId,
+            nodeDocumentPath,
+            *nodeDocument,
+            QStringLiteral("Failed to paste node audio clip."),
+            true))
+    {
+        return false;
+    }
+
+    m_nodeEditorQuickController->selectClip(targetLaneId, pastedClipId);
+    refreshNodeEditor();
+    showStatus(QStringLiteral("Pasted audio clip."));
+    return true;
+}
+
+void MainWindow::copyNodeEditorClip(
+    const QString& laneId,
+    const QString& clipId,
+    const int laneOffsetMs)
+{
+    dropNodeEditorClip(laneId, clipId, laneId, laneOffsetMs, true);
+}
+
+void MainWindow::dropNodeEditorClip(
+    const QString& sourceLaneId,
+    const QString& clipId,
+    const QString& targetLaneId,
+    const int laneOffsetMs,
+    const bool copyClip)
+{
+    if (!m_controller
+        || !m_nodeEditorQuickController
+        || sourceLaneId.isEmpty()
+        || targetLaneId.isEmpty()
+        || clipId.isEmpty())
+    {
+        return;
+    }
+
+    const auto selectedTrackId = m_controller->selectedTrackId();
+    const auto nodeDocumentPath = selectedTrackId.isNull()
+        ? QString{}
+        : m_controller->trackNodeDocumentPath(selectedTrackId).trimmed();
+    if (nodeDocumentPath.isEmpty() || !QFileInfo::exists(nodeDocumentPath))
+    {
+        showStatus(QStringLiteral("Save or import audio into this node before editing clips."));
+        return;
+    }
+
+    QString errorMessage;
+    auto nodeDocument = dawg::node::loadDocument(nodeDocumentPath, &errorMessage);
+    if (!nodeDocument.has_value())
+    {
+        showStatus(errorMessage.isEmpty() ? QStringLiteral("Failed to load node clip.") : errorMessage);
+        return;
+    }
+
+    auto laneIt = std::find_if(
+        nodeDocument->node.lanes.begin(),
+        nodeDocument->node.lanes.end(),
+        [&sourceLaneId](const dawg::node::LaneData& lane)
+        {
+            return lane.id == sourceLaneId;
+        });
+    if (laneIt == nodeDocument->node.lanes.end())
+    {
+        showStatus(QStringLiteral("Selected node lane no longer exists."));
+        return;
+    }
+
+    auto targetLaneIt = std::find_if(
+        nodeDocument->node.lanes.begin(),
+        nodeDocument->node.lanes.end(),
+        [&targetLaneId](const dawg::node::LaneData& lane)
+        {
+            return lane.id == targetLaneId;
+        });
+    if (targetLaneIt == nodeDocument->node.lanes.end())
+    {
+        showStatus(QStringLiteral("Target node lane no longer exists."));
+        return;
+    }
+
+    auto clipIt = std::find_if(
+        laneIt->audioClips.begin(),
+        laneIt->audioClips.end(),
+        [&clipId](const dawg::node::AudioClipData& clip)
+        {
+            return clip.id == clipId;
+        });
+    if (clipIt == laneIt->audioClips.end())
+    {
+        showStatus(QStringLiteral("Selected audio clip no longer exists."));
+        return;
+    }
+
+    auto droppedClip = *clipIt;
+    if (copyClip)
+    {
+        droppedClip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
+    droppedClip.laneOffsetMs = clampedNodeAudioClipOffsetMs(
+        droppedClip,
+        laneOffsetMs,
+        std::max(1, m_nodeEditorQuickController->nodeDurationMs()));
+    if (droppedClip.attachedAudio.has_value())
+    {
+        droppedClip.attachedAudio->loopEnabled = false;
+    }
+
+    const auto droppedClipId = droppedClip.id;
+    if (copyClip)
+    {
+        targetLaneIt->audioClips.push_back(std::move(droppedClip));
+    }
+    else if (sourceLaneId == targetLaneId)
+    {
+        *clipIt = std::move(droppedClip);
+    }
+    else
+    {
+        laneIt->audioClips.erase(clipIt);
+        targetLaneIt->audioClips.push_back(std::move(droppedClip));
+    }
+
+    if (!writeSelectedNodeEditorDocument(
+            selectedTrackId,
+            nodeDocumentPath,
+            *nodeDocument,
+            copyClip
+                ? QStringLiteral("Failed to copy node audio clip.")
+                : QStringLiteral("Failed to move node audio clip."),
+            true))
+    {
+        return;
+    }
+
+    m_nodeEditorQuickController->selectClip(targetLaneId, droppedClipId);
+    refreshNodeEditor();
+    showStatus(copyClip ? QStringLiteral("Copied audio clip.") : QStringLiteral("Moved audio clip."));
 }
 
 bool MainWindow::deleteSelectedNodeEditorSelection()
@@ -5812,6 +6351,11 @@ void MainWindow::buildUi()
         &MainWindow::handleNodeEditorAudioAction);
     connect(
         m_nodeEditorQuickController,
+        &NodeEditorQuickController::editActionRequested,
+        this,
+        &MainWindow::handleNodeEditorEditAction);
+    connect(
+        m_nodeEditorQuickController,
         &NodeEditorQuickController::laneMuteRequested,
         this,
         &MainWindow::setNodeEditorLaneMuted);
@@ -5825,6 +6369,16 @@ void MainWindow::buildUi()
         &NodeEditorQuickController::clipMoveRequested,
         this,
         &MainWindow::moveNodeEditorClip);
+    connect(
+        m_nodeEditorQuickController,
+        &NodeEditorQuickController::clipCopyRequested,
+        this,
+        &MainWindow::copyNodeEditorClip);
+    connect(
+        m_nodeEditorQuickController,
+        &NodeEditorQuickController::clipDropRequested,
+        this,
+        &MainWindow::dropNodeEditorClip);
     connect(
         m_nodeEditorQuickController,
         &NodeEditorQuickController::clipTrimRequested,

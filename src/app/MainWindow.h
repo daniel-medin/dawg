@@ -18,6 +18,7 @@
 #include <QTimer>
 
 #include "app/AudioPlaybackCoordinator.h"
+#include "app/NodeDocument.h"
 #include "app/ProjectDocument.h"
 #include "ui/AudioClipPreviewTypes.h"
 #include "ui/MixTypes.h"
@@ -82,6 +83,7 @@ public:
     Q_INVOKABLE void requestSelectNextVisibleNode();
     Q_INVOKABLE void requestNodeEditorFileAction(const QString& actionKey);
     Q_INVOKABLE void requestNodeEditorAudioAction(const QString& actionKey);
+    Q_INVOKABLE void requestNodeEditorEditAction(const QString& actionKey);
     [[nodiscard]] QPoint mapQuickLocalToGlobal(double localX, double localY) const;
 
 protected:
@@ -180,6 +182,7 @@ private:
     void refreshNodeEditor();
     void handleNodeEditorFileAction(const QString& actionKey);
     void handleNodeEditorAudioAction(const QString& actionKey);
+    void handleNodeEditorEditAction(const QString& actionKey);
     void refreshMixView();
     void updateEditActionState();
     void updateOverlayPositions();
@@ -256,6 +259,16 @@ private:
     [[nodiscard]] bool videoPanelHasFocus() const;
     void resetNodeEditorPlayheadToStart();
     [[nodiscard]] bool deleteSelectedNodeEditorSelection();
+    [[nodiscard]] bool copySelectedNodeEditorClip();
+    [[nodiscard]] bool cutSelectedNodeEditorClip();
+    [[nodiscard]] bool pasteNodeEditorClip();
+    void copyNodeEditorClip(const QString& laneId, const QString& clipId, int laneOffsetMs);
+    void dropNodeEditorClip(
+        const QString& sourceLaneId,
+        const QString& clipId,
+        const QString& targetLaneId,
+        int laneOffsetMs,
+        bool copyClip);
     void deleteFromFocusedPanel();
     void setNodeEditorLaneMuted(const QString& laneId, bool muted);
     void setNodeEditorLaneSoloed(const QString& laneId, bool soloed);
@@ -280,6 +293,12 @@ private:
         bool bindToSelectedTrack = true,
         const QString& nodeLabelOverride = {});
     [[nodiscard]] bool openNodeFileAsNewNode(const QString& nodeFilePath);
+    [[nodiscard]] bool writeSelectedNodeEditorDocument(
+        const QUuid& selectedTrackId,
+        const QString& nodeDocumentPath,
+        const dawg::node::Document& nodeDocument,
+        const QString& failureStatus,
+        bool forcePreviewSync = false);
 
     PlayerController* m_controller = nullptr;
     std::unique_ptr<MainWindowActions> m_actionsController;
@@ -427,6 +446,7 @@ private:
     QString m_qtQuickLoadText;
     QString m_qtQuickGraphicsApiText;
     std::optional<AudioClipPreviewState> m_nodeEditorState;
+    std::optional<dawg::node::AudioClipData> m_nodeEditorClipClipboard;
     std::optional<int> m_pendingLoopShortcutStartFrame;
     std::optional<int> m_pendingLoopShortcutEndFrame;
     float m_masterMixGainDb = 0.0F;
