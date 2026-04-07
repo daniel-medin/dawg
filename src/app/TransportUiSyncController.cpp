@@ -80,16 +80,21 @@ void TransportUiSyncController::syncProjectPlayheadToNodeEditor(const int playhe
 void TransportUiSyncController::syncProjectMarkersToNodeEditor(const int playheadMs)
 {
     const auto projectFrame = nodeEditorProjectFrameForPlayheadMs(playheadMs);
-    if (!projectFrame.has_value() || *projectFrame == m_lastNodeEditorSyncedProjectFrame)
+    const auto projectFramePosition = nodeEditorProjectFramePositionForPlayheadMs(playheadMs);
+    if (!projectFrame.has_value())
     {
         syncThumbnailStripMarkerToNodeEditor(playheadMs);
         return;
     }
 
-    m_lastNodeEditorSyncedProjectFrame = *projectFrame;
-    if (isTimelineVisible())
+    if (isTimelineVisible() && projectFramePosition.has_value())
     {
-        m_timeline.setCurrentFrame(*projectFrame);
+        m_timeline.setCurrentFramePosition(*projectFramePosition);
+    }
+    if (*projectFrame != m_lastNodeEditorSyncedProjectFrame)
+    {
+        m_lastNodeEditorSyncedProjectFrame = *projectFrame;
+        m_player.refreshOverlaysForFrame(*projectFrame);
     }
     syncThumbnailStripMarkerToNodeEditor(playheadMs);
 }

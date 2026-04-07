@@ -857,7 +857,12 @@ std::optional<AudioClipPreviewState> clipStateFromNodeAudioClip(
     return state;
 }
 
-QVariantList nodeTrackItemsFromDocument(const dawg::node::Document& document, const int nodeDurationMs)
+using AudioChannelCountFn = std::function<std::optional<int>(const QString&)>;
+
+QVariantList nodeTrackItemsFromDocument(
+    const dawg::node::Document& document,
+    const int nodeDurationMs,
+    const AudioChannelCountFn& channelCountForPath)
 {
     QVariantList items;
     const auto safeNodeDurationMs = std::max(1, nodeDurationMs);
@@ -874,6 +879,7 @@ QVariantList nodeTrackItemsFromDocument(const dawg::node::Document& document, co
 
         QVariantList clipItems;
         QVariantMap waveformState;
+        bool laneUsesStereoMeter = false;
         for (int clipIndex = 0; clipIndex < static_cast<int>(lane.audioClips.size()); ++clipIndex)
         {
             const auto& clip = lane.audioClips[static_cast<std::size_t>(clipIndex)];
@@ -882,6 +888,11 @@ QVariantList nodeTrackItemsFromDocument(const dawg::node::Document& document, co
                 continue;
             }
 
+            if (!laneUsesStereoMeter && channelCountForPath)
+            {
+                const auto channelCount = channelCountForPath(clip.attachedAudio->assetPath);
+                laneUsesStereoMeter = channelCount.has_value() && *channelCount > 1;
+            }
             const auto clipTitle = clip.label.trimmed().isEmpty()
                 ? QStringLiteral("Audio Clip %1").arg(clipIndex + 1)
                 : clip.label.trimmed();
@@ -945,6 +956,7 @@ QVariantList nodeTrackItemsFromDocument(const dawg::node::Document& document, co
             {QStringLiteral("primary"), laneIndex == 0},
             {QStringLiteral("muted"), lane.muted},
             {QStringLiteral("soloed"), lane.soloed},
+            {QStringLiteral("useStereoMeter"), laneUsesStereoMeter},
             {QStringLiteral("clipCount"), clipCount},
             {QStringLiteral("clips"), clipItems},
             {QStringLiteral("hasWaveform"), !waveformState.isEmpty()},
@@ -969,7 +981,8 @@ QUuid uuidFromNodeDocumentId(const QString& id)
 }
 
 std::vector<AudioPlaybackCoordinator::NodePreviewClip> nodePreviewClipsFromDocument(
-    const dawg::node::Document& document)
+    const dawg::node::Document& document,
+    const AudioChannelCountFn& channelCountForPath)
 {
     std::vector<AudioPlaybackCoordinator::NodePreviewClip> clips;
     const auto anyLaneSoloed = std::any_of(
@@ -1012,15 +1025,20 @@ std::vector<AudioPlaybackCoordinator::NodePreviewClip> nodePreviewClipsFromDocum
             {
                 continue;
             }
+            const auto channelCount = channelCountForPath
+                ? channelCountForPath(clip.attachedAudio->assetPath)
+                : std::optional<int>{};
 
             clips.push_back(AudioPlaybackCoordinator::NodePreviewClip{
                 .previewTrackId = previewTrackId,
+                .laneId = lane.id,
                 .assetPath = clip.attachedAudio->assetPath,
                 .laneOffsetMs = clip.laneOffsetMs,
                 .clipStartMs = clipStartMs,
                 .clipEndMs = clipEndMs,
                 .gainDb = clip.attachedAudio->gainDb,
-                .loopEnabled = false
+                .loopEnabled = false,
+                .useStereoMeter = channelCount.has_value() && *channelCount > 1
             });
         }
     }
@@ -1184,12 +1202,11 @@ MainWindow::MainWindow(QWindow* parent)
     m_clearAllShortcutTimer.setInterval(1500);
     m_memoryUsageTimer.setInterval(1000);
     m_mixMeterTimer.setInterval(33);
-    m_nodeEditorPreviewTimer.setTimerType(Qt::PreciseTimer);
-    m_nodeEditorPreviewTimer.setInterval(16);
+    m_nodeEditorPreviewMeterTimer.setInterval(66);
     connect(&m_clearAllShortcutTimer, &QTimer::timeout, this, &MainWindow::clearPendingClearAllShortcut);
     connect(&m_memoryUsageTimer, &QTimer::timeout, this, &MainWindow::updateMemoryUsage);
     connect(&m_mixMeterTimer, &QTimer::timeout, this, &MainWindow::updateMixMeterLevels);
-    connect(&m_nodeEditorPreviewTimer, &QTimer::timeout, this, &MainWindow::updateNodeEditorPreview);
+    connect(&m_nodeEditorPreviewMeterTimer, &QTimer::timeout, this, &MainWindow::updateNodeEditorPreviewMeters);
     m_statusToastTimer.setSingleShot(true);
     m_statusToastTimer.setInterval(2800);
     connect(&m_statusToastTimer, &QTimer::timeout, this, [this]()
@@ -2998,6 +3015,26 @@ void MainWindow::updateFrame(const QImage& image, const int frameIndex, const do
         const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
         m_transportUiSyncController->syncNodeEditorPlayheadToProjectFrame(frameIndex);
     }
+    if (m_nodeEditorPreviewActive && m_nodeEditorQuickController)
+    {
+        const auto playheadMs = std::clamp(
+            m_nodeEditorQuickController->playheadMs(),
+            0,
+            std::max(0, m_nodeEditorPreviewNodeDurationMs));
+        const auto selectedRange = m_controller ? m_controller->selectedTrackFrameRange() : std::nullopt;
+        if (playheadMs >= m_nodeEditorPreviewNodeDurationMs
+            || (selectedRange.has_value() && frameIndex >= selectedRange->second))
+        {
+            stopNodeEditorPreview(false);
+        }
+        else if (m_controller && shouldSyncNodeEditorPreviewAudio(playheadMs))
+        {
+            static_cast<void>(m_controller->syncNodeEditorPreview(
+                m_nodeEditorPreviewClips,
+                m_nodeEditorPreviewNodeDurationMs,
+                playheadMs));
+        }
+    }
     if (m_controller
         && m_controller->isPlaying()
         && m_audioPoolQuickWidget
@@ -3057,9 +3094,13 @@ void MainWindow::updateInsertionFollowsPlaybackState(const bool enabled)
 void MainWindow::updatePlaybackState(const bool playing)
 {
     clearStuckWaitCursor(this);
+    if (!playing && m_nodeEditorPreviewActive)
+    {
+        stopNodeEditorPreview(false);
+    }
     if (m_nodeEditorQuickController)
     {
-        m_nodeEditorQuickController->setPlaybackActive(playing || m_nodeEditorPreviewTimer.isActive());
+        m_nodeEditorQuickController->setPlaybackActive(playing || m_nodeEditorPreviewActive);
     }
     if (m_mixQuickController)
     {
@@ -3770,7 +3811,13 @@ void MainWindow::refreshNodeEditor()
             hasUnsavedNodeChanges =
                 m_nodeTracksWithUnsavedChanges.contains(selectedTrackId)
                 || labelDiffers;
-            nodeTrackItems = nodeTrackItemsFromDocument(*nodeDocument, nodeDurationMs);
+            nodeTrackItems = nodeTrackItemsFromDocument(
+                *nodeDocument,
+                nodeDurationMs,
+                [this](const QString& filePath) -> std::optional<int>
+                {
+                    return m_controller ? m_controller->audioFileChannelCount(filePath) : std::nullopt;
+                });
             for (const auto& lane : nodeDocument->node.lanes)
             {
                 for (const auto& clip : lane.audioClips)
@@ -4232,7 +4279,10 @@ void MainWindow::refreshMixView()
 
 void MainWindow::updateMixMeterLevels()
 {
-    if (!m_mixQuickController || !(m_mixQuickWidget || m_detachedMixWindow))
+    const auto mixVisible =
+        (m_mixQuickWidget && m_mixQuickWidget->isVisible())
+        || (m_detachedMixWindow && m_detachedMixWindow->isVisible());
+    if (!m_mixQuickController || !mixVisible)
     {
         return;
     }
@@ -4546,13 +4596,12 @@ void MainWindow::resetNodeEditorPlayheadToStart()
 
     m_nodeEditorPreviewAnchorMs = 0;
     m_nodeEditorPreviewStartMs = 0;
-    if (m_nodeEditorPreviewTimer.isActive())
+    if (m_nodeEditorPreviewActive)
     {
         if (m_transportUiSyncController)
         {
-            m_transportUiSyncController->syncProjectMarkersToNodeEditor(0);
+            m_transportUiSyncController->syncProjectPlayheadToNodeEditor(0);
         }
-        m_nodeEditorPreviewElapsedTimer.restart();
         if (m_controller)
         {
             static_cast<void>(m_controller->syncNodeEditorPreview(
@@ -4695,7 +4744,7 @@ bool MainWindow::deleteSelectedNodeEditorSelection()
     {
         setProjectDirty(true);
     }
-    if (m_nodeEditorPreviewTimer.isActive())
+    if (m_nodeEditorPreviewActive)
     {
         const auto hasPreviewableAudio = std::any_of(
             nodeDocument->node.lanes.cbegin(),
@@ -4788,10 +4837,15 @@ void MainWindow::setNodeEditorLaneMuted(const QString& laneId, const bool muted)
     {
         setProjectDirty(true);
     }
-    if (m_nodeEditorPreviewTimer.isActive())
+    if (m_nodeEditorPreviewActive)
     {
         const auto playheadMs = m_nodeEditorQuickController ? m_nodeEditorQuickController->playheadMs() : 0;
-        m_nodeEditorPreviewClips = nodePreviewClipsFromDocument(*nodeDocument);
+        m_nodeEditorPreviewClips = nodePreviewClipsFromDocument(
+            *nodeDocument,
+            [this](const QString& filePath) -> std::optional<int>
+            {
+                return m_controller ? m_controller->audioFileChannelCount(filePath) : std::nullopt;
+            });
         m_nodeEditorPreviewActiveAudioSignature.clear();
         m_lastNodeEditorPreviewAudioSyncMs = -1;
         if (m_controller && !m_nodeEditorPreviewClips.empty())
@@ -4882,10 +4936,15 @@ void MainWindow::setNodeEditorLaneSoloed(const QString& laneId, const bool soloe
     {
         setProjectDirty(true);
     }
-    if (m_nodeEditorPreviewTimer.isActive())
+    if (m_nodeEditorPreviewActive)
     {
         const auto playheadMs = m_nodeEditorQuickController ? m_nodeEditorQuickController->playheadMs() : 0;
-        m_nodeEditorPreviewClips = nodePreviewClipsFromDocument(*nodeDocument);
+        m_nodeEditorPreviewClips = nodePreviewClipsFromDocument(
+            *nodeDocument,
+            [this](const QString& filePath) -> std::optional<int>
+            {
+                return m_controller ? m_controller->audioFileChannelCount(filePath) : std::nullopt;
+            });
         m_nodeEditorPreviewActiveAudioSignature.clear();
         m_lastNodeEditorPreviewAudioSyncMs = -1;
         if (m_controller && !m_nodeEditorPreviewClips.empty())
@@ -4928,7 +4987,12 @@ bool MainWindow::startNodeEditorPreview()
         return false;
     }
 
-    m_nodeEditorPreviewClips = nodePreviewClipsFromDocument(*nodeDocument);
+    m_nodeEditorPreviewClips = nodePreviewClipsFromDocument(
+        *nodeDocument,
+        [this](const QString& filePath) -> std::optional<int>
+        {
+            return m_controller ? m_controller->audioFileChannelCount(filePath) : std::nullopt;
+        });
     if (m_nodeEditorPreviewClips.empty())
     {
         showStatus(QStringLiteral("This node has no audio clips to preview."));
@@ -4940,8 +5004,6 @@ bool MainWindow::startNodeEditorPreview()
     {
         m_transportUiSyncController->resetNodeEditorSync();
     }
-    m_lastNodeEditorPreviewProjectSyncMs = -1;
-    m_lastNodeEditorPreviewMeterUpdateMs = -1;
     m_nodeEditorPreviewActiveAudioSignature.clear();
     m_lastNodeEditorPreviewAudioSyncMs = -1;
     auto playheadMs = std::clamp(
@@ -4954,10 +5016,20 @@ bool MainWindow::startNodeEditorPreview()
         m_nodeEditorQuickController->setPlayheadMs(playheadMs);
     }
 
+    const auto projectFrame = m_transportUiSyncController
+        ? m_transportUiSyncController->nodeEditorProjectFrameForPlayheadMs(playheadMs)
+        : std::nullopt;
+    if (!projectFrame.has_value())
+    {
+        showStatus(QStringLiteral("Failed to resolve the node preview timeline position."));
+        return false;
+    }
+
     if (!m_controller->startNodeEditorPreview(
             m_nodeEditorPreviewClips,
             m_nodeEditorPreviewNodeDurationMs,
-            playheadMs))
+            playheadMs,
+            *projectFrame))
     {
         showStatus(QStringLiteral("Failed to start node preview."));
         return false;
@@ -4967,11 +5039,9 @@ bool MainWindow::startNodeEditorPreview()
     m_nodeEditorPreviewStartMs = playheadMs;
     m_nodeEditorPreviewActiveAudioSignature = nodeEditorPreviewActiveAudioSignature(playheadMs);
     m_lastNodeEditorPreviewAudioSyncMs = playheadMs;
-    m_lastNodeEditorPreviewProjectSyncMs = playheadMs;
-    m_lastNodeEditorPreviewMeterUpdateMs = playheadMs;
     m_nodeEditorQuickController->setInsertionMarkerMs(playheadMs);
-    m_nodeEditorPreviewElapsedTimer.restart();
-    m_nodeEditorPreviewTimer.start();
+    m_nodeEditorPreviewActive = true;
+    m_nodeEditorPreviewMeterTimer.start();
     m_nodeEditorQuickController->setPlaybackActive(true);
     if (m_transportUiSyncController)
     {
@@ -4983,14 +5053,19 @@ bool MainWindow::startNodeEditorPreview()
 
 void MainWindow::stopNodeEditorPreview(const bool restorePlaybackAnchor)
 {
-    const auto wasPlaying = m_nodeEditorPreviewTimer.isActive();
-    if (m_nodeEditorPreviewTimer.isActive())
+    const auto wasPlaying = m_nodeEditorPreviewActive;
+    m_nodeEditorPreviewActive = false;
+    if (m_nodeEditorPreviewMeterTimer.isActive())
     {
-        m_nodeEditorPreviewTimer.stop();
+        m_nodeEditorPreviewMeterTimer.stop();
     }
     if (m_controller)
     {
         m_controller->stopNodeEditorPreview();
+    }
+    if (m_nodeEditorQuickController)
+    {
+        m_nodeEditorQuickController->setLaneMeterStates({});
     }
     m_nodeEditorPreviewClips.clear();
     m_nodeEditorPreviewNodeDurationMs = 0;
@@ -4998,8 +5073,6 @@ void MainWindow::stopNodeEditorPreview(const bool restorePlaybackAnchor)
     {
         m_transportUiSyncController->resetNodeEditorSync();
     }
-    m_lastNodeEditorPreviewProjectSyncMs = -1;
-    m_lastNodeEditorPreviewMeterUpdateMs = -1;
     m_nodeEditorPreviewActiveAudioSignature.clear();
     m_lastNodeEditorPreviewAudioSyncMs = -1;
     if (m_nodeEditorQuickController)
@@ -5024,7 +5097,7 @@ void MainWindow::stopNodeEditorPreview(const bool restorePlaybackAnchor)
 
 void MainWindow::toggleNodeEditorPreview()
 {
-    if (m_nodeEditorPreviewTimer.isActive())
+    if (m_nodeEditorPreviewActive)
     {
         stopNodeEditorPreview();
         showStatus(QStringLiteral("Stopped node preview."));
@@ -5034,64 +5107,36 @@ void MainWindow::toggleNodeEditorPreview()
     static_cast<void>(startNodeEditorPreview());
 }
 
-void MainWindow::updateNodeEditorPreview()
+void MainWindow::updateNodeEditorPreviewMeters()
 {
-    constexpr int kNodePreviewProjectSyncIntervalMs = 33;
-    constexpr int kNodePreviewMeterUpdateIntervalMs = 33;
-
-    if (!m_nodeEditorQuickController || m_nodeEditorPreviewNodeDurationMs <= 0)
+    if (!m_nodeEditorQuickController)
     {
-        stopNodeEditorPreview();
         return;
     }
 
-    const auto elapsedMs = m_nodeEditorPreviewElapsedTimer.isValid()
-        ? static_cast<int>(m_nodeEditorPreviewElapsedTimer.elapsed())
-        : 0;
-    const auto nextPlayheadMs = m_nodeEditorPreviewStartMs + std::max(0, elapsedMs);
-    if (nextPlayheadMs >= m_nodeEditorPreviewNodeDurationMs)
+    QVariantList meterStates;
+    if (m_nodeEditorPreviewActive && m_controller)
     {
-        const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
-        m_nodeEditorQuickController->setPlayheadMs(m_nodeEditorPreviewNodeDurationMs);
-        if (m_transportUiSyncController)
+        const auto laneMeterStates = m_controller->nodePreviewLaneMeterStates();
+        meterStates.reserve(static_cast<qsizetype>(laneMeterStates.size()));
+        for (const auto& state : laneMeterStates)
         {
-            m_transportUiSyncController->syncProjectMarkersToNodeEditor(m_nodeEditorPreviewNodeDurationMs);
+            meterStates.push_back(QVariantMap{
+                {QStringLiteral("laneId"), state.laneId},
+                {QStringLiteral("meterLevel"), state.meterLevel},
+                {QStringLiteral("meterLeftLevel"), state.meterLeftLevel},
+                {QStringLiteral("meterRightLevel"), state.meterRightLevel},
+                {QStringLiteral("useStereoMeter"), state.useStereoMeter}
+            });
         }
-        updateMixMeterLevels();
-        stopNodeEditorPreview();
+    }
+    m_nodeEditorQuickController->setLaneMeterStates(meterStates);
+
+    if (!m_nodeEditorPreviewActive)
+    {
         return;
     }
-
-    {
-        const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
-        m_nodeEditorQuickController->setPlayheadMs(nextPlayheadMs);
-    }
-    if (m_transportUiSyncController)
-    {
-        m_transportUiSyncController->syncThumbnailStripMarkerToNodeEditor(nextPlayheadMs);
-    }
-    if (m_lastNodeEditorPreviewProjectSyncMs < 0
-        || std::abs(nextPlayheadMs - m_lastNodeEditorPreviewProjectSyncMs) >= kNodePreviewProjectSyncIntervalMs)
-    {
-        if (m_transportUiSyncController)
-        {
-            m_transportUiSyncController->syncProjectMarkersToNodeEditor(nextPlayheadMs);
-        }
-        m_lastNodeEditorPreviewProjectSyncMs = nextPlayheadMs;
-    }
-    if (m_controller && shouldSyncNodeEditorPreviewAudio(nextPlayheadMs))
-    {
-        static_cast<void>(m_controller->syncNodeEditorPreview(
-            m_nodeEditorPreviewClips,
-            m_nodeEditorPreviewNodeDurationMs,
-            nextPlayheadMs));
-    }
-    if (m_lastNodeEditorPreviewMeterUpdateMs < 0
-        || std::abs(nextPlayheadMs - m_lastNodeEditorPreviewMeterUpdateMs) >= kNodePreviewMeterUpdateIntervalMs)
-    {
-        updateMixMeterLevels();
-        m_lastNodeEditorPreviewMeterUpdateMs = nextPlayheadMs;
-    }
+    updateMixMeterLevels();
 }
 
 QString MainWindow::nodeEditorPreviewActiveAudioSignature(const int playheadMs) const
@@ -5448,11 +5493,11 @@ void MainWindow::buildUi()
                 return;
             }
 
-            if (m_nodeEditorPreviewTimer.isActive())
+            if (m_nodeEditorPreviewActive)
             {
                 if (m_transportUiSyncController)
                 {
-                    m_transportUiSyncController->syncProjectMarkersToNodeEditor(playheadMs);
+                    m_transportUiSyncController->syncProjectPlayheadToNodeEditor(playheadMs);
                 }
             }
             else
@@ -5462,7 +5507,7 @@ void MainWindow::buildUi()
                     m_transportUiSyncController->syncProjectPlayheadToNodeEditor(playheadMs);
                 }
             }
-            if (!m_nodeEditorPreviewTimer.isActive()
+            if (!m_nodeEditorPreviewActive
                 || m_nodeEditorPreviewNodeDurationMs <= 0)
             {
                 return;
@@ -5471,7 +5516,6 @@ void MainWindow::buildUi()
             m_nodeEditorPreviewStartMs = std::clamp(playheadMs, 0, m_nodeEditorPreviewNodeDurationMs);
             m_nodeEditorPreviewAnchorMs = m_nodeEditorPreviewStartMs;
             m_nodeEditorQuickController->setInsertionMarkerMs(m_nodeEditorPreviewAnchorMs);
-            m_nodeEditorPreviewElapsedTimer.restart();
             if (m_controller)
             {
                 static_cast<void>(m_controller->syncNodeEditorPreview(

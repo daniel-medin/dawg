@@ -44,12 +44,23 @@ public:
     struct NodePreviewClip
     {
         QUuid previewTrackId;
+        QString laneId;
         QString assetPath;
         int laneOffsetMs = 0;
         int clipStartMs = 0;
         int clipEndMs = 0;
         float gainDb = 0.0F;
         bool loopEnabled = false;
+        bool useStereoMeter = false;
+    };
+
+    struct NodePreviewLaneMeterState
+    {
+        QString laneId;
+        float meterLevel = 0.0F;
+        float meterLeftLevel = 0.0F;
+        float meterRightLevel = 0.0F;
+        bool useStereoMeter = false;
     };
 
     explicit AudioPlaybackCoordinator(AudioEngine& audioEngine);
@@ -76,6 +87,7 @@ public:
     void stopNodePreview();
     [[nodiscard]] bool isNodePreviewPlaying() const;
     [[nodiscard]] AudioEngine::StereoLevels nodePreviewStereoLevels() const;
+    [[nodiscard]] std::vector<NodePreviewLaneMeterState> nodePreviewLaneMeterStates() const;
     void applyLiveMixStateToCurrentPlayback(
         const PlaybackSyncRequest& request,
         const std::vector<TimelineTrackSpan>& spans,
@@ -105,6 +117,7 @@ private:
     int m_clipPreviewClipStartMs = 0;
     int m_clipPreviewClipEndMs = 0;
     bool m_nodePreviewActive = false;
+    std::vector<NodePreviewClip> m_nodePreviewClips;
     std::vector<QUuid> m_nodePreviewTrackIds;
     std::vector<QUuid> m_nodePreviewActiveTrackIds;
 };

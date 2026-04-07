@@ -2,6 +2,7 @@
 
 #include <optional>
 
+#include <QHash>
 #include <QObject>
 #include <QString>
 #include <QVariantList>
@@ -40,6 +41,8 @@ class NodeEditorQuickController final : public QObject
     Q_PROPERTY(bool insertionMarkerStationary READ insertionMarkerStationary NOTIFY playbackStateChanged)
     Q_PROPERTY(bool insertionFollowsPlayback READ insertionFollowsPlayback NOTIFY stateChanged)
     Q_PROPERTY(bool playbackActive READ playbackActive NOTIFY playbackStateChanged)
+    Q_PROPERTY(int laneMeterToken READ laneMeterToken NOTIFY laneMeterLevelsChanged)
+    Q_PROPERTY(int meterResetToken READ meterResetToken NOTIFY meterResetTokenChanged)
     Q_PROPERTY(qreal waveformWidthRatio READ waveformWidthRatio NOTIFY stateChanged)
     Q_PROPERTY(qreal waveformOffsetRatio READ waveformOffsetRatio NOTIFY stateChanged)
 
@@ -83,6 +86,8 @@ public:
     [[nodiscard]] bool insertionMarkerStationary() const;
     [[nodiscard]] bool insertionFollowsPlayback() const;
     [[nodiscard]] bool playbackActive() const;
+    [[nodiscard]] int laneMeterToken() const;
+    [[nodiscard]] int meterResetToken() const;
     [[nodiscard]] qreal waveformWidthRatio() const;
     [[nodiscard]] qreal waveformOffsetRatio() const;
 
@@ -93,16 +98,23 @@ public:
     Q_INVOKABLE void selectClip(const QString& laneId, const QString& clipId);
     Q_INVOKABLE void setLaneMuted(const QString& laneId, bool muted);
     Q_INVOKABLE void setLaneSoloed(const QString& laneId, bool soloed);
+    Q_INVOKABLE qreal laneMeterLevel(const QString& laneId) const;
+    Q_INVOKABLE qreal laneMeterLeftLevel(const QString& laneId) const;
+    Q_INVOKABLE qreal laneMeterRightLevel(const QString& laneId) const;
+    Q_INVOKABLE bool laneUsesStereoMeter(const QString& laneId) const;
     Q_INVOKABLE void setPlayheadFromRatio(qreal ratio);
     void setPlayheadMs(int playheadMs);
     void setInsertionMarkerMs(int markerMs);
     void setInsertionFollowsPlayback(bool enabled);
     void setPlaybackActive(bool active);
+    void setLaneMeterStates(const QVariantList& meterStates);
 
 signals:
     void stateChanged();
     void playheadPositionChanged();
     void playbackStateChanged();
+    void laneMeterLevelsChanged();
+    void meterResetTokenChanged();
     void playheadChanged(int playheadMs);
     void laneMuteRequested(const QString& laneId, bool muted);
     void laneSoloRequested(const QString& laneId, bool soloed);
@@ -110,6 +122,16 @@ signals:
     void audioActionRequested(const QString& actionKey);
 
 private:
+    struct LaneMeterState
+    {
+        float meterLevel = 0.0F;
+        float meterLeftLevel = 0.0F;
+        float meterRightLevel = 0.0F;
+        bool useStereoMeter = false;
+    };
+
+    bool syncLaneMeterTopology(const QVariantList& nodeTracks);
+
     bool m_canOpenNode = false;
     QString m_selectedNodeLabel;
     QString m_nodeContainerPath;
@@ -124,4 +146,7 @@ private:
     int m_insertionMarkerMs = 0;
     bool m_insertionFollowsPlayback = false;
     bool m_playbackActive = false;
+    QHash<QString, LaneMeterState> m_laneMeterStates;
+    int m_laneMeterToken = 0;
+    int m_meterResetToken = 0;
 };

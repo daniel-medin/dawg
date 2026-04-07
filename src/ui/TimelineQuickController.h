@@ -45,6 +45,7 @@ public:
     void setVideoPath(const QString& videoPath);
     void setTimeline(int totalFrames, double fps);
     void setCurrentFrame(int frameIndex);
+    void setCurrentFramePosition(double framePosition);
     void setLoopRanges(const std::vector<TimelineLoopRange>& loopRanges);
     void setTrackSpans(const std::vector<TimelineTrackSpan>& trackSpans);
     void setSeekOnClickEnabled(bool enabled);
@@ -171,6 +172,7 @@ private:
     void ensureFrameVisible(int frameIndex);
     [[nodiscard]] int frameForPosition(double x) const;
     [[nodiscard]] double xForFrame(int frameIndex) const;
+    [[nodiscard]] double xForFramePosition(double framePosition) const;
     [[nodiscard]] int laneCount() const;
     void requestFrame(int frameIndex);
     void requestFrameCoalesced(int frameIndex);

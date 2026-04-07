@@ -494,7 +494,8 @@ void PlayerController::stopSelectedTrackClipPreview()
 bool PlayerController::startNodeEditorPreview(
     const std::vector<AudioPlaybackCoordinator::NodePreviewClip>& clips,
     const int nodeDurationMs,
-    const int playheadMs)
+    const int playheadMs,
+    const int projectFrame)
 {
     if (!hasVideoLoaded() || clips.empty() || nodeDurationMs <= 0)
     {
@@ -508,7 +509,32 @@ bool PlayerController::startNodeEditorPreview(
     stopAudioPoolPreview();
     stopSelectedTrackClipPreview();
     stopNodeEditorPreview();
-    return m_audioPlaybackCoordinator->syncNodePreview(clips, nodeDurationMs, playheadMs);
+    seekToFrame(projectFrame);
+    if (!m_audioPlaybackCoordinator->syncNodePreview(clips, nodeDurationMs, playheadMs, true))
+    {
+        return false;
+    }
+
+    m_nodeEditorPreviewTransportActive = true;
+    m_playbackDebugStats = {};
+    static_cast<void>(m_videoPlaybackCoordinator->applyPresentationScaleForPlaybackState(
+        true,
+        [this]()
+        {
+            refreshOverlays();
+        }));
+    emitCurrentFrame();
+    m_transport.startPlayback(m_videoPlaybackCoordinator->currentFrame().index);
+    m_videoPlaybackCoordinator->restartPlaybackTiming();
+    const auto stats = m_videoPlaybackCoordinator->runtimeStats();
+    m_perfLogger.logEvent(
+        QStringLiteral("node_preview_play"),
+        QStringLiteral("frame=%1 time=%2s queue=%3/%4")
+            .arg(m_videoPlaybackCoordinator->currentFrame().index)
+            .arg(m_videoPlaybackCoordinator->currentFrame().timestampSeconds, 0, 'f', 3)
+            .arg(stats.queuedFrames)
+            .arg(stats.prefetchTargetFrames));
+    return true;
 }
 
 bool PlayerController::syncNodeEditorPreview(
@@ -532,7 +558,13 @@ bool PlayerController::syncNodeEditorPreview(
 
 void PlayerController::stopNodeEditorPreview()
 {
+    const auto shouldStopTransport = m_nodeEditorPreviewTransportActive && m_transport.isPlaying();
+    m_nodeEditorPreviewTransportActive = false;
     m_audioPlaybackCoordinator->stopNodePreview();
+    if (shouldStopTransport)
+    {
+        pause(false);
+    }
 }
 
 bool PlayerController::setSelectedTrackClipRangeMs(const int clipStartMs, const int clipEndMs)
@@ -831,6 +863,11 @@ void PlayerController::togglePlayback()
 
 void PlayerController::pause(const bool restorePlaybackAnchor)
 {
+    if (m_nodeEditorPreviewTransportActive)
+    {
+        m_nodeEditorPreviewTransportActive = false;
+        m_audioPlaybackCoordinator->stopNodePreview();
+    }
     m_trackAudioPreviewStopTimer.stop();
     m_audioEngine->stopAll();
     m_perfLogger.logEvent(
@@ -1675,6 +1712,11 @@ std::vector<MixLaneMeterState> PlayerController::mixLaneMeterStates(const std::v
     return meterStates;
 }
 
+std::vector<AudioPlaybackCoordinator::NodePreviewLaneMeterState> PlayerController::nodePreviewLaneMeterStates() const
+{
+    return m_audioPlaybackCoordinator->nodePreviewLaneMeterStates();
+}
+
 std::vector<TimelineTrackSpan> PlayerController::timelineTrackSpans() const
 {
     return TimelineLayoutService::timelineTrackSpans(
@@ -1686,6 +1728,36 @@ std::vector<TimelineTrackSpan> PlayerController::timelineTrackSpans() const
 const std::vector<TrackOverlay>& PlayerController::currentOverlays() const
 {
     return m_currentOverlays;
+}
+
+void PlayerController::refreshOverlaysForFrame(const int frameIndex)
+{
+    if (!m_videoPlaybackCoordinator || m_videoPlaybackCoordinator->totalFrames() <= 0)
+    {
+        return;
+    }
+
+    QElapsedTimer timer;
+    timer.start();
+    const auto clampedFrameIndex = std::clamp(
+        frameIndex,
+        0,
+        std::max(0, m_videoPlaybackCoordinator->totalFrames() - 1));
+    m_currentOverlays = m_tracker.overlaysForFrame(
+        clampedFrameIndex,
+        m_selectionController->selectedTrackIds(),
+        m_selectionController->fadingDeselectedTrackId(),
+        m_selectionController->fadingDeselectedTrackOpacity());
+    updateSmoothedMs(m_playbackDebugStats.overlayBuildMs, elapsedMs(timer));
+    m_playbackDebugStats.overlayCount = static_cast<int>(m_currentOverlays.size());
+    m_playbackDebugStats.overlayLabelCount = static_cast<int>(std::count_if(
+        m_currentOverlays.begin(),
+        m_currentOverlays.end(),
+        [](const TrackOverlay& overlay)
+        {
+            return overlay.showLabel;
+        }));
+    emit overlaysChanged();
 }
 
 PlaybackDebugStats PlayerController::playbackDebugStats() const
@@ -1713,7 +1785,10 @@ void PlayerController::advancePlayback()
     {
         QElapsedTimer audioTimer;
         audioTimer.start();
-        syncAttachedAudioForCurrentFrame();
+        if (!m_nodeEditorPreviewTransportActive)
+        {
+            syncAttachedAudioForCurrentFrame();
+        }
         updateSmoothedMs(m_playbackDebugStats.syncAudioMs, elapsedMs(audioTimer));
     };
     callbacks.onPausePlayback = [this](const bool restorePlaybackAnchor)
@@ -1801,6 +1876,11 @@ std::optional<int> PlayerController::audioChannelCount(const QString& filePath) 
     return channelCount;
 }
 
+std::optional<int> PlayerController::audioFileChannelCount(const QString& filePath) const
+{
+    return audioChannelCount(filePath);
+}
+
 std::optional<int> PlayerController::trimmedEndFrameForTrack(const TrackPoint& track) const
 {
     if (!track.attachedAudio.has_value() || !hasVideoLoaded())
@@ -1866,23 +1946,7 @@ void PlayerController::restoreTrackEditState(
 
 void PlayerController::refreshOverlays()
 {
-    QElapsedTimer timer;
-    timer.start();
-    m_currentOverlays = m_tracker.overlaysForFrame(
-        m_videoPlaybackCoordinator->currentFrame().index,
-        m_selectionController->selectedTrackIds(),
-        m_selectionController->fadingDeselectedTrackId(),
-        m_selectionController->fadingDeselectedTrackOpacity());
-    updateSmoothedMs(m_playbackDebugStats.overlayBuildMs, elapsedMs(timer));
-    m_playbackDebugStats.overlayCount = static_cast<int>(m_currentOverlays.size());
-    m_playbackDebugStats.overlayLabelCount = static_cast<int>(std::count_if(
-        m_currentOverlays.begin(),
-        m_currentOverlays.end(),
-        [](const TrackOverlay& overlay)
-        {
-            return overlay.showLabel;
-        }));
-    emit overlaysChanged();
+    refreshOverlaysForFrame(m_videoPlaybackCoordinator->currentFrame().index);
 }
 
 bool PlayerController::isTrackSelected(const QUuid& trackId) const

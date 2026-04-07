@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 #include <QHash>
 
@@ -260,6 +261,7 @@ bool AudioPlaybackCoordinator::syncNodePreview(
     }
 
     m_nodePreviewActive = true;
+    m_nodePreviewClips = clips;
     std::vector<QUuid> previewTrackIds;
     std::vector<QUuid> activeTrackIds;
     previewTrackIds.reserve(clips.size());
@@ -332,6 +334,7 @@ void AudioPlaybackCoordinator::stopNodePreview()
     {
         m_audioEngine.stopTrack(trackId);
     }
+    m_nodePreviewClips.clear();
     m_nodePreviewTrackIds.clear();
     m_nodePreviewActiveTrackIds.clear();
     m_nodePreviewActive = false;
@@ -352,6 +355,52 @@ AudioEngine::StereoLevels AudioPlaybackCoordinator::nodePreviewStereoLevels() co
         levels.right = std::max(levels.right, trackLevels.right);
     }
     return levels;
+}
+
+std::vector<AudioPlaybackCoordinator::NodePreviewLaneMeterState>
+AudioPlaybackCoordinator::nodePreviewLaneMeterStates() const
+{
+    std::vector<NodePreviewLaneMeterState> states;
+    if (!m_nodePreviewActive)
+    {
+        return states;
+    }
+
+    for (const auto& clip : m_nodePreviewClips)
+    {
+        if (clip.laneId.isEmpty()
+            || clip.previewTrackId.isNull()
+            || !containsTrackId(m_nodePreviewTrackIds, clip.previewTrackId))
+        {
+            continue;
+        }
+
+        auto stateIt = std::find_if(
+            states.begin(),
+            states.end(),
+            [&clip](const NodePreviewLaneMeterState& state)
+            {
+                return state.laneId == clip.laneId;
+            });
+        if (stateIt == states.end())
+        {
+            states.push_back(NodePreviewLaneMeterState{
+                .laneId = clip.laneId,
+                .useStereoMeter = clip.useStereoMeter
+            });
+            stateIt = std::prev(states.end());
+        }
+
+        const auto trackLevels = m_audioEngine.trackStereoLevels(clip.previewTrackId);
+        stateIt->meterLeftLevel = std::max(stateIt->meterLeftLevel, trackLevels.left);
+        stateIt->meterRightLevel = std::max(stateIt->meterRightLevel, trackLevels.right);
+        stateIt->meterLevel = std::max(
+            stateIt->meterLevel,
+            std::max(trackLevels.left, trackLevels.right));
+        stateIt->useStereoMeter = stateIt->useStereoMeter || clip.useStereoMeter;
+    }
+
+    return states;
 }
 
 void AudioPlaybackCoordinator::applyLiveMixStateToCurrentPlayback(

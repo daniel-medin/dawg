@@ -163,6 +163,25 @@ void TimelineQuickController::setCurrentFrame(const int frameIndex)
     emit markerChanged();
 }
 
+void TimelineQuickController::setCurrentFramePosition(const double framePosition)
+{
+    const auto maxFrameIndex = std::max(0, m_totalFrames - 1);
+    const auto clampedPosition = std::clamp(framePosition, 0.0, static_cast<double>(maxFrameIndex));
+    const auto clampedFrame = std::clamp(
+        static_cast<int>(std::lround(clampedPosition)),
+        0,
+        maxFrameIndex);
+    const auto previousMarkerX = m_markerX;
+    m_currentFrame = clampedFrame;
+    m_lastRequestedFrame = m_currentFrame;
+    m_pendingRequestedFrame = -1;
+    m_markerX = xForFramePosition(clampedPosition);
+    if (std::abs(m_markerX - previousMarkerX) > 0.001)
+    {
+        emit markerChanged();
+    }
+}
+
 void TimelineQuickController::setLoopRanges(const std::vector<TimelineLoopRange>& loopRanges)
 {
     if (m_loopRanges == loopRanges)
@@ -1485,6 +1504,11 @@ int TimelineQuickController::frameForPosition(const double x) const
 
 double TimelineQuickController::xForFrame(const int frameIndex) const
 {
+    return xForFramePosition(static_cast<double>(frameIndex));
+}
+
+double TimelineQuickController::xForFramePosition(const double framePosition) const
+{
     const auto rect = computeLoopBarRect();
     if (m_totalFrames <= 1)
     {
@@ -1492,7 +1516,7 @@ double TimelineQuickController::xForFrame(const int frameIndex) const
     }
 
     const auto ratio =
-        (static_cast<double>(std::clamp(frameIndex, 0, m_totalFrames - 1)) - m_viewStartFrame)
+        (std::clamp(framePosition, 0.0, static_cast<double>(m_totalFrames - 1)) - m_viewStartFrame)
         / std::max(1.0, visibleFrameSpan());
     return rect.left() + rect.width() * ratio;
 }

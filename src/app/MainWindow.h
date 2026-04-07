@@ -262,7 +262,7 @@ private:
     bool startNodeEditorPreview();
     void stopNodeEditorPreview(bool restorePlaybackAnchor = true);
     void toggleNodeEditorPreview();
-    void updateNodeEditorPreview();
+    void updateNodeEditorPreviewMeters();
     [[nodiscard]] QString nodeEditorPreviewActiveAudioSignature(int playheadMs) const;
     [[nodiscard]] bool shouldSyncNodeEditorPreviewAudio(int playheadMs);
     [[nodiscard]] std::optional<int> timelineLoopShortcutFrame() const;
@@ -434,7 +434,7 @@ private:
     QTimer m_clearAllShortcutTimer;
     QTimer m_memoryUsageTimer;
     QTimer m_mixMeterTimer;
-    QTimer m_nodeEditorPreviewTimer;
+    QTimer m_nodeEditorPreviewMeterTimer;
     QTimer m_statusToastTimer;
     QTimer m_canvasTipsTimer;
     QTimer m_nodeNudgeTimer;
@@ -445,14 +445,12 @@ private:
     QElapsedTimer m_debugTextTimer;
     QElapsedTimer m_audioPoolPlaybackRefreshTimer;
     QElapsedTimer m_timelinePlaybackUiTimer;
-    QElapsedTimer m_nodeEditorPreviewElapsedTimer;
     int m_nodeEditorPreviewAnchorMs = 0;
     int m_nodeEditorPreviewStartMs = 0;
     int m_nodeEditorPreviewNodeDurationMs = 0;
     std::vector<AudioPlaybackCoordinator::NodePreviewClip> m_nodeEditorPreviewClips;
     bool m_nodeEditorPreviewUpdatingPlayhead = false;
-    int m_lastNodeEditorPreviewProjectSyncMs = -1;
-    int m_lastNodeEditorPreviewMeterUpdateMs = -1;
+    bool m_nodeEditorPreviewActive = false;
     QString m_nodeEditorPreviewActiveAudioSignature;
     int m_lastNodeEditorPreviewAudioSyncMs = -1;
     int m_outputFpsFrameCount = 0;

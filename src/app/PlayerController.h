@@ -130,7 +130,8 @@ public:
     bool startNodeEditorPreview(
         const std::vector<AudioPlaybackCoordinator::NodePreviewClip>& clips,
         int nodeDurationMs,
-        int playheadMs);
+        int playheadMs,
+        int projectFrame);
     bool syncNodeEditorPreview(
         const std::vector<AudioPlaybackCoordinator::NodePreviewClip>& clips,
         int nodeDurationMs,
@@ -143,6 +144,7 @@ public:
     bool setSelectedTrackClipPlayheadMs(int playheadMs);
     bool setSelectedTrackAudioGainDb(float gainDb);
     bool setSelectedTrackLoopEnabled(bool enabled);
+    void refreshOverlaysForFrame(int frameIndex);
 
     [[nodiscard]] bool hasVideoLoaded() const;
     [[nodiscard]] bool isPlaying() const;
@@ -197,9 +199,11 @@ public:
     [[nodiscard]] dawg::project::ControllerState snapshotProjectState() const;
     [[nodiscard]] std::vector<MixLaneStrip> mixLaneStrips() const;
     [[nodiscard]] std::vector<MixLaneMeterState> mixLaneMeterStates(const std::vector<TimelineTrackSpan>& spans) const;
+    [[nodiscard]] std::vector<AudioPlaybackCoordinator::NodePreviewLaneMeterState> nodePreviewLaneMeterStates() const;
     [[nodiscard]] std::vector<TimelineTrackSpan> timelineTrackSpans() const;
     [[nodiscard]] const std::vector<TrackOverlay>& currentOverlays() const;
     [[nodiscard]] PlaybackDebugStats playbackDebugStats() const;
+    [[nodiscard]] std::optional<int> audioFileChannelCount(const QString& filePath) const;
 
 signals:
     void frameReady(const QImage& image, int frameIndex, double timestampSeconds);
@@ -262,6 +266,7 @@ private:
     QString m_proxyVideoPath;
     bool m_embeddedVideoAudioMuted = true;
     bool m_useProxyVideo = false;
+    bool m_nodeEditorPreviewTransportActive = false;
     std::vector<TrackOverlay> m_currentOverlays;
     bool m_motionTrackingEnabled = false;
     std::vector<TimelineLoopRange> m_loopRanges;

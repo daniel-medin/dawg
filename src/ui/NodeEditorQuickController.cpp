@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include <QFileInfo>
 #include <QTimer>
+#include <QVariantMap>
 
 namespace
 {
@@ -169,6 +171,14 @@ void NodeEditorQuickController::setState(
     m_selectedClipId = nextSelectedClipId;
     m_playheadMs = std::clamp(m_playheadMs, 0, nodeDurationMs());
     m_insertionMarkerMs = std::clamp(m_insertionMarkerMs, 0, nodeDurationMs());
+    const auto meterTopologyChanged = syncLaneMeterTopology(m_nodeTracks);
+    if (meterTopologyChanged)
+    {
+        ++m_laneMeterToken;
+        ++m_meterResetToken;
+        emit laneMeterLevelsChanged();
+        emit meterResetTokenChanged();
+    }
     emit playheadPositionChanged();
     emit stateChanged();
 }
@@ -373,6 +383,16 @@ bool NodeEditorQuickController::playbackActive() const
     return m_playbackActive;
 }
 
+int NodeEditorQuickController::laneMeterToken() const
+{
+    return m_laneMeterToken;
+}
+
+int NodeEditorQuickController::meterResetToken() const
+{
+    return m_meterResetToken;
+}
+
 qreal NodeEditorQuickController::waveformWidthRatio() const
 {
     if (!showTimeline() || !hasAttachedAudio())
@@ -483,6 +503,36 @@ void NodeEditorQuickController::setLaneSoloed(const QString& laneId, const bool 
     emit laneSoloRequested(laneId, soloed);
 }
 
+qreal NodeEditorQuickController::laneMeterLevel(const QString& laneId) const
+{
+    const auto stateIt = m_laneMeterStates.constFind(laneId);
+    return stateIt == m_laneMeterStates.cend()
+        ? 0.0
+        : static_cast<qreal>(stateIt->meterLevel);
+}
+
+qreal NodeEditorQuickController::laneMeterLeftLevel(const QString& laneId) const
+{
+    const auto stateIt = m_laneMeterStates.constFind(laneId);
+    return stateIt == m_laneMeterStates.cend()
+        ? 0.0
+        : static_cast<qreal>(stateIt->meterLeftLevel);
+}
+
+qreal NodeEditorQuickController::laneMeterRightLevel(const QString& laneId) const
+{
+    const auto stateIt = m_laneMeterStates.constFind(laneId);
+    return stateIt == m_laneMeterStates.cend()
+        ? 0.0
+        : static_cast<qreal>(stateIt->meterRightLevel);
+}
+
+bool NodeEditorQuickController::laneUsesStereoMeter(const QString& laneId) const
+{
+    const auto stateIt = m_laneMeterStates.constFind(laneId);
+    return stateIt != m_laneMeterStates.cend() && stateIt->useStereoMeter;
+}
+
 void NodeEditorQuickController::setPlayheadFromRatio(const qreal ratio)
 {
     const auto durationMs = nodeDurationMs();
@@ -556,5 +606,110 @@ void NodeEditorQuickController::setPlaybackActive(const bool active)
     }
 
     m_playbackActive = active;
+    if (active)
+    {
+        ++m_meterResetToken;
+        emit meterResetTokenChanged();
+    }
     emit playbackStateChanged();
+}
+
+void NodeEditorQuickController::setLaneMeterStates(const QVariantList& meterStates)
+{
+    bool changed = false;
+    for (auto stateIt = m_laneMeterStates.begin(); stateIt != m_laneMeterStates.end(); ++stateIt)
+    {
+        if (std::abs(stateIt->meterLevel) > 0.0001F
+            || std::abs(stateIt->meterLeftLevel) > 0.0001F
+            || std::abs(stateIt->meterRightLevel) > 0.0001F)
+        {
+            stateIt->meterLevel = 0.0F;
+            stateIt->meterLeftLevel = 0.0F;
+            stateIt->meterRightLevel = 0.0F;
+            changed = true;
+        }
+    }
+
+    for (const auto& meterStateValue : meterStates)
+    {
+        const auto meterStateMap = meterStateValue.toMap();
+        const auto laneId = meterStateMap.value(QStringLiteral("laneId")).toString();
+        if (laneId.isEmpty())
+        {
+            continue;
+        }
+
+        auto& state = m_laneMeterStates[laneId];
+        const auto nextLeftLevel = std::clamp(
+            meterStateMap.value(QStringLiteral("meterLeftLevel")).toFloat(),
+            0.0F,
+            1.0F);
+        const auto nextRightLevel = std::clamp(
+            meterStateMap.value(QStringLiteral("meterRightLevel")).toFloat(),
+            0.0F,
+            1.0F);
+        const auto nextMeterLevel = std::clamp(
+            meterStateMap.value(QStringLiteral("meterLevel")).toFloat(),
+            0.0F,
+            1.0F);
+        const auto nextUseStereoMeter =
+            state.useStereoMeter || meterStateMap.value(QStringLiteral("useStereoMeter")).toBool();
+        if (std::abs(state.meterLeftLevel - nextLeftLevel) > 0.0001F
+            || std::abs(state.meterRightLevel - nextRightLevel) > 0.0001F
+            || std::abs(state.meterLevel - nextMeterLevel) > 0.0001F
+            || state.useStereoMeter != nextUseStereoMeter)
+        {
+            state.meterLeftLevel = nextLeftLevel;
+            state.meterRightLevel = nextRightLevel;
+            state.meterLevel = nextMeterLevel;
+            state.useStereoMeter = nextUseStereoMeter;
+            changed = true;
+        }
+    }
+
+    if (!changed)
+    {
+        return;
+    }
+
+    ++m_laneMeterToken;
+    emit laneMeterLevelsChanged();
+}
+
+bool NodeEditorQuickController::syncLaneMeterTopology(const QVariantList& nodeTracks)
+{
+    QHash<QString, LaneMeterState> nextStates;
+    for (const auto& laneValue : nodeTracks)
+    {
+        const auto laneMap = laneValue.toMap();
+        const auto laneId = laneMap.value(QStringLiteral("laneId")).toString();
+        if (laneId.isEmpty())
+        {
+            continue;
+        }
+
+        auto nextState = m_laneMeterStates.value(laneId);
+        nextState.useStereoMeter = laneMap.value(QStringLiteral("useStereoMeter")).toBool();
+        nextStates.insert(laneId, nextState);
+    }
+
+    if (nextStates.size() != m_laneMeterStates.size())
+    {
+        m_laneMeterStates = std::move(nextStates);
+        return true;
+    }
+
+    for (auto stateIt = nextStates.cbegin(); stateIt != nextStates.cend(); ++stateIt)
+    {
+        const auto previousIt = m_laneMeterStates.constFind(stateIt.key());
+        if (previousIt == m_laneMeterStates.cend()
+            || previousIt->useStereoMeter != stateIt->useStereoMeter)
+        {
+            m_laneMeterStates = std::move(nextStates);
+            return true;
+        }
+    }
+
+    m_laneMeterStates = std::move(nextStates);
+    return false;
 }

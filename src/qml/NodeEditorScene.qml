@@ -14,13 +14,106 @@ Rectangle {
     property var activeMenuItems: []
     property var activeMenuAnchor: null
     property bool editMarkerBlinkOn: true
+    property real meterTickMs: 0.0
+    property bool meterDecayActive: false
+
+    readonly property real meterFloorDb: -72.0
+    readonly property real meterZeroNormalized: 2.0 / 3.0
+    readonly property real meterReleaseDbPerSecond: Math.abs(meterFloorDb)
+    readonly property real meterSilenceThresholdLevel: Math.pow(10.0, (meterFloorDb + 3.0) / 20.0)
+    readonly property int laneMeterSegmentCount: 28
+    readonly property real laneMeterSegmentGap: 0.5
 
     function timelineContentWidth(viewportWidth) {
         return Math.max(1, viewportWidth)
     }
 
+    function clamp(value, minValue, maxValue) {
+        return Math.max(minValue, Math.min(maxValue, value))
+    }
+
+    function levelToMeterDb(level) {
+        if (level <= 0.00001)
+            return meterFloorDb
+        return Math.max(meterFloorDb, Math.min(12.0, 20.0 * Math.log(level) / Math.LN10))
+    }
+
+    function meterDbToLevel(db) {
+        if (db <= meterFloorDb + 0.001)
+            return 0.0
+        return Math.pow(10.0, db / 20.0)
+    }
+
+    function meterPositionForDb(db) {
+        var clampedDb = Math.max(meterFloorDb, Math.min(12.0, db))
+        if (clampedDb <= 0.0)
+            return clamp(((clampedDb - meterFloorDb) / (0.0 - meterFloorDb)) * meterZeroNormalized, 0.0, meterZeroNormalized)
+        return clamp(meterZeroNormalized + (clampedDb / 12.0) * (1.0 - meterZeroNormalized), meterZeroNormalized, 1.0)
+    }
+
+    function meterNormalized(level) {
+        return level <= 0.0 ? 0.0 : meterPositionForDb(levelToMeterDb(level))
+    }
+
+    function meterDbAtPosition(position) {
+        var clampedPosition = clamp(position, 0.0, 1.0)
+        if (clampedPosition <= meterZeroNormalized)
+            return meterFloorDb + (clampedPosition / meterZeroNormalized) * (0.0 - meterFloorDb)
+        return ((clampedPosition - meterZeroNormalized) / (1.0 - meterZeroNormalized)) * 12.0
+    }
+
+    function meterSegmentColor(position) {
+        var db = meterDbAtPosition(position)
+        if (db >= 0.0)
+            return "#ff5b4d"
+        if (db >= -9.0)
+            return "#ffb33b"
+        return "#2fe06d"
+    }
+
+    function nextDisplayedMeterLevel(displayedLevel, sourceLevel, deltaSeconds) {
+        var effectiveSourceLevel = sourceLevel >= meterSilenceThresholdLevel ? sourceLevel : 0.0
+        if (effectiveSourceLevel >= displayedLevel)
+            return effectiveSourceLevel
+        var displayedDb = levelToMeterDb(displayedLevel)
+        var sourceDb = levelToMeterDb(effectiveSourceLevel)
+        return meterDbToLevel(Math.max(sourceDb, displayedDb - meterReleaseDbPerSecond * deltaSeconds))
+    }
+
     AppTheme {
         id: theme
+    }
+
+    Timer {
+        interval: 16
+        repeat: true
+        running: root.visible
+            && nodeEditorController.nodeTrackCount > 0
+            && (nodeEditorController.playbackActive || root.meterDecayActive)
+        onTriggered: root.meterTickMs = Date.now()
+    }
+
+    Timer {
+        id: meterDecayStopTimer
+
+        interval: 1100
+        repeat: false
+        onTriggered: root.meterDecayActive = false
+    }
+
+    Connections {
+        target: nodeEditorController
+
+        function onPlaybackStateChanged() {
+            if (nodeEditorController.playbackActive) {
+                meterDecayStopTimer.stop()
+                root.meterDecayActive = false
+                return
+            }
+
+            root.meterDecayActive = true
+            meterDecayStopTimer.restart()
+        }
     }
 
     Timer {
@@ -338,7 +431,7 @@ Rectangle {
                                                     anchors.right: parent.right
                                                     anchors.top: parent.top
                                                     anchors.leftMargin: 10
-                                                    anchors.rightMargin: 42
+                                                    anchors.rightMargin: 72
                                                     anchors.topMargin: 12
                                                     text: modelData.title
                                                     color: "#eef2f6"
@@ -352,7 +445,7 @@ Rectangle {
                                                     anchors.right: parent.right
                                                     anchors.top: parent.top
                                                     anchors.leftMargin: 10
-                                                    anchors.rightMargin: 42
+                                                    anchors.rightMargin: 72
                                                     anchors.topMargin: 34
                                                     text: modelData.subtitle
                                                     color: "#91a0b0"
@@ -360,7 +453,133 @@ Rectangle {
                                                     elide: Text.ElideRight
                                                 }
 
+                                                Item {
+                                                    id: laneVuMeter
+
+                                                    anchors.right: laneButtonStack.left
+                                                    anchors.rightMargin: 6
+                                                    anchors.top: parent.top
+                                                    anchors.topMargin: 4
+                                                    anchors.bottom: parent.bottom
+                                                    anchors.bottomMargin: 4
+                                                    width: useStereoMeter ? 18 : 10
+                                                    z: 10
+
+                                                    property int meterToken: nodeEditorController.laneMeterToken
+                                                    property int resetToken: nodeEditorController.meterResetToken
+                                                    property bool useStereoMeter: {
+                                                        var token = meterToken
+                                                        return nodeEditorController.laneUsesStereoMeter(modelData.laneId)
+                                                    }
+                                                    property real sourceLeftLevel: {
+                                                        var token = meterToken
+                                                        return nodeEditorController.laneMeterLeftLevel(modelData.laneId)
+                                                    }
+                                                    property real sourceRightLevel: {
+                                                        var token = meterToken
+                                                        return nodeEditorController.laneMeterRightLevel(modelData.laneId)
+                                                    }
+                                                    property real displayedLeftLevel: 0.0
+                                                    property real displayedRightLevel: 0.0
+                                                    property real lastMeterTickMs: 0.0
+
+                                                    onResetTokenChanged: {
+                                                        displayedLeftLevel = 0.0
+                                                        displayedRightLevel = 0.0
+                                                        lastMeterTickMs = 0.0
+                                                    }
+
+                                                    Connections {
+                                                        target: root
+
+                                                        function onMeterTickMsChanged() {
+                                                            var nowMs = root.meterTickMs > 0.0 ? root.meterTickMs : Date.now()
+                                                            var deltaSeconds = laneVuMeter.lastMeterTickMs > 0.0
+                                                                ? Math.max(0.001, (nowMs - laneVuMeter.lastMeterTickMs) / 1000.0)
+                                                                : 0.016
+                                                            laneVuMeter.lastMeterTickMs = nowMs
+                                                            laneVuMeter.displayedLeftLevel = root.nextDisplayedMeterLevel(
+                                                                laneVuMeter.displayedLeftLevel,
+                                                                laneVuMeter.useStereoMeter ? laneVuMeter.sourceLeftLevel : Math.max(laneVuMeter.sourceLeftLevel, laneVuMeter.sourceRightLevel),
+                                                                deltaSeconds)
+                                                            if (laneVuMeter.useStereoMeter) {
+                                                                laneVuMeter.displayedRightLevel = root.nextDisplayedMeterLevel(
+                                                                    laneVuMeter.displayedRightLevel,
+                                                                    laneVuMeter.sourceRightLevel,
+                                                                    deltaSeconds)
+                                                            } else {
+                                                                laneVuMeter.displayedRightLevel = laneVuMeter.displayedLeftLevel
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Row {
+                                                        anchors.fill: parent
+                                                        spacing: laneVuMeter.useStereoMeter ? 2 : 0
+
+                                                        Repeater {
+                                                            model: laneVuMeter.useStereoMeter ? 2 : 1
+
+                                                            Item {
+                                                                property int meterBarIndex: index
+                                                                width: laneVuMeter.useStereoMeter ? 8 : laneVuMeter.width
+                                                                height: laneVuMeter.height
+                                                                clip: true
+
+                                                                Rectangle {
+                                                                    anchors.fill: parent
+                                                                    color: "#0b1016"
+                                                                    border.width: laneVuMeter.useStereoMeter ? 0 : 1
+                                                                    border.color: "#1d2733"
+                                                                }
+
+                                                                Item {
+                                                                    id: laneSegmentArea
+
+                                                                    anchors.fill: parent
+                                                                    anchors.topMargin: 2
+                                                                    anchors.bottomMargin: 2
+                                                                    anchors.leftMargin: 1
+                                                                    anchors.rightMargin: 1
+
+                                                                    readonly property real segmentHeight: Math.max(
+                                                                        1,
+                                                                        (height - ((root.laneMeterSegmentCount - 1) * root.laneMeterSegmentGap)) / root.laneMeterSegmentCount)
+                                                                    readonly property real barLevel: parent.meterBarIndex === 0
+                                                                        ? laneVuMeter.displayedLeftLevel
+                                                                        : laneVuMeter.displayedRightLevel
+
+                                                                    Repeater {
+                                                                        model: root.laneMeterSegmentCount
+
+                                                                        Rectangle {
+                                                                            readonly property real segmentPosition: (index + 1) / root.laneMeterSegmentCount
+                                                                            x: 0
+                                                                            y: laneSegmentArea.height - ((index + 1) * height) - (index * root.laneMeterSegmentGap)
+                                                                            width: laneSegmentArea.width
+                                                                            height: laneSegmentArea.segmentHeight
+                                                                            radius: 1
+                                                                            color: root.meterSegmentColor(segmentPosition)
+                                                                            opacity: segmentPosition <= root.meterNormalized(laneSegmentArea.barLevel) ? 1.0 : 0.12
+                                                                        }
+                                                                    }
+                                                                }
+
+                                                                Rectangle {
+                                                                    width: parent.width
+                                                                    height: 1
+                                                                    color: "#b8c6d6"
+                                                                    opacity: 0.45
+                                                                    y: (laneSegmentArea.y + laneSegmentArea.height) - (root.meterZeroNormalized * laneSegmentArea.height)
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
                                                 Column {
+                                                    id: laneButtonStack
+
                                                     anchors.right: parent.right
                                                     anchors.rightMargin: 8
                                                     anchors.verticalCenter: parent.verticalCenter
