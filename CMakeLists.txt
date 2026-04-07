@@ -94,6 +94,8 @@ add_executable(dawg WIN32
     src/app/TrackEditService.h
     src/app/TransportController.cpp
     src/app/TransportController.h
+    src/app/TransportUiSyncController.cpp
+    src/app/TransportUiSyncController.h
     src/app/VideoPlaybackCoordinator.cpp
     src/app/VideoPlaybackCoordinator.h
     src/app/WindowChromeController.cpp

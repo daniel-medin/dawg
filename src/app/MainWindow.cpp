@@ -70,6 +70,7 @@
 #include "app/NodeDocument.h"
 #include "app/ProjectDocument.h"
 #include "app/ProjectTimelineThumbnails.h"
+#include "app/TransportUiSyncController.h"
 #include "app/VideoProxyController.h"
 #include "app/WindowChromeController.h"
 #include "core/audio/AudioDurationProbe.h"
@@ -2992,7 +2993,11 @@ void MainWindow::moveSelectedNodeRight()
 void MainWindow::updateFrame(const QImage& image, const int frameIndex, const double timestampSeconds)
 {
     m_debugUiController->updateFrame(image, frameIndex, timestampSeconds);
-    syncNodeEditorPlayheadToProjectFrame(frameIndex);
+    if (m_transportUiSyncController)
+    {
+        const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
+        m_transportUiSyncController->syncNodeEditorPlayheadToProjectFrame(frameIndex);
+    }
     if (m_controller
         && m_controller->isPlaying()
         && m_audioPoolQuickWidget
@@ -4543,7 +4548,10 @@ void MainWindow::resetNodeEditorPlayheadToStart()
     m_nodeEditorPreviewStartMs = 0;
     if (m_nodeEditorPreviewTimer.isActive())
     {
-        syncProjectMarkersToNodeEditor(0);
+        if (m_transportUiSyncController)
+        {
+            m_transportUiSyncController->syncProjectMarkersToNodeEditor(0);
+        }
         m_nodeEditorPreviewElapsedTimer.restart();
         if (m_controller)
         {
@@ -4557,145 +4565,11 @@ void MainWindow::resetNodeEditorPlayheadToStart()
     }
     else
     {
-        syncProjectPlayheadToNodeEditor(0);
+        if (m_transportUiSyncController)
+        {
+            m_transportUiSyncController->syncProjectPlayheadToNodeEditor(0);
+        }
     }
-}
-
-std::optional<int> MainWindow::nodeEditorProjectFrameForPlayheadMs(const int playheadMs) const
-{
-    if (!m_controller)
-    {
-        return std::nullopt;
-    }
-
-    const auto selectedRange = m_controller->selectedTrackFrameRange();
-    if (!selectedRange.has_value())
-    {
-        return std::nullopt;
-    }
-
-    const auto fps = std::max(0.0001, m_controller->fps());
-    const auto frameOffset = static_cast<int>(std::lround((static_cast<double>(std::max(0, playheadMs)) * fps) / 1000.0));
-    return std::clamp(
-        selectedRange->first + frameOffset,
-        selectedRange->first,
-        selectedRange->second);
-}
-
-std::optional<double> MainWindow::nodeEditorProjectFramePositionForPlayheadMs(const int playheadMs) const
-{
-    if (!m_controller)
-    {
-        return std::nullopt;
-    }
-
-    const auto selectedRange = m_controller->selectedTrackFrameRange();
-    if (!selectedRange.has_value())
-    {
-        return std::nullopt;
-    }
-
-    const auto fps = std::max(0.0001, m_controller->fps());
-    const auto frameOffset = (static_cast<double>(std::max(0, playheadMs)) * fps) / 1000.0;
-    return std::clamp(
-        static_cast<double>(selectedRange->first) + frameOffset,
-        static_cast<double>(selectedRange->first),
-        static_cast<double>(selectedRange->second));
-}
-
-void MainWindow::syncProjectPlayheadToNodeEditor(const int playheadMs)
-{
-    if (!m_controller)
-    {
-        return;
-    }
-
-    const auto projectFrame = nodeEditorProjectFrameForPlayheadMs(playheadMs);
-    if (!projectFrame.has_value() || *projectFrame == m_lastNodeEditorSyncedProjectFrame)
-    {
-        return;
-    }
-
-    m_lastNodeEditorSyncedProjectFrame = *projectFrame;
-    m_controller->seekToFrame(*projectFrame);
-    setTimelineCurrentFrame(*projectFrame);
-}
-
-void MainWindow::syncProjectMarkersToNodeEditor(const int playheadMs)
-{
-    const auto projectFrame = nodeEditorProjectFrameForPlayheadMs(playheadMs);
-    if (!projectFrame.has_value() || *projectFrame == m_lastNodeEditorSyncedProjectFrame)
-    {
-        syncThumbnailStripMarkerToNodeEditor(playheadMs);
-        return;
-    }
-
-    m_lastNodeEditorSyncedProjectFrame = *projectFrame;
-    if (m_timelineQuickController && m_timelineQuickWidget && m_timelineQuickWidget->isVisible())
-    {
-        m_timelineQuickController->setCurrentFrame(*projectFrame);
-    }
-    syncThumbnailStripMarkerToNodeEditor(playheadMs);
-}
-
-void MainWindow::syncThumbnailStripMarkerToNodeEditor(const int playheadMs)
-{
-    if (!m_thumbnailStripQuickController)
-    {
-        return;
-    }
-
-    const auto projectFramePosition = nodeEditorProjectFramePositionForPlayheadMs(playheadMs);
-    if (!projectFramePosition.has_value())
-    {
-        return;
-    }
-
-    m_thumbnailStripQuickController->setCurrentFramePosition(*projectFramePosition);
-}
-
-void MainWindow::syncNodeEditorPlayheadToProjectFrame(const int frameIndex)
-{
-    if (!m_controller || !m_nodeEditorQuickController)
-    {
-        return;
-    }
-
-    const auto selectedRange = m_controller->selectedTrackFrameRange();
-    if (!selectedRange.has_value())
-    {
-        m_lastNodeEditorSyncedProjectFrame = -1;
-        return;
-    }
-
-    const auto nodeDurationMs = m_nodeEditorQuickController->nodeDurationMs();
-    if (nodeDurationMs <= 0)
-    {
-        return;
-    }
-
-    const auto fps = std::max(0.0001, m_controller->fps());
-    int playheadMs = 0;
-    if (frameIndex <= selectedRange->first)
-    {
-        playheadMs = 0;
-    }
-    else if (frameIndex > selectedRange->second)
-    {
-        playheadMs = nodeDurationMs;
-    }
-    else
-    {
-        playheadMs = std::clamp(
-            static_cast<int>(std::lround(
-                (static_cast<double>(frameIndex - selectedRange->first) * 1000.0) / fps)),
-            0,
-            nodeDurationMs);
-    }
-
-    m_lastNodeEditorSyncedProjectFrame = frameIndex;
-    const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
-    m_nodeEditorQuickController->setPlayheadMs(playheadMs);
 }
 
 bool MainWindow::deleteSelectedNodeEditorSelection()
@@ -5062,7 +4936,10 @@ bool MainWindow::startNodeEditorPreview()
     }
 
     m_nodeEditorPreviewNodeDurationMs = std::max(1, m_nodeEditorQuickController->nodeDurationMs());
-    m_lastNodeEditorSyncedProjectFrame = -1;
+    if (m_transportUiSyncController)
+    {
+        m_transportUiSyncController->resetNodeEditorSync();
+    }
     m_lastNodeEditorPreviewProjectSyncMs = -1;
     m_lastNodeEditorPreviewMeterUpdateMs = -1;
     m_nodeEditorPreviewActiveAudioSignature.clear();
@@ -5096,7 +4973,10 @@ bool MainWindow::startNodeEditorPreview()
     m_nodeEditorPreviewElapsedTimer.restart();
     m_nodeEditorPreviewTimer.start();
     m_nodeEditorQuickController->setPlaybackActive(true);
-    syncThumbnailStripMarkerToNodeEditor(playheadMs);
+    if (m_transportUiSyncController)
+    {
+        m_transportUiSyncController->syncThumbnailStripMarkerToNodeEditor(playheadMs);
+    }
     showStatus(QStringLiteral("Playing node preview."));
     return true;
 }
@@ -5114,7 +4994,10 @@ void MainWindow::stopNodeEditorPreview(const bool restorePlaybackAnchor)
     }
     m_nodeEditorPreviewClips.clear();
     m_nodeEditorPreviewNodeDurationMs = 0;
-    m_lastNodeEditorSyncedProjectFrame = -1;
+    if (m_transportUiSyncController)
+    {
+        m_transportUiSyncController->resetNodeEditorSync();
+    }
     m_lastNodeEditorPreviewProjectSyncMs = -1;
     m_lastNodeEditorPreviewMeterUpdateMs = -1;
     m_nodeEditorPreviewActiveAudioSignature.clear();
@@ -5170,7 +5053,10 @@ void MainWindow::updateNodeEditorPreview()
     {
         const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
         m_nodeEditorQuickController->setPlayheadMs(m_nodeEditorPreviewNodeDurationMs);
-        syncProjectMarkersToNodeEditor(m_nodeEditorPreviewNodeDurationMs);
+        if (m_transportUiSyncController)
+        {
+            m_transportUiSyncController->syncProjectMarkersToNodeEditor(m_nodeEditorPreviewNodeDurationMs);
+        }
         updateMixMeterLevels();
         stopNodeEditorPreview();
         return;
@@ -5180,11 +5066,17 @@ void MainWindow::updateNodeEditorPreview()
         const QScopedValueRollback playbackUpdateGuard{m_nodeEditorPreviewUpdatingPlayhead, true};
         m_nodeEditorQuickController->setPlayheadMs(nextPlayheadMs);
     }
-    syncThumbnailStripMarkerToNodeEditor(nextPlayheadMs);
+    if (m_transportUiSyncController)
+    {
+        m_transportUiSyncController->syncThumbnailStripMarkerToNodeEditor(nextPlayheadMs);
+    }
     if (m_lastNodeEditorPreviewProjectSyncMs < 0
         || std::abs(nextPlayheadMs - m_lastNodeEditorPreviewProjectSyncMs) >= kNodePreviewProjectSyncIntervalMs)
     {
-        syncProjectMarkersToNodeEditor(nextPlayheadMs);
+        if (m_transportUiSyncController)
+        {
+            m_transportUiSyncController->syncProjectMarkersToNodeEditor(nextPlayheadMs);
+        }
         m_lastNodeEditorPreviewProjectSyncMs = nextPlayheadMs;
     }
     if (m_controller && shouldSyncNodeEditorPreviewAudio(nextPlayheadMs))
@@ -5512,6 +5404,15 @@ void MainWindow::buildUi()
     m_audioPoolQuickController = new AudioPoolQuickController(*this, this);
     m_audioPoolQuickController->setShowLength(m_audioPoolShowLength);
     m_audioPoolQuickController->setShowSize(m_audioPoolShowSize);
+    m_transportUiSyncController = std::make_unique<TransportUiSyncController>(
+        *m_controller,
+        *m_nodeEditorQuickController,
+        *m_timelineQuickController,
+        *m_thumbnailStripQuickController,
+        [this]()
+        {
+            return m_timelineQuickWidget && m_timelineQuickWidget->isVisible();
+        });
     m_contextMenuController = new ContextMenuController(this);
     m_dialogController = new DialogController(this);
     m_filePickerController = new FilePickerController(this);
@@ -5549,11 +5450,17 @@ void MainWindow::buildUi()
 
             if (m_nodeEditorPreviewTimer.isActive())
             {
-                syncProjectMarkersToNodeEditor(playheadMs);
+                if (m_transportUiSyncController)
+                {
+                    m_transportUiSyncController->syncProjectMarkersToNodeEditor(playheadMs);
+                }
             }
             else
             {
-                syncProjectPlayheadToNodeEditor(playheadMs);
+                if (m_transportUiSyncController)
+                {
+                    m_transportUiSyncController->syncProjectPlayheadToNodeEditor(playheadMs);
+                }
             }
             if (!m_nodeEditorPreviewTimer.isActive()
                 || m_nodeEditorPreviewNodeDurationMs <= 0)

@@ -45,6 +45,7 @@ class ShellOverlayController;
 class QWidget;
 class TimelineQuickController;
 class ThumbnailStripQuickController;
+class TransportUiSyncController;
 class VideoViewportQuickController;
 class WindowChromeController;
 class QThread;
@@ -254,12 +255,6 @@ private:
     [[nodiscard]] bool nodeEditorHasFocus() const;
     [[nodiscard]] bool videoPanelHasFocus() const;
     void resetNodeEditorPlayheadToStart();
-    [[nodiscard]] std::optional<int> nodeEditorProjectFrameForPlayheadMs(int playheadMs) const;
-    [[nodiscard]] std::optional<double> nodeEditorProjectFramePositionForPlayheadMs(int playheadMs) const;
-    void syncProjectPlayheadToNodeEditor(int playheadMs);
-    void syncProjectMarkersToNodeEditor(int playheadMs);
-    void syncThumbnailStripMarkerToNodeEditor(int playheadMs);
-    void syncNodeEditorPlayheadToProjectFrame(int frameIndex);
     [[nodiscard]] bool deleteSelectedNodeEditorSelection();
     void deleteFromFocusedPanel();
     void setNodeEditorLaneMuted(const QString& laneId, bool muted);
@@ -290,6 +285,7 @@ private:
     std::unique_ptr<DebugUiController> m_debugUiController;
     std::unique_ptr<MediaImportController> m_mediaImportController;
     std::unique_ptr<VideoProxyController> m_videoProxyController;
+    std::unique_ptr<TransportUiSyncController> m_transportUiSyncController;
     ActionRegistry* m_actionRegistry = nullptr;
     WindowChromeController* m_windowChromeController = nullptr;
     QQuickItem* m_shellRootItem = nullptr;
@@ -455,7 +451,6 @@ private:
     int m_nodeEditorPreviewNodeDurationMs = 0;
     std::vector<AudioPlaybackCoordinator::NodePreviewClip> m_nodeEditorPreviewClips;
     bool m_nodeEditorPreviewUpdatingPlayhead = false;
-    int m_lastNodeEditorSyncedProjectFrame = -1;
     int m_lastNodeEditorPreviewProjectSyncMs = -1;
     int m_lastNodeEditorPreviewMeterUpdateMs = -1;
     QString m_nodeEditorPreviewActiveAudioSignature;
