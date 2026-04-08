@@ -66,10 +66,22 @@ add_executable(dawg WIN32
     src/app/NodeDocument.h
     src/app/NodeController.cpp
     src/app/NodeController.h
+    src/app/NodeEditorEditSession.cpp
+    src/app/NodeEditorEditSession.h
+    src/app/NodeEditorWorkspaceSession.cpp
+    src/app/NodeEditorWorkspaceSession.h
+    src/app/NodeEditorDocumentUtils.cpp
+    src/app/NodeEditorDocumentUtils.h
+    src/app/NodeEditorPreviewSession.cpp
+    src/app/NodeEditorPreviewSession.h
     src/app/PanelLayoutController.cpp
     src/app/PanelLayoutController.h
+    src/app/ShellUiSetupController.cpp
+    src/app/ShellUiSetupController.h
     src/app/TimelineLayoutService.cpp
     src/app/TimelineLayoutService.h
+    src/app/TimelineThumbnailGenerationController.cpp
+    src/app/TimelineThumbnailGenerationController.h
     src/app/ProjectDocument.cpp
     src/app/ProjectDocument.h
     src/app/ProjectTimelineThumbnails.cpp

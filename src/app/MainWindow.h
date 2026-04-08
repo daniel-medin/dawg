@@ -14,19 +14,15 @@
 #include <QQuickItem>
 #include <QQuickView>
 #include <QShortcut>
-#include <QSet>
 #include <QTimer>
 
 #include "app/AudioPlaybackCoordinator.h"
-#include "app/NodeDocument.h"
 #include "app/ProjectDocument.h"
-#include "ui/AudioClipPreviewTypes.h"
 #include "ui/MixTypes.h"
 #include "ui/TimelineTypes.h"
 
 class PlayerController;
 class DebugOverlayWindow;
-class ClipWaveformQuickItem;
 class MixQuickController;
 class NativeVideoViewport;
 class NodeEditorQuickController;
@@ -46,10 +42,13 @@ class ShellOverlayController;
 class QWidget;
 class TimelineQuickController;
 class ThumbnailStripQuickController;
+class NodeEditorPreviewSession;
+class NodeEditorWorkspaceSession;
+class ShellUiSetupController;
+class TimelineThumbnailGenerationController;
 class TransportUiSyncController;
 class VideoViewportQuickController;
 class WindowChromeController;
-class QThread;
 
 class MainWindow final : public QQuickView
 {
@@ -100,7 +99,6 @@ private slots:
     void saveProject();
     void saveProjectAs();
     void openVideo();
-    void importSound();
     void importAudioToPool();
     void trimSelectedNodeToSound();
     void toggleSelectedNodeAutoPan();
@@ -150,12 +148,10 @@ private slots:
     void updateNativeViewportVisibility(bool visible);
 
 private:
-    struct TimelineThumbnailGenerationRequest
+    enum class PlaybackContext
     {
-        QString projectRootPath;
-        QString videoPath;
-        int totalFrames = 0;
-        double fps = 0.0;
+        Project,
+        NodeEditor
     };
 
     friend class MainWindowActions;
@@ -166,6 +162,8 @@ private:
     friend class VideoProxyController;
     friend class ActionRegistry;
     friend class AudioPoolQuickController;
+    friend class ShellUiSetupController;
+    friend class TimelineThumbnailGenerationController;
 
     void showNodeContextMenu(const QUuid& trackId, const QPoint& globalPosition, bool includeSoundActions);
     void showLoopContextMenu(const QPoint& globalPosition);
@@ -173,16 +171,7 @@ private:
     void buildUi();
     void refreshTimeline();
     void requestProjectTimelineThumbnailsGeneration();
-    void startProjectTimelineThumbnailsGeneration(const TimelineThumbnailGenerationRequest& request);
-    void handleProjectTimelineThumbnailsGenerationFinished(
-        quint64 generationId,
-        const TimelineThumbnailGenerationRequest& request,
-        bool success,
-        const QString& errorMessage);
     void refreshNodeEditor();
-    void handleNodeEditorFileAction(const QString& actionKey);
-    void handleNodeEditorAudioAction(const QString& actionKey);
-    void handleNodeEditorEditAction(const QString& actionKey);
     void refreshMixView();
     void updateEditActionState();
     void updateOverlayPositions();
@@ -257,49 +246,15 @@ private:
     void syncNodeEditorActionAvailability();
     [[nodiscard]] bool nodeEditorHasFocus() const;
     [[nodiscard]] bool videoPanelHasFocus() const;
-    void resetNodeEditorPlayheadToStart();
-    [[nodiscard]] bool deleteSelectedNodeEditorSelection();
-    [[nodiscard]] bool copySelectedNodeEditorClip();
-    [[nodiscard]] bool cutSelectedNodeEditorClip();
-    [[nodiscard]] bool pasteNodeEditorClip();
-    void copyNodeEditorClip(const QString& laneId, const QString& clipId, int laneOffsetMs);
-    void dropNodeEditorClip(
-        const QString& sourceLaneId,
-        const QString& clipId,
-        const QString& targetLaneId,
-        int laneOffsetMs,
-        bool copyClip);
+    [[nodiscard]] PlaybackContext preferredPlaybackContext() const;
+    void playFromPreferredContext();
+    void setPreferredPlaybackContext(PlaybackContext context);
     void deleteFromFocusedPanel();
-    void setNodeEditorLaneMuted(const QString& laneId, bool muted);
-    void setNodeEditorLaneSoloed(const QString& laneId, bool soloed);
-    void moveNodeEditorClip(const QString& laneId, const QString& clipId, int laneOffsetMs);
-    void trimNodeEditorClip(const QString& laneId, const QString& clipId, int targetMs, bool trimStart);
-    [[nodiscard]] bool trimSelectedNodeEditorClipToPlayhead(bool trimStart);
-    bool startNodeEditorPreview();
-    void stopNodeEditorPreview(bool restorePlaybackAnchor = true);
-    void toggleNodeEditorPreview();
-    void updateNodeEditorPreviewMeters();
-    [[nodiscard]] QString nodeEditorPreviewActiveAudioSignature(int playheadMs) const;
-    [[nodiscard]] bool shouldSyncNodeEditorPreviewAudio(int playheadMs);
     [[nodiscard]] std::optional<int> timelineLoopShortcutFrame() const;
     [[nodiscard]] bool timelineHasSelectedLoopRange() const;
     [[nodiscard]] bool timelineHasFocus() const;
     [[nodiscard]] int timelineMinimumHeight() const;
     void updateTimelineMinimumHeight();
-    void syncNodeWaveformItem();
-    [[nodiscard]] QString projectNodesDirectoryPath() const;
-    [[nodiscard]] bool saveSelectedNodeToFile(
-        const QString& nodeFilePath,
-        bool bindToSelectedTrack = true,
-        const QString& nodeLabelOverride = {});
-    [[nodiscard]] bool openNodeFileAsNewNode(const QString& nodeFilePath);
-    [[nodiscard]] bool writeSelectedNodeEditorDocument(
-        const QUuid& selectedTrackId,
-        const QString& nodeDocumentPath,
-        const dawg::node::Document& nodeDocument,
-        const QString& failureStatus,
-        bool forcePreviewSync = false);
-
     PlayerController* m_controller = nullptr;
     std::unique_ptr<MainWindowActions> m_actionsController;
     std::unique_ptr<ProjectWindowController> m_projectWindowController;
@@ -307,7 +262,11 @@ private:
     std::unique_ptr<DebugUiController> m_debugUiController;
     std::unique_ptr<MediaImportController> m_mediaImportController;
     std::unique_ptr<VideoProxyController> m_videoProxyController;
+    std::unique_ptr<ShellUiSetupController> m_shellUiSetupController;
+    std::unique_ptr<TimelineThumbnailGenerationController> m_timelineThumbnailGenerationController;
     std::unique_ptr<TransportUiSyncController> m_transportUiSyncController;
+    std::unique_ptr<NodeEditorPreviewSession> m_nodeEditorPreviewSession;
+    std::unique_ptr<NodeEditorWorkspaceSession> m_nodeEditorWorkspaceSession;
     ActionRegistry* m_actionRegistry = nullptr;
     WindowChromeController* m_windowChromeController = nullptr;
     QQuickItem* m_shellRootItem = nullptr;
@@ -324,7 +283,6 @@ private:
     ThumbnailStripQuickController* m_thumbnailStripQuickController = nullptr;
     QQuickItem* m_nodeEditorQuickWidget = nullptr;
     NodeEditorQuickController* m_nodeEditorQuickController = nullptr;
-    ClipWaveformQuickItem* m_nodeEditorWaveformItem = nullptr;
     QQuickItem* m_mixQuickWidget = nullptr;
     MixQuickController* m_mixQuickController = nullptr;
     DebugOverlayWindow* m_debugOverlay = nullptr;
@@ -348,7 +306,6 @@ private:
     FilePickerController* m_filePickerController = nullptr;
     QQuickItem* m_shellOverlayQuickWidget = nullptr;
     ShellOverlayController* m_shellOverlayController = nullptr;
-    QSet<QUuid> m_nodeTracksWithUnsavedChanges;
     QUuid m_trackGainPopupTrackId;
     QUuid m_contextMenuTrackId;
     QString m_contextMenuNodeLabel;
@@ -445,8 +402,6 @@ private:
     QString m_videoMemoryUsageText;
     QString m_qtQuickLoadText;
     QString m_qtQuickGraphicsApiText;
-    std::optional<AudioClipPreviewState> m_nodeEditorState;
-    std::optional<dawg::node::AudioClipData> m_nodeEditorClipClipboard;
     std::optional<int> m_pendingLoopShortcutStartFrame;
     std::optional<int> m_pendingLoopShortcutEndFrame;
     float m_masterMixGainDb = 0.0F;
@@ -457,7 +412,6 @@ private:
     QTimer m_clearAllShortcutTimer;
     QTimer m_memoryUsageTimer;
     QTimer m_mixMeterTimer;
-    QTimer m_nodeEditorPreviewMeterTimer;
     QTimer m_statusToastTimer;
     QTimer m_canvasTipsTimer;
     QTimer m_nodeNudgeTimer;
@@ -468,15 +422,6 @@ private:
     QElapsedTimer m_debugTextTimer;
     QElapsedTimer m_audioPoolPlaybackRefreshTimer;
     QElapsedTimer m_timelinePlaybackUiTimer;
-    QElapsedTimer m_nodeEditorPreviewMixMeterTimer;
-    int m_nodeEditorPreviewAnchorMs = 0;
-    int m_nodeEditorPreviewStartMs = 0;
-    int m_nodeEditorPreviewNodeDurationMs = 0;
-    std::vector<AudioPlaybackCoordinator::NodePreviewClip> m_nodeEditorPreviewClips;
-    bool m_nodeEditorPreviewUpdatingPlayhead = false;
-    bool m_nodeEditorPreviewActive = false;
-    QString m_nodeEditorPreviewActiveAudioSignature;
-    int m_lastNodeEditorPreviewAudioSyncMs = -1;
     int m_outputFpsFrameCount = 0;
     int m_lastTimelinePlaybackUiFrame = -1;
     double m_outputFps = 0.0;
@@ -489,12 +434,10 @@ private:
     bool m_mixDetached = false;
     bool m_audioPoolDetached = false;
     bool m_shuttingDown = false;
-    QThread* m_timelineThumbnailGenerationThread = nullptr;
-    std::optional<TimelineThumbnailGenerationRequest> m_pendingTimelineThumbnailGenerationRequest;
-    quint64 m_timelineThumbnailGenerationId = 0;
     QString m_currentProjectFilePath;
     QString m_currentProjectRootPath;
     QString m_currentProjectName;
+    PlaybackContext m_preferredPlaybackContext = PlaybackContext::Project;
     bool m_projectDirty = false;
     bool m_projectStateChangeInProgress = false;
 };

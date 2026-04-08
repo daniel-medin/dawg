@@ -56,7 +56,7 @@ void MainWindowActions::buildMenus()
     m_window.m_toggleNodeNameAction = new QAction(QStringLiteral("Toggle Node Name (E)"), &m_window);
     m_window.m_showAllNodeNamesAction = new QAction(QStringLiteral("Node Name Always On"), &m_window);
     m_window.m_useProxyVideoAction = new QAction(QStringLiteral("Use Proxy Video"), &m_window);
-    m_window.m_importSoundAction = new QAction(QStringLiteral("Import Audio..."), &m_window);
+    m_window.m_importSoundAction = new QAction(QStringLiteral("Import Audio To Pool..."), &m_window);
     m_window.m_detachVideoAction = new QAction(QStringLiteral("Detach Video"), &m_window);
     m_window.m_detachTimelineAction = new QAction(QStringLiteral("Detach Timeline"), &m_window);
     m_window.m_detachMixAction = new QAction(QStringLiteral("Detach Mixer"), &m_window);
@@ -117,7 +117,7 @@ void MainWindowActions::buildMenus()
     m_window.m_trimNodeAction->setEnabled(false);
     m_window.m_autoPanAction->setEnabled(false);
     m_window.m_toggleNodeNameAction->setEnabled(false);
-    m_window.m_importSoundAction->setEnabled(false);
+    m_window.m_importSoundAction->setEnabled(true);
     m_window.m_copyAction->setEnabled(false);
     m_window.m_pasteAction->setEnabled(false);
     m_window.m_cutAction->setEnabled(false);
@@ -152,7 +152,6 @@ void MainWindowActions::updateSelectionState(const bool hasSelection)
         m_window.m_autoPanAction->setChecked(hasSelection && m_window.m_controller->selectedTracksAutoPanEnabled());
     }
     m_window.m_toggleNodeNameAction->setEnabled(hasSelection);
-    m_window.m_importSoundAction->setEnabled(hasSelection);
     m_window.m_deleteNodeAction->setEnabled(hasSelection);
     m_window.m_showNodeEditorAction->setEnabled(hasSelection);
     m_window.refreshNodeEditor();

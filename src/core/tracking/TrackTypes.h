@@ -99,9 +99,14 @@ struct TrackPoint
     return QColor{122, 128, 136};
 }
 
+[[nodiscard]] inline bool trackHasAudioContent(const TrackPoint& track)
+{
+    return track.attachedAudio.has_value() || !track.nodeDocumentPath.trimmed().isEmpty();
+}
+
 [[nodiscard]] inline QColor trackDisplayColor(const TrackPoint& track)
 {
-    return track.attachedAudio.has_value() ? track.color : inactiveTrackDisplayColor();
+    return trackHasAudioContent(track) ? track.color : inactiveTrackDisplayColor();
 }
 
 struct TrackOverlay

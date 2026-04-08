@@ -26,7 +26,7 @@ Rectangle {
     property real clipDragGhostHeight: 1.0
     property real clipDragGhostVerticalZoom: 1.0
     property string clipDragGhostTitle: ""
-    property var clipDragGhostWaveformState: null
+    property var clipDragGhostWaveformState: ({})
 
     readonly property real meterFloorDb: -72.0
     readonly property real meterZeroNormalized: 2.0 / 3.0
@@ -124,7 +124,7 @@ Rectangle {
 
     function hideClipDragGhost() {
         clipDragGhostVisible = false
-        clipDragGhostWaveformState = null
+        clipDragGhostWaveformState = ({})
     }
 
     function showClipDragGhost(x, y, width, height, title, waveformState, verticalZoom) {
@@ -1181,7 +1181,7 @@ Rectangle {
                                 playheadVisible: false
                                 contentMargin: 0
                                 textureSize: Qt.size(Math.max(1, width), Math.max(1, height))
-                                waveformState: root.clipDragGhostWaveformState
+                                waveformState: root.clipDragGhostWaveformState || ({})
                                 previewWaveformState: ({ "active": false })
                                 verticalZoom: root.clipDragGhostVerticalZoom
 

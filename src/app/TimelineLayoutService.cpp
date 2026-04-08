@@ -111,7 +111,7 @@ std::vector<TimelineTrackSpan> TimelineLayoutService::timelineTrackSpans(
             .startFrame = candidate.startFrame,
             .endFrame = candidate.endFrame,
             .laneIndex = laneIndex,
-            .hasAttachedAudio = candidate.track->attachedAudio.has_value(),
+            .hasAttachedAudio = trackHasAudioContent(*candidate.track),
             .isSelected = std::find(
                 selectedTrackIds.cbegin(),
                 selectedTrackIds.cend(),

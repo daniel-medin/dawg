@@ -24,7 +24,6 @@ public:
         const QString& directory = {}) const;
 
     void openVideo();
-    void importSound();
     void importAudioToPool();
 
 private:

@@ -217,43 +217,6 @@ void MediaImportController::openVideo()
     }
 }
 
-void MediaImportController::importSound()
-{
-    if (!ensureProjectForMediaAction(QStringLiteral("import audio")))
-    {
-        return;
-    }
-
-    if (!m_window.m_controller->hasSelection())
-    {
-        m_window.showStatus(QStringLiteral("Select a node before importing audio."));
-        return;
-    }
-
-    const auto filePath = chooseOpenFileName(
-        QStringLiteral("Import Audio"),
-        QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
-        QStringLiteral("Audio Files (*.wav *.mp3 *.flac *.aif *.aiff *.m4a *.aac *.ogg);;All Files (*.*)"));
-    if (filePath.isEmpty())
-    {
-        return;
-    }
-
-    QString errorMessage;
-    const auto copiedFilePath = copyMediaIntoProject(filePath, QStringLiteral("audio"), &errorMessage);
-    if (!copiedFilePath.has_value())
-    {
-        static_cast<void>(m_window.m_dialogController->execMessage(
-            QStringLiteral("Import Audio"),
-            errorMessage,
-            {},
-            {DialogController::Button::Ok}));
-        return;
-    }
-
-    m_window.m_controller->importSoundForSelectedTrack(*copiedFilePath);
-}
-
 void MediaImportController::importAudioToPool()
 {
     if (!ensureProjectForMediaAction(QStringLiteral("import audio")))

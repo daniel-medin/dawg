@@ -598,7 +598,7 @@ std::vector<TrackOverlay> MotionTracker::overlaysForFrame(
             .highlightOpacity = (std::find(selectedTrackIds.begin(), selectedTrackIds.end(), track.id) != selectedTrackIds.end()) ? 1.0F
                 : (track.id == fadingTrackId ? fadingTrackOpacity : 0.0F),
             .showLabel = track.showLabel,
-            .hasAttachedAudio = track.attachedAudio.has_value(),
+            .hasAttachedAudio = trackHasAudioContent(track),
             .autoPanEnabled = track.autoPanEnabled
         });
     }

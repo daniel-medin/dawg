@@ -63,6 +63,28 @@ public:
         bool useStereoMeter = false;
     };
 
+    struct ProjectNodeClip
+    {
+        QUuid previewTrackId;
+        QUuid ownerTrackId;
+        QString assetPath;
+        int projectStartMs = 0;
+        int clipStartMs = 0;
+        int clipEndMs = 0;
+        float gainDb = 0.0F;
+        float pan = 0.0F;
+        bool useStereoMeter = false;
+    };
+
+    struct ProjectNodeTrackMeterState
+    {
+        QUuid ownerTrackId;
+        float meterLevel = 0.0F;
+        float meterLeftLevel = 0.0F;
+        float meterRightLevel = 0.0F;
+        bool useStereoMeter = false;
+    };
+
     explicit AudioPlaybackCoordinator(AudioEngine& audioEngine);
 
     [[nodiscard]] const QUuid& audioPoolPreviewTrackId() const;
@@ -88,6 +110,11 @@ public:
     [[nodiscard]] bool isNodePreviewPlaying() const;
     [[nodiscard]] AudioEngine::StereoLevels nodePreviewStereoLevels() const;
     [[nodiscard]] std::vector<NodePreviewLaneMeterState> nodePreviewLaneMeterStates() const;
+    void syncProjectNodePlayback(
+        const std::vector<ProjectNodeClip>& clips,
+        int currentProjectMs);
+    void stopProjectNodePlayback();
+    [[nodiscard]] std::vector<ProjectNodeTrackMeterState> projectNodeTrackMeterStates() const;
     void applyLiveMixStateToCurrentPlayback(
         const PlaybackSyncRequest& request,
         const std::vector<TimelineTrackSpan>& spans,
@@ -120,4 +147,7 @@ private:
     std::vector<NodePreviewClip> m_nodePreviewClips;
     std::vector<QUuid> m_nodePreviewTrackIds;
     std::vector<QUuid> m_nodePreviewActiveTrackIds;
+    std::vector<ProjectNodeClip> m_projectNodeClips;
+    std::vector<QUuid> m_projectNodeTrackIds;
+    std::vector<QUuid> m_projectNodeActiveTrackIds;
 };

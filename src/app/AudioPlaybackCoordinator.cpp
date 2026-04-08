@@ -403,6 +403,120 @@ AudioPlaybackCoordinator::nodePreviewLaneMeterStates() const
     return states;
 }
 
+void AudioPlaybackCoordinator::syncProjectNodePlayback(
+    const std::vector<ProjectNodeClip>& clips,
+    const int currentProjectMs)
+{
+    m_projectNodeClips = clips;
+    std::vector<QUuid> projectTrackIds;
+    std::vector<QUuid> activeTrackIds;
+    projectTrackIds.reserve(clips.size());
+    activeTrackIds.reserve(clips.size());
+
+    for (const auto& clip : clips)
+    {
+        if (clip.previewTrackId.isNull()
+            || clip.ownerTrackId.isNull()
+            || clip.assetPath.isEmpty()
+            || clip.clipEndMs <= clip.clipStartMs)
+        {
+            continue;
+        }
+
+        projectTrackIds.push_back(clip.previewTrackId);
+        const auto elapsedWithinClipMs = currentProjectMs - std::max(0, clip.projectStartMs);
+        if (elapsedWithinClipMs < 0)
+        {
+            continue;
+        }
+
+        const auto clipDurationMs = std::max(1, clip.clipEndMs - clip.clipStartMs);
+        if (elapsedWithinClipMs >= clipDurationMs)
+        {
+            continue;
+        }
+
+        activeTrackIds.push_back(clip.previewTrackId);
+
+        AudioEngine::TrackPlaybackOptions options;
+        options.offsetMs = clip.clipStartMs + elapsedWithinClipMs;
+        options.clipStartMs = clip.clipStartMs;
+        options.clipEndMs = clip.clipEndMs;
+        options.loopEnabled = false;
+
+        if (!m_audioEngine.playTrack(clip.previewTrackId, clip.assetPath, options))
+        {
+            continue;
+        }
+
+        m_audioEngine.setTrackGain(clip.previewTrackId, clip.gainDb);
+        m_audioEngine.setTrackPan(clip.previewTrackId, clip.pan);
+    }
+
+    for (const auto& previousTrackId : m_projectNodeTrackIds)
+    {
+        if (!containsTrackId(activeTrackIds, previousTrackId))
+        {
+            m_audioEngine.stopTrack(previousTrackId);
+        }
+    }
+
+    m_projectNodeTrackIds = std::move(projectTrackIds);
+    m_projectNodeActiveTrackIds = std::move(activeTrackIds);
+}
+
+void AudioPlaybackCoordinator::stopProjectNodePlayback()
+{
+    for (const auto& trackId : m_projectNodeTrackIds)
+    {
+        m_audioEngine.stopTrack(trackId);
+    }
+    m_projectNodeClips.clear();
+    m_projectNodeTrackIds.clear();
+    m_projectNodeActiveTrackIds.clear();
+}
+
+std::vector<AudioPlaybackCoordinator::ProjectNodeTrackMeterState>
+AudioPlaybackCoordinator::projectNodeTrackMeterStates() const
+{
+    std::vector<ProjectNodeTrackMeterState> states;
+    for (const auto& clip : m_projectNodeClips)
+    {
+        if (clip.ownerTrackId.isNull()
+            || clip.previewTrackId.isNull()
+            || !containsTrackId(m_projectNodeActiveTrackIds, clip.previewTrackId))
+        {
+            continue;
+        }
+
+        auto stateIt = std::find_if(
+            states.begin(),
+            states.end(),
+            [&clip](const ProjectNodeTrackMeterState& state)
+            {
+                return state.ownerTrackId == clip.ownerTrackId;
+            });
+        if (stateIt == states.end())
+        {
+            states.push_back(ProjectNodeTrackMeterState{
+                .ownerTrackId = clip.ownerTrackId,
+                .useStereoMeter = clip.useStereoMeter
+            });
+            stateIt = std::prev(states.end());
+        }
+
+        const auto trackLevels = m_audioEngine.trackStereoLevels(clip.previewTrackId);
+        stateIt->meterLeftLevel = std::max(stateIt->meterLeftLevel, trackLevels.left);
+        stateIt->meterRightLevel = std::max(stateIt->meterRightLevel, trackLevels.right);
+        stateIt->meterLevel = std::max(
+            stateIt->meterLevel,
+            std::max(trackLevels.left, trackLevels.right));
+        stateIt->useStereoMeter = stateIt->useStereoMeter || clip.useStereoMeter;
+    }
+
+    return states;
+}
+
 void AudioPlaybackCoordinator::applyLiveMixStateToCurrentPlayback(
     const PlaybackSyncRequest& request,
     const std::vector<TimelineTrackSpan>& spans,
@@ -413,6 +527,7 @@ void AudioPlaybackCoordinator::applyLiveMixStateToCurrentPlayback(
 {
     if (!request.hasVideoLoaded)
     {
+        stopProjectNodePlayback();
         return;
     }
 
@@ -548,6 +663,7 @@ void AudioPlaybackCoordinator::syncAttachedAudioForCurrentFrame(
         }
         m_audioEngine.setTrackPan(track.id, pan);
     }
+
 }
 
 void AudioPlaybackCoordinator::reset()
@@ -555,4 +671,5 @@ void AudioPlaybackCoordinator::reset()
     stopAudioPoolPreview();
     stopClipPreview();
     stopNodePreview();
+    stopProjectNodePlayback();
 }

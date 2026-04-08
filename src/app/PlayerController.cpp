@@ -7,12 +7,14 @@
 #include "app/TrackAudioSession.h"
 #include "app/MixStateStore.h"
 #include "app/NodeController.h"
+#include "app/NodeEditorDocumentUtils.h"
 #include "app/ProjectSessionAdapter.h"
 #include "app/SelectionController.h"
 #include "app/TimelineLayoutService.h"
 #include "app/TrackEditService.h"
 #include "app/VideoPlaybackCoordinator.h"
 #include <QHash>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
 
@@ -42,6 +44,13 @@ QString normalizedAbsolutePath(const QString& path)
 bool pathsMatch(const QString& left, const QString& right)
 {
     return QString::compare(normalizedAbsolutePath(left), normalizedAbsolutePath(right), pathCaseSensitivity()) == 0;
+}
+
+QUuid projectNodePlaybackTrackId(const QUuid& ownerTrackId, const QUuid& nodeClipTrackId)
+{
+    QByteArray bytes = ownerTrackId.toRfc4122();
+    bytes.append(nodeClipTrackId.toRfc4122());
+    return QUuid::fromRfc4122(QCryptographicHash::hash(bytes, QCryptographicHash::Md5));
 }
 
 int audioClipStartMs(const AudioAttachment& attachment)
@@ -157,6 +166,7 @@ void PlayerController::clearProjectStateAfterMediaStop(const bool resetVideoPlay
     m_mixStateStore->reset();
     m_audioDurationMsByPath.clear();
     m_audioChannelCountByPath.clear();
+    m_nodePreviewClipsByPath.clear();
     m_playbackDebugStats = {};
     m_trackAudioSession->reset();
     m_audioPlaybackCoordinator->reset();
@@ -1576,6 +1586,36 @@ std::vector<MixLaneStrip> PlayerController::mixLaneStrips() const
         m_mixStateStore->mutedByLane(),
         m_mixStateStore->soloByLane());
 
+    const auto projectNodeMeterStates = m_audioPlaybackCoordinator->projectNodeTrackMeterStates();
+    for (const auto& meterState : projectNodeMeterStates)
+    {
+        const auto spanIt = std::find_if(
+            spans.begin(),
+            spans.end(),
+            [&meterState](const TimelineTrackSpan& span)
+            {
+                return span.id == meterState.ownerTrackId;
+            });
+        if (spanIt == spans.end())
+        {
+            continue;
+        }
+
+        for (auto& strip : strips)
+        {
+            if (strip.laneIndex != spanIt->laneIndex)
+            {
+                continue;
+            }
+
+            strip.meterLeftLevel = std::max(strip.meterLeftLevel, meterState.meterLeftLevel);
+            strip.meterRightLevel = std::max(strip.meterRightLevel, meterState.meterRightLevel);
+            strip.meterLevel = std::max(strip.meterLevel, meterState.meterLevel);
+            strip.useStereoMeter = strip.useStereoMeter || meterState.useStereoMeter;
+            break;
+        }
+    }
+
     if (m_audioPlaybackCoordinator->isClipPreviewPlaying())
     {
         const auto sourceTrackId = m_audioPlaybackCoordinator->clipPreviewSourceTrackId();
@@ -1643,6 +1683,35 @@ std::vector<MixLaneStrip> PlayerController::mixLaneStrips() const
 std::vector<MixLaneMeterState> PlayerController::mixLaneMeterStates(const std::vector<TimelineTrackSpan>& spans) const
 {
     auto meterStates = TimelineLayoutService::mixLaneMeterStates(spans, m_tracker.tracks(), *m_audioEngine);
+    const auto projectNodeMeterStates = m_audioPlaybackCoordinator->projectNodeTrackMeterStates();
+    for (const auto& meterState : projectNodeMeterStates)
+    {
+        const auto spanIt = std::find_if(
+            spans.begin(),
+            spans.end(),
+            [&meterState](const TimelineTrackSpan& span)
+            {
+                return span.id == meterState.ownerTrackId;
+            });
+        if (spanIt == spans.end())
+        {
+            continue;
+        }
+
+        for (auto& state : meterStates)
+        {
+            if (state.laneIndex != spanIt->laneIndex)
+            {
+                continue;
+            }
+
+            state.meterLeftLevel = std::max(state.meterLeftLevel, meterState.meterLeftLevel);
+            state.meterRightLevel = std::max(state.meterRightLevel, meterState.meterRightLevel);
+            state.meterLevel = std::max(state.meterLevel, meterState.meterLevel);
+            break;
+        }
+    }
+
     if (m_audioPlaybackCoordinator->isClipPreviewPlaying())
     {
         const auto sourceTrackId = m_audioPlaybackCoordinator->clipPreviewSourceTrackId();
@@ -1876,6 +1945,69 @@ std::optional<int> PlayerController::audioChannelCount(const QString& filePath) 
     return channelCount;
 }
 
+const std::vector<AudioPlaybackCoordinator::NodePreviewClip>& PlayerController::cachedNodePreviewClips(
+    const QString& nodeDocumentPath) const
+{
+    static const std::vector<AudioPlaybackCoordinator::NodePreviewClip> kEmptyClips;
+
+    if (nodeDocumentPath.isEmpty())
+    {
+        return kEmptyClips;
+    }
+
+    const QFileInfo fileInfo(nodeDocumentPath);
+    if (!fileInfo.exists())
+    {
+        m_nodePreviewClipsByPath.remove(nodeDocumentPath);
+        return kEmptyClips;
+    }
+
+    const auto lastModifiedUtc = fileInfo.lastModified().toUTC();
+    if (const auto cachedIt = m_nodePreviewClipsByPath.constFind(nodeDocumentPath);
+        cachedIt != m_nodePreviewClipsByPath.cend()
+        && cachedIt->lastModifiedUtc == lastModifiedUtc)
+    {
+        return cachedIt->clips;
+    }
+
+    QString errorMessage;
+    const auto document = dawg::node::loadDocument(nodeDocumentPath, &errorMessage);
+    if (!document.has_value())
+    {
+        m_nodePreviewClipsByPath.remove(nodeDocumentPath);
+        return kEmptyClips;
+    }
+
+    CachedNodePreviewClips entry;
+    entry.lastModifiedUtc = lastModifiedUtc;
+    entry.clips = dawg::nodeeditor::nodePreviewClipsFromDocument(
+        *document,
+        [this](const QString& filePath)
+        {
+            return audioDurationMs(filePath);
+        },
+        [this](const QString& filePath)
+        {
+            return audioChannelCount(filePath);
+        });
+    return m_nodePreviewClipsByPath.insert(nodeDocumentPath, std::move(entry)).value().clips;
+}
+
+void PlayerController::invalidateNodePreviewClipCache(const QString& nodeDocumentPath)
+{
+    if (nodeDocumentPath.isEmpty())
+    {
+        return;
+    }
+
+    m_nodePreviewClipsByPath.remove(QDir::cleanPath(nodeDocumentPath));
+}
+
+std::optional<int> PlayerController::audioFileDurationMs(const QString& filePath) const
+{
+    return audioDurationMs(filePath);
+}
+
 std::optional<int> PlayerController::audioFileChannelCount(const QString& filePath) const
 {
     return audioChannelCount(filePath);
@@ -2093,6 +2225,93 @@ void PlayerController::applyLiveMixStateToCurrentPlayback()
 void PlayerController::syncAttachedAudioForCurrentFrame()
 {
     const auto spans = timelineTrackSpans();
+    auto tracks = m_tracker.tracks();
+    std::vector<AudioPlaybackCoordinator::ProjectNodeClip> projectNodeClips;
+    projectNodeClips.reserve(tracks.size() * 2);
+
+    QHash<QUuid, int> laneByTrackId;
+    laneByTrackId.reserve(static_cast<qsizetype>(spans.size()));
+    for (const auto& span : spans)
+    {
+        laneByTrackId.insert(span.id, span.laneIndex);
+    }
+
+    const auto currentTimestampSeconds = frameTimestampSeconds(m_videoPlaybackCoordinator->currentFrame().index);
+    const auto currentProjectMs =
+        std::max(0, static_cast<int>(std::lround(currentTimestampSeconds * 1000.0)));
+    const auto anyLaneSoloed = std::any_of(
+        m_mixStateStore->soloByLane().cbegin(),
+        m_mixStateStore->soloByLane().cend(),
+        [](const auto& entry)
+        {
+            return entry.second;
+        });
+
+    for (auto& track : tracks)
+    {
+        if (track.nodeDocumentPath.isEmpty())
+        {
+            continue;
+        }
+
+        const auto& nodeClips = cachedNodePreviewClips(track.nodeDocumentPath);
+        if (nodeClips.empty())
+        {
+            continue;
+        }
+
+        track.attachedAudio.reset();
+
+        const auto maxFrameIndex = std::max(0, m_videoPlaybackCoordinator->totalFrames() - 1);
+        const auto startFrame = std::clamp(track.startFrame, 0, maxFrameIndex);
+        const auto endFrame = track.endFrame.has_value()
+            ? std::clamp(std::max(startFrame, *track.endFrame), startFrame, maxFrameIndex)
+            : maxFrameIndex;
+        if (m_videoPlaybackCoordinator->currentFrame().index < startFrame
+            || m_videoPlaybackCoordinator->currentFrame().index > endFrame)
+        {
+            continue;
+        }
+
+        const auto startTimestampSeconds = frameTimestampSeconds(startFrame);
+        const auto nodeStartMs =
+            std::max(0, static_cast<int>(std::lround(startTimestampSeconds * 1000.0)));
+        const auto laneIndex = laneByTrackId.value(track.id, 0);
+        const auto laneMuted = m_mixStateStore->mutedByLane().contains(laneIndex)
+            && m_mixStateStore->mutedByLane().at(laneIndex);
+        const auto laneSoloed = m_mixStateStore->soloByLane().contains(laneIndex)
+            && m_mixStateStore->soloByLane().at(laneIndex);
+        const auto laneAudible = !laneMuted && (!anyLaneSoloed || laneSoloed);
+        const auto laneGainDb = m_mixStateStore->gainByLane().contains(laneIndex)
+            ? m_mixStateStore->gainByLane().at(laneIndex)
+            : 0.0F;
+
+        float pan = 0.0F;
+        if (track.autoPanEnabled && m_videoPlaybackCoordinator->currentFrame().frameSize.width > 1)
+        {
+            const auto samplePoint = track.interpolatedSampleAt(m_videoPlaybackCoordinator->currentFrame().index).value_or(QPointF{});
+            const auto normalizedPan =
+                ((samplePoint.x() / static_cast<double>(m_videoPlaybackCoordinator->currentFrame().frameSize.width - 1)) * 2.0)
+                - 1.0;
+            pan = std::clamp(static_cast<float>(normalizedPan), -1.0F, 1.0F);
+        }
+
+        for (const auto& clip : nodeClips)
+        {
+            projectNodeClips.push_back(AudioPlaybackCoordinator::ProjectNodeClip{
+                .previewTrackId = projectNodePlaybackTrackId(track.id, clip.previewTrackId),
+                .ownerTrackId = track.id,
+                .assetPath = clip.assetPath,
+                .projectStartMs = nodeStartMs + std::max(0, clip.laneOffsetMs),
+                .clipStartMs = clip.clipStartMs,
+                .clipEndMs = clip.clipEndMs,
+                .gainDb = laneAudible ? (clip.gainDb + laneGainDb) : -100.0F,
+                .pan = pan,
+                .useStereoMeter = clip.useStereoMeter
+            });
+        }
+    }
+
     m_audioPlaybackCoordinator->syncAttachedAudioForCurrentFrame(
         AudioPlaybackCoordinator::PlaybackSyncRequest{
             .hasVideoLoaded = hasVideoLoaded(),
@@ -2106,7 +2325,7 @@ void PlayerController::syncAttachedAudioForCurrentFrame()
             .embeddedVideoAudioMuted = m_embeddedVideoAudioMuted
         },
         spans,
-        m_tracker.tracks(),
+        tracks,
         m_mixStateStore->gainByLane(),
         m_mixStateStore->mutedByLane(),
         m_mixStateStore->soloByLane(),
@@ -2118,4 +2337,5 @@ void PlayerController::syncAttachedAudioForCurrentFrame()
         {
             return frameTimestampSeconds(frameIndex);
         });
+    m_audioPlaybackCoordinator->syncProjectNodePlayback(projectNodeClips, currentProjectMs);
 }
