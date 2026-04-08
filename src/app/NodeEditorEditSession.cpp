@@ -163,11 +163,26 @@ NodeEditorEditSession::Outcome NodeEditorEditSession::deleteSelection(
 NodeEditorEditSession::Outcome NodeEditorEditSession::trimSelectedClipToPlayhead(const bool trimStart)
 {
     Outcome outcome;
-    const auto laneId = m_nodeEditorQuickController.selectedLaneId();
-    const auto clipId = m_nodeEditorQuickController.selectedClipId();
+    auto laneId = m_nodeEditorQuickController.selectedLaneId();
+    auto clipId = m_nodeEditorQuickController.selectedClipId();
+    if (clipId.isEmpty())
+    {
+        QString resolvedLaneId;
+        QString resolvedClipId;
+        if (m_controller.resolveNodeClipAtPlayhead(
+                laneId,
+                m_nodeEditorQuickController.playheadMs(),
+                &resolvedLaneId,
+                &resolvedClipId))
+        {
+            laneId = resolvedLaneId;
+            clipId = resolvedClipId;
+        }
+    }
+
     if (laneId.isEmpty() || clipId.isEmpty())
     {
-        showStatus(QStringLiteral("Select an audio clip before trimming it."));
+        showStatus(QStringLiteral("Move the marker inside an audio clip before trimming it."));
         return outcome;
     }
 
@@ -185,7 +200,6 @@ NodeEditorEditSession::Outcome NodeEditorEditSession::trimSelectedClipToPlayhead
     outcome.forcePreviewSync = true;
     outcome.updatePasteAvailability = true;
     outcome.selectedLaneId = laneId;
-    outcome.selectedClipId = clipId;
     return outcome;
 }
 

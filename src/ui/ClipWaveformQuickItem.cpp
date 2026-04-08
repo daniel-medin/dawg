@@ -300,6 +300,24 @@ void ClipWaveformQuickItem::setVerticalZoom(const qreal zoom)
     emit verticalZoomChanged();
 }
 
+bool ClipWaveformQuickItem::invertedColors() const
+{
+    return m_invertedColors;
+}
+
+void ClipWaveformQuickItem::setInvertedColors(const bool inverted)
+{
+    if (m_invertedColors == inverted)
+    {
+        return;
+    }
+
+    m_invertedColors = inverted;
+    invalidateWaveformCache();
+    update();
+    emit invertedColorsChanged();
+}
+
 bool ClipWaveformQuickItem::scrollVisible() const
 {
     return m_scrollVisible;
@@ -918,7 +936,17 @@ void ClipWaveformQuickItem::rebuildWaveformCache()
         return;
     }
 
-    m_waveformCache.fill(QColor{10, 13, 18}.rgba());
+    const QColor cacheBackground = m_invertedColors ? QColor{214, 224, 235} : QColor{10, 13, 18};
+    const QColor framePen = m_invertedColors ? QColor{172, 184, 197} : QColor{34, 40, 48};
+    const QColor frameBrush = m_invertedColors ? QColor{228, 235, 243} : QColor{14, 18, 24};
+    const QColor boundsFill = m_invertedColors ? QColor{220, 229, 238} : QColor{12, 16, 22};
+    const QColor clipFill = m_invertedColors ? QColor{236, 242, 248} : QColor{24, 34, 46};
+    const QColor channelGuide = m_invertedColors ? QColor{183, 194, 206} : QColor{28, 35, 44};
+    const QColor activeWaveColor = m_invertedColors ? QColor{22, 31, 41} : QColor{202, 216, 234};
+    const QColor inactiveWaveColor = m_invertedColors ? QColor{98, 109, 121} : QColor{92, 102, 114};
+    const QColor emptyTextColor = m_invertedColors ? QColor{68, 78, 89} : QColor{126, 136, 148};
+
+    m_waveformCache.fill(cacheBackground.rgba());
 
     QPainter painter(&m_waveformCache);
     painter.setRenderHint(QPainter::Antialiasing, false);
@@ -930,25 +958,25 @@ void ClipWaveformQuickItem::rebuildWaveformCache()
         return;
     }
 
-    painter.setPen(QPen(QColor{34, 40, 48}, 1.0));
-    painter.setBrush(QColor{14, 18, 24});
+    painter.setPen(QPen(framePen, 1.0));
+    painter.setBrush(frameBrush);
     painter.drawRect(bounds);
 
     if (!m_state.has_value() || m_state->sourceDurationMs <= 0)
     {
-        painter.setPen(QColor{126, 136, 148});
+        painter.setPen(emptyTextColor);
         painter.drawText(bounds, Qt::AlignCenter, QStringLiteral("Select a node with audio."));
         m_waveformCacheDirty = false;
         return;
     }
 
     const auto clipRect = m_clipRangeOnly ? bounds : selectionRect(bounds);
-    painter.fillRect(bounds, QColor{12, 16, 22});
-    painter.fillRect(clipRect, QColor{24, 34, 46});
+    painter.fillRect(bounds, boundsFill);
+    painter.fillRect(clipRect, clipFill);
 
     const auto displayedChannelCount = std::clamp(m_waveformChannelCount, 1, 2);
     const auto channelRowHeight = bounds.height() / static_cast<double>(displayedChannelCount);
-    painter.setPen(QPen(QColor{28, 35, 44}, 1.0));
+    painter.setPen(QPen(channelGuide, 1.0));
     for (int channel = 0; channel < displayedChannelCount; ++channel)
     {
         const auto rowTop = bounds.top() + static_cast<double>(channel) * channelRowHeight;
@@ -999,7 +1027,7 @@ void ClipWaveformQuickItem::rebuildWaveformCache()
                 const auto topY = rowCenterY - (totalHeight > 0.001 ? positiveHeight : 1.0);
                 const auto drawHeight = totalHeight > 0.001 ? totalHeight + 1.0 : 2.0;
                 const auto active = clipRect.contains(QPointF{static_cast<double>(pixelX), rowCenterY});
-                painter.setBrush(active ? QColor{202, 216, 234} : QColor{92, 102, 114});
+                painter.setBrush(active ? activeWaveColor : inactiveWaveColor);
                 painter.drawRect(
                     QRectF{
                         QPointF{static_cast<double>(pixelX), topY},
@@ -1009,7 +1037,7 @@ void ClipWaveformQuickItem::rebuildWaveformCache()
     }
     else
     {
-        painter.setPen(QColor{126, 136, 148});
+        painter.setPen(emptyTextColor);
         painter.drawText(bounds, Qt::AlignCenter, QStringLiteral("Waveform unavailable."));
     }
 

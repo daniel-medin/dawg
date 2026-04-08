@@ -18,6 +18,7 @@ class ClipWaveformQuickItem : public QQuickPaintedItem
     Q_PROPERTY(bool playheadVisible READ playheadVisible WRITE setPlayheadVisible NOTIFY playheadVisibleChanged)
     Q_PROPERTY(qreal contentMargin READ contentMargin WRITE setContentMargin NOTIFY contentMarginChanged)
     Q_PROPERTY(qreal verticalZoom READ verticalZoom WRITE setVerticalZoom NOTIFY verticalZoomChanged)
+    Q_PROPERTY(bool invertedColors READ invertedColors WRITE setInvertedColors NOTIFY invertedColorsChanged)
     Q_PROPERTY(bool scrollVisible READ scrollVisible NOTIFY scrollMetricsChanged)
     Q_PROPERTY(int scrollValue READ scrollValue NOTIFY scrollMetricsChanged)
     Q_PROPERTY(int scrollMaximum READ scrollMaximum NOTIFY scrollMetricsChanged)
@@ -43,6 +44,8 @@ public:
     void setContentMargin(qreal margin);
     [[nodiscard]] qreal verticalZoom() const;
     void setVerticalZoom(qreal zoom);
+    [[nodiscard]] bool invertedColors() const;
+    void setInvertedColors(bool inverted);
     [[nodiscard]] bool scrollVisible() const;
     [[nodiscard]] int scrollValue() const;
     [[nodiscard]] int scrollMaximum() const;
@@ -60,6 +63,7 @@ signals:
     void playheadVisibleChanged();
     void contentMarginChanged();
     void verticalZoomChanged();
+    void invertedColorsChanged();
     void scrollMetricsChanged();
     void waveformStateChanged();
     void previewWaveformStateChanged();
@@ -122,6 +126,7 @@ private:
     bool m_previewClipRangeActive = false;
     bool m_playheadVisible = true;
     qreal m_contentMargin = 10.0;
+    bool m_invertedColors = false;
     QString m_loadedAssetPath;
     std::vector<WaveformPeak> m_peaks;
     int m_waveformChannelCount = 0;

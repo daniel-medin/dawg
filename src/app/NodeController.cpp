@@ -2060,6 +2060,88 @@ bool NodeController::splitNodeClipAtPlayhead(
     return true;
 }
 
+bool NodeController::resolveNodeClipAtPlayhead(
+    const QString& preferredLaneId,
+    const int playheadMs,
+    QString* resolvedLaneId,
+    QString* resolvedClipId) const
+{
+    if (!m_controller.hasSelection())
+    {
+        return false;
+    }
+
+    QString nodeDocumentPath;
+    dawg::node::Document nodeDocument;
+    QString errorMessage;
+    if (!loadSelectedNodeDocument(&nodeDocumentPath, &nodeDocument, &errorMessage))
+    {
+        return false;
+    }
+
+    auto resolveFromLane = [this, playheadMs, resolvedLaneId, resolvedClipId](const dawg::node::LaneData& lane) -> bool
+    {
+        for (const auto& clip : lane.audioClips)
+        {
+            const auto clipRange = resolvedNodeClipRange(
+                clip,
+                [this](const QString& filePath) -> std::optional<int>
+                {
+                    return m_controller.audioFileDurationMs(filePath);
+                });
+            if (!clipRange.has_value())
+            {
+                continue;
+            }
+
+            if (playheadMs < clipRange->laneStartMs || playheadMs > clipRange->laneEndMs)
+            {
+                continue;
+            }
+
+            if (resolvedLaneId)
+            {
+                *resolvedLaneId = lane.id;
+            }
+            if (resolvedClipId)
+            {
+                *resolvedClipId = clip.id;
+            }
+            return true;
+        }
+        return false;
+    };
+
+    if (!preferredLaneId.isEmpty())
+    {
+        const auto preferredLaneIt = std::find_if(
+            nodeDocument.node.lanes.cbegin(),
+            nodeDocument.node.lanes.cend(),
+            [&preferredLaneId](const dawg::node::LaneData& lane)
+            {
+                return lane.id == preferredLaneId;
+            });
+        if (preferredLaneIt != nodeDocument.node.lanes.cend() && resolveFromLane(*preferredLaneIt))
+        {
+            return true;
+        }
+    }
+
+    for (const auto& lane : nodeDocument.node.lanes)
+    {
+        if (!preferredLaneId.isEmpty() && lane.id == preferredLaneId)
+        {
+            continue;
+        }
+        if (resolveFromLane(lane))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool NodeController::trimNodeClip(
     const QString& laneId,
     const QString& clipId,
@@ -2977,6 +3059,19 @@ bool PlayerController::splitNodeClipAtPlayhead(
         playheadMs,
         selectedLaneId,
         selectedClipId);
+}
+
+bool PlayerController::resolveNodeClipAtPlayhead(
+    const QString& preferredLaneId,
+    const int playheadMs,
+    QString* resolvedLaneId,
+    QString* resolvedClipId) const
+{
+    return m_nodeController->resolveNodeClipAtPlayhead(
+        preferredLaneId,
+        playheadMs,
+        resolvedLaneId,
+        resolvedClipId);
 }
 
 bool PlayerController::trimNodeClip(

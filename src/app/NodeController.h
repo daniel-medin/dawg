@@ -87,6 +87,11 @@ public:
         int playheadMs,
         QString* selectedLaneId = nullptr,
         QString* selectedClipId = nullptr);
+    [[nodiscard]] bool resolveNodeClipAtPlayhead(
+        const QString& preferredLaneId,
+        int playheadMs,
+        QString* resolvedLaneId,
+        QString* resolvedClipId) const;
     [[nodiscard]] bool trimNodeClip(
         const QString& laneId,
         const QString& clipId,
