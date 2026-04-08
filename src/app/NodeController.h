@@ -81,6 +81,12 @@ public:
         const QString& clipId,
         int laneOffsetMs,
         int nodeDurationMs);
+    [[nodiscard]] bool splitNodeClipAtPlayhead(
+        const QString& laneId,
+        const QString& clipId,
+        int playheadMs,
+        QString* selectedLaneId = nullptr,
+        QString* selectedClipId = nullptr);
     [[nodiscard]] bool trimNodeClip(
         const QString& laneId,
         const QString& clipId,

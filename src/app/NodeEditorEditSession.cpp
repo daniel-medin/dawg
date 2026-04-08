@@ -75,6 +75,42 @@ NodeEditorEditSession::Outcome NodeEditorEditSession::handleEditAction(const QSt
         }
     }
 
+    if (actionKey == QStringLiteral("splitClip"))
+    {
+        return splitSelectedClipAtPlayhead();
+    }
+
+    return outcome;
+}
+
+NodeEditorEditSession::Outcome NodeEditorEditSession::splitSelectedClipAtPlayhead()
+{
+    Outcome outcome;
+    const auto laneId = m_nodeEditorQuickController.selectedLaneId();
+    const auto clipId = m_nodeEditorQuickController.selectedClipId();
+    if (laneId.isEmpty() || clipId.isEmpty())
+    {
+        showStatus(QStringLiteral("Select an audio clip before cutting it at the marker."));
+        return outcome;
+    }
+
+    QString selectedLaneId;
+    QString selectedClipId;
+    if (!m_controller.splitNodeClipAtPlayhead(
+            laneId,
+            clipId,
+            m_nodeEditorQuickController.playheadMs(),
+            &selectedLaneId,
+            &selectedClipId))
+    {
+        return outcome;
+    }
+
+    outcome.documentChanged = true;
+    outcome.forcePreviewSync = true;
+    outcome.updatePasteAvailability = true;
+    outcome.selectedLaneId = selectedLaneId;
+    outcome.selectedClipId = selectedClipId;
     return outcome;
 }
 

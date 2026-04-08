@@ -26,6 +26,7 @@ public:
 
     [[nodiscard]] Outcome handleEditAction(const QString& actionKey);
     [[nodiscard]] Outcome deleteSelection(const std::function<bool(int clipCount)>& confirmDeletePopulatedLane);
+    [[nodiscard]] Outcome splitSelectedClipAtPlayhead();
     [[nodiscard]] Outcome trimSelectedClipToPlayhead(bool trimStart);
     [[nodiscard]] Outcome setLaneMuted(const QString& laneId, bool muted);
     [[nodiscard]] Outcome setLaneSoloed(const QString& laneId, bool soloed);

@@ -27,7 +27,11 @@ Rectangle {
     property real clipDragGhostVerticalZoom: 1.0
     property string clipDragGhostTitle: ""
     property var clipDragGhostWaveformState: ({})
-
+    property bool clipPreviewActive: false
+    property string clipPreviewLaneId: ""
+    property string clipPreviewClipId: ""
+    property real clipPreviewStartRatio: 0.0
+    property real clipPreviewEndRatio: 0.0
     readonly property real meterFloorDb: -72.0
     readonly property real meterZeroNormalized: 2.0 / 3.0
     readonly property real meterReleaseDbPerSecond: Math.abs(meterFloorDb)
@@ -92,9 +96,10 @@ Rectangle {
         if (clipWidth <= 0)
             return 0
         var edgeWidth = Math.min(clipEdgeHandleWidth, clipWidth * 0.5)
-        if (localX <= edgeWidth)
+        var edgeSlack = clipWidth > 6 ? 2 : 1
+        if (localX <= edgeWidth + edgeSlack)
             return -1
-        if (localX >= clipWidth - edgeWidth)
+        if (localX >= clipWidth - edgeWidth - edgeSlack)
             return 1
         return 0
     }
@@ -157,6 +162,86 @@ Rectangle {
             next[existingKey] = clipVerticalZooms[existingKey]
         next[key] = nextZoom
         clipVerticalZooms = next
+    }
+
+    function clearClipPreview() {
+        clipPreviewActive = false
+        clipPreviewLaneId = ""
+        clipPreviewClipId = ""
+        clipPreviewStartRatio = 0.0
+        clipPreviewEndRatio = 0.0
+    }
+
+    function setClipPreview(laneId, clipId, startRatio, endRatio) {
+        clipPreviewActive = true
+        clipPreviewLaneId = String(laneId)
+        clipPreviewClipId = String(clipId)
+        clipPreviewStartRatio = clamp(startRatio, 0.0, 1.0)
+        clipPreviewEndRatio = clamp(Math.max(startRatio, endRatio), 0.0, 1.0)
+    }
+
+    function effectiveClipStartRatio(laneId, clipId, fallbackStartRatio) {
+        if (clipPreviewActive
+            && clipPreviewLaneId === String(laneId)
+            && clipPreviewClipId === String(clipId))
+            return clipPreviewStartRatio
+        return fallbackStartRatio
+    }
+
+    function effectiveClipEndRatio(laneId, clipId, fallbackEndRatio) {
+        if (clipPreviewActive
+            && clipPreviewLaneId === String(laneId)
+            && clipPreviewClipId === String(clipId))
+            return clipPreviewEndRatio
+        return fallbackEndRatio
+    }
+
+    function clipIsPreviewTarget(laneId, clipId) {
+        return clipPreviewActive
+            && clipPreviewLaneId === String(laneId)
+            && clipPreviewClipId === String(clipId)
+    }
+
+    function clipHasLeftOverlap(laneId, clips, clipId, startRatio, endRatio) {
+        var effectiveStartRatio = effectiveClipStartRatio(laneId, clipId, startRatio)
+        var effectiveEndRatio = effectiveClipEndRatio(laneId, clipId, endRatio)
+        var laneClips = clips || []
+        for (var i = 0; i < laneClips.length; ++i) {
+            var otherClip = laneClips[i]
+            if (!otherClip || otherClip.clipId === clipId)
+                continue
+
+            var otherStartRatio = otherClip.clipOffsetRatio || 0
+            var otherWidthRatio = Math.max(0.0, otherClip.clipWidthRatio || 0.0)
+            var otherEndRatio = Math.min(1.0, otherStartRatio + otherWidthRatio)
+            otherStartRatio = effectiveClipStartRatio(laneId, otherClip.clipId, otherStartRatio)
+            otherEndRatio = effectiveClipEndRatio(laneId, otherClip.clipId, otherEndRatio)
+            if (otherStartRatio < effectiveStartRatio && otherEndRatio > effectiveStartRatio && effectiveEndRatio > effectiveStartRatio)
+                return true
+        }
+
+        return false
+    }
+
+    function clipHasRightOverlap(laneId, clips, clipId, startRatio, endRatio) {
+        var effectiveStartRatio = effectiveClipStartRatio(laneId, clipId, startRatio)
+        var effectiveEndRatio = effectiveClipEndRatio(laneId, clipId, endRatio)
+        var laneClips = clips || []
+        for (var i = 0; i < laneClips.length; ++i) {
+            var otherClip = laneClips[i]
+            if (!otherClip || otherClip.clipId === clipId)
+                continue
+
+            var otherStartRatio = otherClip.clipOffsetRatio || 0
+            var otherWidthRatio = Math.max(0.0, otherClip.clipWidthRatio || 0.0)
+            var otherEndRatio = Math.min(1.0, otherStartRatio + otherWidthRatio)
+            otherStartRatio = effectiveClipStartRatio(laneId, otherClip.clipId, otherStartRatio)
+            otherEndRatio = effectiveClipEndRatio(laneId, otherClip.clipId, otherEndRatio)
+            if (otherStartRatio < effectiveEndRatio && otherEndRatio > effectiveEndRatio && effectiveEndRatio > effectiveStartRatio)
+                return true
+        }
+
+        return false
     }
 
     onTimelineZoomChanged: clampTimelineStart()
@@ -312,6 +397,7 @@ Rectangle {
             return nodeEditorController.canExportNode
         case "copyClip":
         case "cutClip":
+        case "splitClip":
             return nodeEditorController.selectedClipId !== ""
         case "pasteClip":
             return nodeEditorController.canPasteClip
@@ -390,7 +476,8 @@ Rectangle {
                     onClicked: {
                         root.openMenu("edit", [
                             { key: "copyClip", text: "Copy Clip    Ctrl+C" },
-                            { key: "cutClip", text: "Cut Clip    Ctrl+X" },
+                            { key: "cutClip", text: "Cut To Clipboard    Ctrl+X" },
+                            { key: "splitClip", text: "Cut Clip    Ctrl+E" },
                             { key: "pasteClip", text: "Paste Clip    Ctrl+V" }
                         ], editMenuButton)
                     }
@@ -892,6 +979,19 @@ Rectangle {
                                                         readonly property real baseX: Math.round(root.timelineXForRatio(clipStartRatio, laneTimeline.width))
                                                         readonly property real visualBaseX: Math.round(root.timelineXForRatio(visualStartRatio, laneTimeline.width))
                                                         readonly property real maxOffsetRatio: Math.max(0.0, 1.0 - clipWidthRatio)
+                                                        readonly property bool leftEdgeOverlapped: root.clipHasLeftOverlap(
+                                                            laneDelegate.modelData.laneId,
+                                                            laneDelegate.modelData.clips,
+                                                            modelData.clipId,
+                                                            clipStartRatio,
+                                                            clipEndRatio)
+                                                        readonly property bool rightEdgeOverlapped: root.clipHasRightOverlap(
+                                                            laneDelegate.modelData.laneId,
+                                                            laneDelegate.modelData.clips,
+                                                            modelData.clipId,
+                                                            clipStartRatio,
+                                                            clipEndRatio)
+                                                        readonly property int hoveredTrimEdge: root.clipTrimEdgeAt(clipMouseArea.mouseX, width)
                                                         property bool dragPreviewActive: false
                                                         property bool copyDragPreviewActive: false
                                                         property bool clipDragMoved: false
@@ -905,7 +1005,7 @@ Rectangle {
                                                         property real dragStartClipX: 0
                                                         property real dragStartPointerX: 0
                                                         property real dragStartRootY: 0
-                                                        z: 10
+                                                        z: (dragPreviewActive && !copyDragPreviewActive) || trimPreviewActive ? 14 : 10
                                                         x: dragPreviewActive && !copyDragPreviewActive ? dragX : visualBaseX
                                                         y: 0
                                                         width: Math.max(
@@ -944,7 +1044,21 @@ Rectangle {
                                                             z: 2
                                                         }
 
+                                                        Rectangle {
+                                                            visible: clipTitle.paintedWidth > 0
+                                                            x: 4
+                                                            y: 2
+                                                            width: Math.min(
+                                                                Math.max(0, parent.width - 8),
+                                                                clipTitle.paintedWidth + 10)
+                                                            height: clipTitle.implicitHeight + 4
+                                                            radius: 3
+                                                            color: "#99000000"
+                                                            z: 3
+                                                        }
+
                                                         Text {
+                                                            id: clipTitle
                                                             anchors.left: parent.left
                                                             anchors.right: parent.right
                                                             anchors.top: parent.top
@@ -956,7 +1070,7 @@ Rectangle {
                                                             font.pixelSize: 11
                                                             font.weight: Font.Medium
                                                             elide: Text.ElideRight
-                                                            z: 3
+                                                            z: 4
                                                         }
 
                                                         Timer {
@@ -976,15 +1090,12 @@ Rectangle {
                                                             acceptedButtons: Qt.LeftButton
                                                             preventStealing: true
                                                             hoverEnabled: true
-                                                            cursorShape: root.clipTrimEdgeAt(mouseX, width) !== 0
+                                                            cursorShape: clipDelegate.hoveredTrimEdge !== 0
                                                                 ? Qt.SizeHorCursor
                                                                 : Qt.PointingHandCursor
                                                             onPressed: function(mouse) {
                                                                 var pointer = mapToItem(laneTimeline, mouse.x, mouse.y)
                                                                 root.forceActiveFocus()
-                                                                nodeEditorController.selectClip(
-                                                                    laneDelegate.modelData.laneId,
-                                                                    clipDelegate.modelData.clipId)
                                                                 clipDelegate.trimDragMode = root.clipTrimEdgeAt(mouse.x, width)
                                                                 root.hideClipDragGhost()
                                                                 clipDelegate.trimPreviewStartRatio = clipDelegate.clipStartRatio
@@ -1003,6 +1114,8 @@ Rectangle {
 
                                                                 var pointer = mapToItem(laneTimeline, mouse.x, mouse.y)
                                                                 if (clipDelegate.trimDragMode !== 0) {
+                                                                    if (!clipDelegate.clipTrimMoved)
+                                                                        nodeEditorController.selectLane(laneDelegate.modelData.laneId)
                                                                     var trimRatio = root.timelineRatioForX(pointer.x, laneTimeline.width)
                                                                     if (clipDelegate.trimDragMode < 0) {
                                                                         clipDelegate.trimPreviewStartRatio = root.clamp(
@@ -1021,6 +1134,11 @@ Rectangle {
                                                                     }
                                                                     clipDelegate.clipTrimMoved = true
                                                                     clipDelegate.trimPreviewActive = true
+                                                                    root.setClipPreview(
+                                                                        laneDelegate.modelData.laneId,
+                                                                        clipDelegate.modelData.clipId,
+                                                                        clipDelegate.trimPreviewStartRatio,
+                                                                        clipDelegate.trimPreviewEndRatio)
                                                                     mouse.accepted = true
                                                                     return
                                                                 }
@@ -1033,6 +1151,8 @@ Rectangle {
                                                                     && Math.abs(laneDragDelta) < 3)
                                                                     return
 
+                                                                if (!clipDelegate.clipDragMoved)
+                                                                    nodeEditorController.selectLane(laneDelegate.modelData.laneId)
                                                                 clipDelegate.clipDragMoved = true
                                                                 clipDelegate.dragPreviewActive = true
                                                                 clipDelegate.copyDragPreviewActive = (mouse.modifiers & Qt.ControlModifier) !== 0
@@ -1043,6 +1163,7 @@ Rectangle {
                                                                     Math.min(minDragX, maxDragX),
                                                                     Math.max(minDragX, maxDragX))
                                                                 if (clipDelegate.copyDragPreviewActive) {
+                                                                    root.clearClipPreview()
                                                                     var targetLaneIndex = root.laneIndexForRootY(rootPointer.y)
                                                                     root.showClipDragGhost(
                                                                         root.laneHeaderWidth + clipDelegate.dragX,
@@ -1053,6 +1174,12 @@ Rectangle {
                                                                         clipDelegate.modelData.waveformState,
                                                                         clipDelegate.verticalZoom)
                                                                 } else {
+                                                                    var previewStartRatio = root.timelineRatioForX(clipDelegate.dragX, laneTimeline.width)
+                                                                    root.setClipPreview(
+                                                                        laneDelegate.modelData.laneId,
+                                                                        clipDelegate.modelData.clipId,
+                                                                        previewStartRatio,
+                                                                        Math.min(1.0, previewStartRatio + clipDelegate.clipWidthRatio))
                                                                     root.hideClipDragGhost()
                                                                 }
                                                                 mouse.accepted = true
@@ -1088,6 +1215,7 @@ Rectangle {
                                                                 clipDelegate.copyDragPreviewActive = false
                                                                 clipDelegate.trimPreviewActive = false
                                                                 clipDelegate.trimDragMode = 0
+                                                                root.clearClipPreview()
                                                                 root.hideClipDragGhost()
                                                                 mouse.accepted = true
                                                             }
@@ -1098,6 +1226,7 @@ Rectangle {
                                                                 clipDelegate.trimPreviewActive = false
                                                                 clipDelegate.clipTrimMoved = false
                                                                 clipDelegate.trimDragMode = 0
+                                                                root.clearClipPreview()
                                                                 root.hideClipDragGhost()
                                                             }
                                                             onClicked: function(mouse) {
@@ -1106,15 +1235,71 @@ Rectangle {
                                                                     return
                                                                 }
                                                                 root.forceActiveFocus()
-                                                                nodeEditorController.selectClip(
-                                                                    laneDelegate.modelData.laneId,
-                                                                    clipDelegate.modelData.clipId)
+                                                                nodeEditorController.selectLane(laneDelegate.modelData.laneId)
                                                                 nodeEditorController.setPlayheadFromRatio(root.timelineRatioForX(clipDelegate.x + mouse.x, laneTimeline.width))
                                                             }
                                                             onDoubleClicked: {
                                                                 root.forceActiveFocus()
                                                                 nodeEditorController.selectClip(laneDelegate.modelData.laneId, clipDelegate.modelData.clipId)
                                                             }
+                                                        }
+                                                    }
+                                                }
+
+                                                Repeater {
+                                                    model: modelData.clips || []
+
+                                                    delegate: Item {
+                                                        required property var modelData
+                                                        readonly property real clipStartRatio: modelData.clipOffsetRatio || 0
+                                                        readonly property real clipWidthRatio: Math.max(0.0, modelData.clipWidthRatio || 0.08)
+                                                        readonly property real clipEndRatio: Math.min(1.0, clipStartRatio + clipWidthRatio)
+                                                        readonly property bool suppressPreviewOverlapMarker: root.clipPreviewActive
+                                                            && root.clipPreviewLaneId === String(laneDelegate.modelData.laneId)
+                                                            && root.clipPreviewClipId !== String(modelData.clipId)
+                                                        readonly property real effectiveStartRatio: root.effectiveClipStartRatio(
+                                                            laneDelegate.modelData.laneId,
+                                                            modelData.clipId,
+                                                            clipStartRatio)
+                                                        readonly property real effectiveEndRatio: root.effectiveClipEndRatio(
+                                                            laneDelegate.modelData.laneId,
+                                                            modelData.clipId,
+                                                            clipEndRatio)
+                                                        readonly property bool showLeftOverlap: !suppressPreviewOverlapMarker
+                                                            && root.clipHasLeftOverlap(
+                                                                laneDelegate.modelData.laneId,
+                                                                laneDelegate.modelData.clips,
+                                                                modelData.clipId,
+                                                                clipStartRatio,
+                                                                clipEndRatio)
+                                                        readonly property bool showRightOverlap: !suppressPreviewOverlapMarker
+                                                            && root.clipHasRightOverlap(
+                                                                laneDelegate.modelData.laneId,
+                                                                laneDelegate.modelData.clips,
+                                                                modelData.clipId,
+                                                                clipStartRatio,
+                                                                clipEndRatio)
+                                                        anchors.fill: parent
+                                                        z: 15
+
+                                                        Rectangle {
+                                                            visible: parent.showLeftOverlap
+                                                            x: Math.round(root.timelineXForRatio(parent.effectiveStartRatio, laneTimeline.width))
+                                                            y: 0
+                                                            width: 1
+                                                            height: laneTimeline.height
+                                                            color: "#0a0d12"
+                                                            opacity: 0.95
+                                                        }
+
+                                                        Rectangle {
+                                                            visible: parent.showRightOverlap
+                                                            x: Math.round(root.timelineXForRatio(parent.effectiveEndRatio, laneTimeline.width)) - 1
+                                                            y: 0
+                                                            width: 1
+                                                            height: laneTimeline.height
+                                                            color: "#0a0d12"
+                                                            opacity: 0.95
                                                         }
                                                     }
                                                 }
@@ -1231,6 +1416,7 @@ Rectangle {
                                 color: "#9ec7f0"
                                 z: 20
                             }
+
                         }
                     }
                 }

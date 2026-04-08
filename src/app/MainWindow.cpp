@@ -1519,7 +1519,10 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             return true;
         }
         if (!keyEvent->isAutoRepeat()
-            && (keyEvent->key() == Qt::Key_C || keyEvent->key() == Qt::Key_X || keyEvent->key() == Qt::Key_V)
+            && (keyEvent->key() == Qt::Key_C
+                || keyEvent->key() == Qt::Key_X
+                || keyEvent->key() == Qt::Key_V
+                || keyEvent->key() == Qt::Key_E)
             && keyEvent->modifiers() == Qt::ControlModifier
             && nodeEditorFocused())
         {
@@ -1530,6 +1533,10 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             else if (keyEvent->key() == Qt::Key_X)
             {
                 requestNodeEditorEditAction(QStringLiteral("cutClip"));
+            }
+            else if (keyEvent->key() == Qt::Key_E)
+            {
+                requestNodeEditorEditAction(QStringLiteral("splitClip"));
             }
             else
             {
