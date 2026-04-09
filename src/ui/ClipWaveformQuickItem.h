@@ -19,6 +19,8 @@ class ClipWaveformQuickItem : public QQuickPaintedItem
     Q_PROPERTY(qreal contentMargin READ contentMargin WRITE setContentMargin NOTIFY contentMarginChanged)
     Q_PROPERTY(qreal verticalZoom READ verticalZoom WRITE setVerticalZoom NOTIFY verticalZoomChanged)
     Q_PROPERTY(bool invertedColors READ invertedColors WRITE setInvertedColors NOTIFY invertedColorsChanged)
+    Q_PROPERTY(qreal invertedSegmentStartRatio READ invertedSegmentStartRatio WRITE setInvertedSegmentStartRatio NOTIFY invertedSegmentChanged)
+    Q_PROPERTY(qreal invertedSegmentEndRatio READ invertedSegmentEndRatio WRITE setInvertedSegmentEndRatio NOTIFY invertedSegmentChanged)
     Q_PROPERTY(bool scrollVisible READ scrollVisible NOTIFY scrollMetricsChanged)
     Q_PROPERTY(int scrollValue READ scrollValue NOTIFY scrollMetricsChanged)
     Q_PROPERTY(int scrollMaximum READ scrollMaximum NOTIFY scrollMetricsChanged)
@@ -46,6 +48,10 @@ public:
     void setVerticalZoom(qreal zoom);
     [[nodiscard]] bool invertedColors() const;
     void setInvertedColors(bool inverted);
+    [[nodiscard]] qreal invertedSegmentStartRatio() const;
+    void setInvertedSegmentStartRatio(qreal ratio);
+    [[nodiscard]] qreal invertedSegmentEndRatio() const;
+    void setInvertedSegmentEndRatio(qreal ratio);
     [[nodiscard]] bool scrollVisible() const;
     [[nodiscard]] int scrollValue() const;
     [[nodiscard]] int scrollMaximum() const;
@@ -64,6 +70,7 @@ signals:
     void contentMarginChanged();
     void verticalZoomChanged();
     void invertedColorsChanged();
+    void invertedSegmentChanged();
     void scrollMetricsChanged();
     void waveformStateChanged();
     void previewWaveformStateChanged();
@@ -127,6 +134,8 @@ private:
     bool m_playheadVisible = true;
     qreal m_contentMargin = 10.0;
     bool m_invertedColors = false;
+    qreal m_invertedSegmentStartRatio = 0.0;
+    qreal m_invertedSegmentEndRatio = 0.0;
     QString m_loadedAssetPath;
     std::vector<WaveformPeak> m_peaks;
     int m_waveformChannelCount = 0;

@@ -14,6 +14,8 @@
 namespace
 {
 
+constexpr int kMinimumClipDurationMs = 1;
+
 int nodeTimelineDurationMs(const dawg::node::Document& document)
 {
     if (document.node.timelineFps <= 0.0)
@@ -128,6 +130,12 @@ struct NodeClipRange
     int sourceEndMs = 0;
 };
 
+struct ExtractedNodeSelectionSegment
+{
+    dawg::node::AudioClipData clip;
+    int laneIndexOffset = 0;
+};
+
 std::optional<NodeClipRange> resolvedNodeClipRange(
     const dawg::node::AudioClipData& clip,
     const dawg::nodeeditor::AudioDurationFn& durationForPath)
@@ -145,7 +153,6 @@ std::optional<NodeClipRange> resolvedNodeClipRange(
         return std::nullopt;
     }
 
-    constexpr int kMinimumClipDurationMs = 1;
     const auto sourceStartMs = std::clamp(
         clip.attachedAudio->clipStartMs,
         0,
@@ -256,6 +263,98 @@ void resolveLaneClipOverlaps(
 
     lane.audioClips = std::move(updatedClips);
     sortLaneAudioClips(lane);
+}
+
+bool extractNodeSelectionFromLane(
+    dawg::node::LaneData& lane,
+    const int selectionStartMs,
+    const int selectionEndMs,
+    const int laneIndexOffset,
+    const dawg::nodeeditor::AudioDurationFn& durationForPath,
+    std::vector<ExtractedNodeSelectionSegment>* extractedSegments)
+{
+    if (selectionEndMs <= selectionStartMs)
+    {
+        return false;
+    }
+
+    bool laneChanged = false;
+    std::vector<dawg::node::AudioClipData> updatedClips;
+    updatedClips.reserve(lane.audioClips.size() + 2);
+    for (const auto& clip : lane.audioClips)
+    {
+        const auto clipRange = resolvedNodeClipRange(clip, durationForPath);
+        if (!clipRange.has_value()
+            || selectionStartMs >= clipRange->laneEndMs
+            || selectionEndMs <= clipRange->laneStartMs)
+        {
+            updatedClips.push_back(clip);
+            continue;
+        }
+
+        laneChanged = true;
+        const auto overlapStartMs = std::max(selectionStartMs, clipRange->laneStartMs);
+        const auto overlapEndMs = std::min(selectionEndMs, clipRange->laneEndMs);
+        if (extractedSegments && overlapEndMs > overlapStartMs)
+        {
+            auto extractedClip = clip;
+            if (extractedClip.attachedAudio.has_value())
+            {
+                extractedClip.attachedAudio->clipStartMs =
+                    clipRange->sourceStartMs + (overlapStartMs - clipRange->laneStartMs);
+                extractedClip.attachedAudio->clipEndMs =
+                    clipRange->sourceStartMs + (overlapEndMs - clipRange->laneStartMs);
+                extractedClip.attachedAudio->loopEnabled = false;
+            }
+            extractedClip.laneOffsetMs = std::max(0, overlapStartMs - selectionStartMs);
+            extractedSegments->push_back(
+                ExtractedNodeSelectionSegment{std::move(extractedClip), laneIndexOffset});
+        }
+
+        const auto keepLeft = overlapStartMs > clipRange->laneStartMs;
+        const auto keepRight = overlapEndMs < clipRange->laneEndMs;
+        if (keepLeft)
+        {
+            auto leftClip = clip;
+            if (leftClip.attachedAudio.has_value())
+            {
+                leftClip.attachedAudio->clipEndMs =
+                    clipRange->sourceStartMs + (overlapStartMs - clipRange->laneStartMs);
+                leftClip.attachedAudio->loopEnabled = false;
+            }
+            updatedClips.push_back(std::move(leftClip));
+        }
+
+        if (keepRight)
+        {
+            auto rightClip = clip;
+            if (keepLeft)
+            {
+                rightClip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            }
+            rightClip.laneOffsetMs = overlapEndMs;
+            if (rightClip.attachedAudio.has_value())
+            {
+                rightClip.attachedAudio->clipStartMs =
+                    clipRange->sourceStartMs + (overlapEndMs - clipRange->laneStartMs);
+                rightClip.attachedAudio->clipEndMs = clipRange->sourceEndMs;
+                rightClip.attachedAudio->loopEnabled = false;
+            }
+            updatedClips.push_back(std::move(rightClip));
+        }
+    }
+
+    if (laneChanged)
+    {
+        lane.audioClips = std::move(updatedClips);
+        sortLaneAudioClips(lane);
+    }
+    return laneChanged;
+}
+
+QString defaultNodeLaneLabel(const int laneNumber)
+{
+    return QStringLiteral("Track %1").arg(std::max(1, laneNumber));
 }
 
 }
@@ -1237,7 +1336,9 @@ void NodeController::toggleSelectedTrackAutoPan()
 
 bool NodeController::canPasteNodeClip() const
 {
-    return m_nodeEditorClipClipboard.has_value();
+    return m_nodeEditorClipClipboard.has_value()
+        || (m_nodeEditorSelectionClipboard.has_value()
+            && !m_nodeEditorSelectionClipboard->segments.empty());
 }
 
 bool NodeController::copySelectedNodeClip(const QString& laneId, const QString& clipId)
@@ -1291,7 +1392,88 @@ bool NodeController::copySelectedNodeClip(const QString& laneId, const QString& 
     }
 
     m_nodeEditorClipClipboard = *clipIt;
+    m_nodeEditorSelectionClipboard.reset();
     emit m_controller.statusChanged(QStringLiteral("Copied audio clip."));
+    return true;
+}
+
+bool NodeController::copyNodeTimelineSelection(
+    const int startLaneIndex,
+    const int endLaneIndex,
+    const int startMs,
+    const int endMs)
+{
+    if (!m_controller.hasSelection())
+    {
+        return false;
+    }
+
+    const auto normalizedStartMs = std::min(startMs, endMs);
+    const auto normalizedEndMs = std::max(startMs, endMs);
+    if (normalizedEndMs <= normalizedStartMs)
+    {
+        emit m_controller.statusChanged(QStringLiteral("Drag a time selection before copying it."));
+        return false;
+    }
+
+    QString nodeDocumentPath;
+    dawg::node::Document nodeDocument;
+    QString errorMessage;
+    if (!loadSelectedNodeDocument(&nodeDocumentPath, &nodeDocument, &errorMessage))
+    {
+        emit m_controller.statusChanged(
+            errorMessage.isEmpty()
+                ? QStringLiteral("Save or import audio into this node before copying a selection.")
+                : errorMessage);
+        return false;
+    }
+    if (nodeDocument.node.lanes.empty())
+    {
+        emit m_controller.statusChanged(QStringLiteral("This node has no audio to copy."));
+        return false;
+    }
+
+    const auto firstLaneIndex = std::clamp(
+        std::min(startLaneIndex, endLaneIndex),
+        0,
+        static_cast<int>(nodeDocument.node.lanes.size()) - 1);
+    const auto lastLaneIndex = std::clamp(
+        std::max(startLaneIndex, endLaneIndex),
+        0,
+        static_cast<int>(nodeDocument.node.lanes.size()) - 1);
+    std::vector<ExtractedNodeSelectionSegment> extractedSegments;
+    const auto durationForPath = [this](const QString& filePath) -> std::optional<int>
+    {
+        return m_controller.audioFileDurationMs(filePath);
+    };
+    for (int laneIndex = firstLaneIndex; laneIndex <= lastLaneIndex; ++laneIndex)
+    {
+        dawg::node::LaneData laneCopy = nodeDocument.node.lanes[static_cast<std::size_t>(laneIndex)];
+        static_cast<void>(extractNodeSelectionFromLane(
+            laneCopy,
+            normalizedStartMs,
+            normalizedEndMs,
+            laneIndex - firstLaneIndex,
+            durationForPath,
+            &extractedSegments));
+    }
+    if (extractedSegments.empty())
+    {
+        emit m_controller.statusChanged(QStringLiteral("No audio clips were under the selection."));
+        return false;
+    }
+
+    NodeSelectionClipboard clipboard;
+    clipboard.durationMs = std::max(kMinimumClipDurationMs, normalizedEndMs - normalizedStartMs);
+    clipboard.segments.reserve(extractedSegments.size());
+    for (auto& segment : extractedSegments)
+    {
+        clipboard.segments.push_back(NodeSelectionClipboardSegment{std::move(segment.clip), segment.laneIndexOffset});
+    }
+    m_nodeEditorSelectionClipboard = std::move(clipboard);
+    m_nodeEditorClipClipboard.reset();
+    emit m_controller.statusChanged(
+        QStringLiteral("Copied %1 clip segment(s).").arg(m_nodeEditorSelectionClipboard->segments.size()));
     return true;
 }
 
@@ -1349,6 +1531,7 @@ bool NodeController::cutSelectedNodeClip(
     }
 
     m_nodeEditorClipClipboard = *clipIt;
+    m_nodeEditorSelectionClipboard.reset();
     laneIt->audioClips.erase(clipIt);
     if (!saveSelectedNodeDocument(
             nodeDocumentPath,
@@ -1366,6 +1549,101 @@ bool NodeController::cutSelectedNodeClip(
     return true;
 }
 
+bool NodeController::cutNodeTimelineSelection(
+    const int startLaneIndex,
+    const int endLaneIndex,
+    const int startMs,
+    const int endMs,
+    QString* selectedLaneId)
+{
+    if (!m_controller.hasSelection())
+    {
+        return false;
+    }
+
+    const auto normalizedStartMs = std::min(startMs, endMs);
+    const auto normalizedEndMs = std::max(startMs, endMs);
+    if (normalizedEndMs <= normalizedStartMs)
+    {
+        emit m_controller.statusChanged(QStringLiteral("Drag a time selection before cutting it."));
+        return false;
+    }
+
+    QString nodeDocumentPath;
+    dawg::node::Document nodeDocument;
+    QString errorMessage;
+    if (!loadSelectedNodeDocument(&nodeDocumentPath, &nodeDocument, &errorMessage))
+    {
+        emit m_controller.statusChanged(
+            errorMessage.isEmpty()
+                ? QStringLiteral("Save or import audio into this node before cutting a selection.")
+                : errorMessage);
+        return false;
+    }
+    if (nodeDocument.node.lanes.empty())
+    {
+        emit m_controller.statusChanged(QStringLiteral("This node has no audio to cut."));
+        return false;
+    }
+
+    const auto firstLaneIndex = std::clamp(
+        std::min(startLaneIndex, endLaneIndex),
+        0,
+        static_cast<int>(nodeDocument.node.lanes.size()) - 1);
+    const auto lastLaneIndex = std::clamp(
+        std::max(startLaneIndex, endLaneIndex),
+        0,
+        static_cast<int>(nodeDocument.node.lanes.size()) - 1);
+    const auto durationForPath = [this](const QString& filePath) -> std::optional<int>
+    {
+        return m_controller.audioFileDurationMs(filePath);
+    };
+
+    std::vector<ExtractedNodeSelectionSegment> extractedSegments;
+    bool documentChanged = false;
+    for (int laneIndex = firstLaneIndex; laneIndex <= lastLaneIndex; ++laneIndex)
+    {
+        documentChanged = extractNodeSelectionFromLane(
+            nodeDocument.node.lanes[static_cast<std::size_t>(laneIndex)],
+            normalizedStartMs,
+            normalizedEndMs,
+            laneIndex - firstLaneIndex,
+            durationForPath,
+            &extractedSegments)
+            || documentChanged;
+    }
+    if (!documentChanged || extractedSegments.empty())
+    {
+        emit m_controller.statusChanged(QStringLiteral("No audio clips were under the selection."));
+        return false;
+    }
+
+    if (!saveSelectedNodeDocument(
+            nodeDocumentPath,
+            nodeDocument,
+            QStringLiteral("Failed to cut the selected time range.")))
+    {
+        return false;
+    }
+
+    NodeSelectionClipboard clipboard;
+    clipboard.durationMs = std::max(kMinimumClipDurationMs, normalizedEndMs - normalizedStartMs);
+    clipboard.segments.reserve(extractedSegments.size());
+    for (auto& segment : extractedSegments)
+    {
+        clipboard.segments.push_back(NodeSelectionClipboardSegment{std::move(segment.clip), segment.laneIndexOffset});
+    }
+    m_nodeEditorSelectionClipboard = std::move(clipboard);
+    m_nodeEditorClipClipboard.reset();
+    if (selectedLaneId)
+    {
+        *selectedLaneId = nodeDocument.node.lanes[static_cast<std::size_t>(firstLaneIndex)].id;
+    }
+    emit m_controller.statusChanged(
+        QStringLiteral("Cut %1 clip segment(s).").arg(m_nodeEditorSelectionClipboard->segments.size()));
+    return true;
+}
+
 bool NodeController::pasteSelectedNodeClip(
     const QString& targetLaneId,
     const int playheadMs,
@@ -1376,9 +1654,11 @@ bool NodeController::pasteSelectedNodeClip(
     {
         return false;
     }
-    if (!m_nodeEditorClipClipboard.has_value())
+    if (!m_nodeEditorClipClipboard.has_value()
+        && (!m_nodeEditorSelectionClipboard.has_value()
+            || m_nodeEditorSelectionClipboard->segments.empty()))
     {
-        emit m_controller.statusChanged(QStringLiteral("Copy or cut an audio clip before pasting."));
+        emit m_controller.statusChanged(QStringLiteral("Copy or cut audio before pasting."));
         return false;
     }
 
@@ -1415,30 +1695,82 @@ bool NodeController::pasteSelectedNodeClip(
         resolvedLaneId = laneIt->id;
     }
 
-    auto pastedClip = *m_nodeEditorClipClipboard;
-    pastedClip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    pastedClip.laneOffsetMs = dawg::nodeeditor::clampedNodeAudioClipOffsetMs(
-        pastedClip,
-        playheadMs,
-        nodeTimelineDurationMs(nodeDocument),
-        [this](const QString& filePath) -> std::optional<int>
-        {
-            return m_controller.audioFileDurationMs(filePath);
-        });
-    if (pastedClip.attachedAudio.has_value())
+    QString nextSelectedLaneId;
+    QString nextSelectedClipId;
+    const auto durationForPath = [this](const QString& filePath) -> std::optional<int>
     {
-        pastedClip.attachedAudio->loopEnabled = false;
-    }
-
-    const auto nextClipId = pastedClip.id;
-    laneIt->audioClips.push_back(std::move(pastedClip));
-    resolveLaneClipOverlaps(
-        *laneIt,
-        nextClipId,
-        [this](const QString& filePath) -> std::optional<int>
+        return m_controller.audioFileDurationMs(filePath);
+    };
+    if (m_nodeEditorSelectionClipboard.has_value() && !m_nodeEditorSelectionClipboard->segments.empty())
+    {
+        const auto targetLaneIndex =
+            static_cast<int>(std::distance(nodeDocument.node.lanes.begin(), laneIt));
+        const auto maxLaneOffset = std::max_element(
+            m_nodeEditorSelectionClipboard->segments.cbegin(),
+            m_nodeEditorSelectionClipboard->segments.cend(),
+            [](const NodeSelectionClipboardSegment& lhs, const NodeSelectionClipboardSegment& rhs)
+            {
+                return lhs.laneIndexOffset < rhs.laneIndexOffset;
+            });
+        const auto requiredLaneCount =
+            targetLaneIndex + (maxLaneOffset != m_nodeEditorSelectionClipboard->segments.cend()
+                ? maxLaneOffset->laneIndexOffset + 1
+                : 1);
+        while (static_cast<int>(nodeDocument.node.lanes.size()) < requiredLaneCount)
         {
-            return m_controller.audioFileDurationMs(filePath);
-        });
+            dawg::node::LaneData createdLane;
+            createdLane.label = defaultNodeLaneLabel(static_cast<int>(nodeDocument.node.lanes.size()) + 1);
+            nodeDocument.node.lanes.push_back(std::move(createdLane));
+        }
+
+        for (const auto& clipboardSegment : m_nodeEditorSelectionClipboard->segments)
+        {
+            const auto destinationLaneIndex = std::clamp(
+                targetLaneIndex + clipboardSegment.laneIndexOffset,
+                0,
+                static_cast<int>(nodeDocument.node.lanes.size()) - 1);
+            auto& destinationLane = nodeDocument.node.lanes[static_cast<std::size_t>(destinationLaneIndex)];
+            auto pastedClip = clipboardSegment.clip;
+            pastedClip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            pastedClip.laneOffsetMs = dawg::nodeeditor::clampedNodeAudioClipOffsetMs(
+                pastedClip,
+                playheadMs + clipboardSegment.clip.laneOffsetMs,
+                nodeTimelineDurationMs(nodeDocument),
+                durationForPath);
+            if (pastedClip.attachedAudio.has_value())
+            {
+                pastedClip.attachedAudio->loopEnabled = false;
+            }
+
+            const auto insertedClipId = pastedClip.id;
+            destinationLane.audioClips.push_back(std::move(pastedClip));
+            resolveLaneClipOverlaps(destinationLane, insertedClipId, durationForPath);
+            if (nextSelectedLaneId.isEmpty())
+            {
+                nextSelectedLaneId = destinationLane.id;
+                nextSelectedClipId = insertedClipId;
+            }
+        }
+    }
+    else
+    {
+        auto pastedClip = *m_nodeEditorClipClipboard;
+        pastedClip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        pastedClip.laneOffsetMs = dawg::nodeeditor::clampedNodeAudioClipOffsetMs(
+            pastedClip,
+            playheadMs,
+            nodeTimelineDurationMs(nodeDocument),
+            durationForPath);
+        if (pastedClip.attachedAudio.has_value())
+        {
+            pastedClip.attachedAudio->loopEnabled = false;
+        }
+
+        nextSelectedClipId = pastedClip.id;
+        nextSelectedLaneId = resolvedLaneId;
+        laneIt->audioClips.push_back(std::move(pastedClip));
+        resolveLaneClipOverlaps(*laneIt, nextSelectedClipId, durationForPath);
+    }
     if (!saveSelectedNodeDocument(
             nodeDocumentPath,
             nodeDocument,
@@ -1449,13 +1781,16 @@ bool NodeController::pasteSelectedNodeClip(
 
     if (pastedLaneId)
     {
-        *pastedLaneId = resolvedLaneId;
+        *pastedLaneId = nextSelectedLaneId;
     }
     if (pastedClipId)
     {
-        *pastedClipId = nextClipId;
+        *pastedClipId = nextSelectedClipId;
     }
-    emit m_controller.statusChanged(QStringLiteral("Pasted audio clip."));
+    emit m_controller.statusChanged(
+        (m_nodeEditorSelectionClipboard.has_value() && !m_nodeEditorSelectionClipboard->segments.empty())
+            ? QStringLiteral("Pasted audio selection.")
+            : QStringLiteral("Pasted audio clip."));
     return true;
 }
 
@@ -1736,6 +2071,90 @@ bool NodeController::deleteSelectedNodeClipOrLane(
     return true;
 }
 
+bool NodeController::deleteNodeTimelineSelection(
+    const int startLaneIndex,
+    const int endLaneIndex,
+    const int startMs,
+    const int endMs,
+    QString* nextSelectedLaneId)
+{
+    if (!m_controller.hasSelection())
+    {
+        return false;
+    }
+
+    const auto normalizedStartMs = std::min(startMs, endMs);
+    const auto normalizedEndMs = std::max(startMs, endMs);
+    if (normalizedEndMs <= normalizedStartMs)
+    {
+        emit m_controller.statusChanged(QStringLiteral("Drag a time selection before deleting it."));
+        return false;
+    }
+
+    QString nodeDocumentPath;
+    dawg::node::Document nodeDocument;
+    QString errorMessage;
+    if (!loadSelectedNodeDocument(&nodeDocumentPath, &nodeDocument, &errorMessage))
+    {
+        emit m_controller.statusChanged(
+            errorMessage.isEmpty()
+                ? QStringLiteral("Save or import audio into this node before deleting a selection.")
+                : errorMessage);
+        return false;
+    }
+    if (nodeDocument.node.lanes.empty())
+    {
+        emit m_controller.statusChanged(QStringLiteral("This node has no audio to delete."));
+        return false;
+    }
+
+    const auto firstLaneIndex = std::clamp(
+        std::min(startLaneIndex, endLaneIndex),
+        0,
+        static_cast<int>(nodeDocument.node.lanes.size()) - 1);
+    const auto lastLaneIndex = std::clamp(
+        std::max(startLaneIndex, endLaneIndex),
+        0,
+        static_cast<int>(nodeDocument.node.lanes.size()) - 1);
+    const auto durationForPath = [this](const QString& filePath) -> std::optional<int>
+    {
+        return m_controller.audioFileDurationMs(filePath);
+    };
+
+    bool documentChanged = false;
+    for (int laneIndex = firstLaneIndex; laneIndex <= lastLaneIndex; ++laneIndex)
+    {
+        documentChanged = extractNodeSelectionFromLane(
+            nodeDocument.node.lanes[static_cast<std::size_t>(laneIndex)],
+            normalizedStartMs,
+            normalizedEndMs,
+            laneIndex - firstLaneIndex,
+            durationForPath,
+            nullptr)
+            || documentChanged;
+    }
+    if (!documentChanged)
+    {
+        emit m_controller.statusChanged(QStringLiteral("No audio clips were under the selection."));
+        return false;
+    }
+
+    if (!saveSelectedNodeDocument(
+            nodeDocumentPath,
+            nodeDocument,
+            QStringLiteral("Failed to delete the selected time range.")))
+    {
+        return false;
+    }
+
+    if (nextSelectedLaneId)
+    {
+        *nextSelectedLaneId = nodeDocument.node.lanes[static_cast<std::size_t>(firstLaneIndex)].id;
+    }
+    emit m_controller.statusChanged(QStringLiteral("Deleted selected time range."));
+    return true;
+}
+
 bool NodeController::setNodeLaneMuted(const QString& laneId, const bool muted)
 {
     if (!m_controller.hasSelection() || laneId.isEmpty())
@@ -1996,7 +2415,6 @@ bool NodeController::splitNodeClipAtPlayhead(
         return false;
     }
 
-    constexpr int kMinimumClipDurationMs = 1;
     const auto sourceDurationMs = *durationMs;
     const auto clipStartMs = std::clamp(
         clipIt->attachedAudio->clipStartMs,
@@ -2204,7 +2622,6 @@ bool NodeController::trimNodeClip(
         return false;
     }
 
-    constexpr int kMinimumClipDurationMs = 1;
     const auto sourceDurationMs = *durationMs;
     const auto clipStartMs = std::clamp(
         clipIt->attachedAudio->clipStartMs,
@@ -2971,12 +3388,36 @@ bool PlayerController::copySelectedNodeClip(const QString& laneId, const QString
     return m_nodeController->copySelectedNodeClip(laneId, clipId);
 }
 
+bool PlayerController::copyNodeTimelineSelection(
+    const int startLaneIndex,
+    const int endLaneIndex,
+    const int startMs,
+    const int endMs)
+{
+    return m_nodeController->copyNodeTimelineSelection(startLaneIndex, endLaneIndex, startMs, endMs);
+}
+
 bool PlayerController::cutSelectedNodeClip(
     const QString& laneId,
     const QString& clipId,
     QString* selectedLaneId)
 {
     return m_nodeController->cutSelectedNodeClip(laneId, clipId, selectedLaneId);
+}
+
+bool PlayerController::cutNodeTimelineSelection(
+    const int startLaneIndex,
+    const int endLaneIndex,
+    const int startMs,
+    const int endMs,
+    QString* selectedLaneId)
+{
+    return m_nodeController->cutNodeTimelineSelection(
+        startLaneIndex,
+        endLaneIndex,
+        startMs,
+        endMs,
+        selectedLaneId);
 }
 
 bool PlayerController::pasteSelectedNodeClip(
@@ -3024,6 +3465,21 @@ bool PlayerController::deleteSelectedNodeClipOrLane(
         laneHeaderId,
         clipId,
         allowDeletePopulatedLane,
+        nextSelectedLaneId);
+}
+
+bool PlayerController::deleteNodeTimelineSelection(
+    const int startLaneIndex,
+    const int endLaneIndex,
+    const int startMs,
+    const int endMs,
+    QString* nextSelectedLaneId)
+{
+    return m_nodeController->deleteNodeTimelineSelection(
+        startLaneIndex,
+        endLaneIndex,
+        startMs,
+        endMs,
         nextSelectedLaneId);
 }
 

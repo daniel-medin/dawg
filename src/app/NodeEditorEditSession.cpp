@@ -1,5 +1,8 @@
 #include "app/NodeEditorEditSession.h"
 
+#include <algorithm>
+#include <cmath>
+
 #include "app/PlayerController.h"
 #include "ui/NodeEditorQuickController.h"
 
@@ -26,25 +29,45 @@ NodeEditorEditSession::Outcome NodeEditorEditSession::handleEditAction(const QSt
 
     if (actionKey == QStringLiteral("copyClip"))
     {
-        static_cast<void>(m_controller.copySelectedNodeClip(
-            m_nodeEditorQuickController.selectedLaneId(),
-            m_nodeEditorQuickController.selectedClipId()));
+        if (m_nodeEditorQuickController.hasTimelineSelection())
+        {
+            static_cast<void>(m_controller.copyNodeTimelineSelection(
+                m_nodeEditorQuickController.timelineSelectionStartLaneIndex(),
+                m_nodeEditorQuickController.timelineSelectionEndLaneIndex(),
+                m_nodeEditorQuickController.timelineSelectionStartMs(),
+                m_nodeEditorQuickController.timelineSelectionEndMs()));
+        }
+        else
+        {
+            static_cast<void>(m_controller.copySelectedNodeClip(
+                m_nodeEditorQuickController.selectedLaneId(),
+                m_nodeEditorQuickController.selectedClipId()));
+        }
         outcome.updatePasteAvailability = true;
         return outcome;
     }
 
     if (actionKey == QStringLiteral("cutClip"))
     {
-        QString selectedLaneId;
-        if (m_controller.cutSelectedNodeClip(
+        QString selectedLaneId = m_nodeEditorQuickController.selectedLaneId();
+        const auto cutSucceeded = m_nodeEditorQuickController.hasTimelineSelection()
+            ? m_controller.cutNodeTimelineSelection(
+                m_nodeEditorQuickController.timelineSelectionStartLaneIndex(),
+                m_nodeEditorQuickController.timelineSelectionEndLaneIndex(),
+                m_nodeEditorQuickController.timelineSelectionStartMs(),
+                m_nodeEditorQuickController.timelineSelectionEndMs(),
+                &selectedLaneId)
+            : m_controller.cutSelectedNodeClip(
                 m_nodeEditorQuickController.selectedLaneId(),
                 m_nodeEditorQuickController.selectedClipId(),
-                &selectedLaneId))
+                &selectedLaneId);
+        if (cutSucceeded)
         {
             outcome.documentChanged = true;
             outcome.forcePreviewSync = true;
             outcome.updatePasteAvailability = true;
             outcome.selectedLaneId = selectedLaneId;
+            outcome.clearTimelineSelection = true;
         }
         else
         {
@@ -126,6 +149,26 @@ NodeEditorEditSession::Outcome NodeEditorEditSession::deleteSelection(
     const auto selectedLaneId = m_nodeEditorQuickController.selectedLaneId();
     const auto selectedLaneHeaderId = m_nodeEditorQuickController.selectedLaneHeaderId();
     const auto selectedClipId = m_nodeEditorQuickController.selectedClipId();
+    if (m_nodeEditorQuickController.hasTimelineSelection())
+    {
+        QString nextSelectedLaneId = selectedLaneId;
+        if (!m_controller.deleteNodeTimelineSelection(
+                m_nodeEditorQuickController.timelineSelectionStartLaneIndex(),
+                m_nodeEditorQuickController.timelineSelectionEndLaneIndex(),
+                m_nodeEditorQuickController.timelineSelectionStartMs(),
+                m_nodeEditorQuickController.timelineSelectionEndMs(),
+                &nextSelectedLaneId))
+        {
+            return outcome;
+        }
+
+        outcome.documentChanged = true;
+        outcome.forcePreviewSync = true;
+        outcome.updatePasteAvailability = true;
+        outcome.clearTimelineSelection = true;
+        outcome.selectedLaneId = nextSelectedLaneId;
+        return outcome;
+    }
     if (selectedClipId.isEmpty() && selectedLaneHeaderId.isEmpty())
     {
         showStatus(QStringLiteral("Select a lane name or double-click an audio clip before deleting."));
@@ -200,6 +243,46 @@ NodeEditorEditSession::Outcome NodeEditorEditSession::trimSelectedClipToPlayhead
     outcome.forcePreviewSync = true;
     outcome.updatePasteAvailability = true;
     outcome.selectedLaneId = laneId;
+    return outcome;
+}
+
+NodeEditorEditSession::Outcome NodeEditorEditSession::nudgeSelectedClipFrames(const int frameDelta)
+{
+    Outcome outcome;
+    if (frameDelta == 0)
+    {
+        return outcome;
+    }
+
+    const auto laneId = m_nodeEditorQuickController.selectedLaneId();
+    const auto clipId = m_nodeEditorQuickController.selectedClipId();
+    const auto currentOffsetMs = m_nodeEditorQuickController.selectedClipLaneOffsetMs();
+    if (laneId.isEmpty() || clipId.isEmpty() || currentOffsetMs < 0)
+    {
+        return outcome;
+    }
+
+    const auto fps = std::max(0.0001, m_controller.fps());
+    const auto deltaMs = static_cast<int>(std::lround((static_cast<double>(frameDelta) * 1000.0) / fps));
+    if (deltaMs == 0)
+    {
+        return outcome;
+    }
+
+    if (!m_controller.moveNodeClip(
+            laneId,
+            clipId,
+            currentOffsetMs + deltaMs,
+            m_nodeEditorQuickController.nodeDurationMs()))
+    {
+        return outcome;
+    }
+
+    outcome.documentChanged = true;
+    outcome.forcePreviewSync = true;
+    outcome.updatePasteAvailability = true;
+    outcome.selectedLaneId = laneId;
+    outcome.selectedClipId = clipId;
     return outcome;
 }
 

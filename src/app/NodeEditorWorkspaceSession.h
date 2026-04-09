@@ -60,6 +60,7 @@ public:
     void trimClip(const QString& laneId, const QString& clipId, int targetMs, bool trimStart, bool hasOpenProject);
     void deleteSelection(bool hasOpenProject);
     void trimSelectedClipToPlayhead(bool trimStart, bool hasOpenProject);
+    void nudgeSelectionOrSelectedClipFrames(int frameDelta, bool hasOpenProject);
     void resetPlayheadToStart();
     void refresh(bool hasOpenProject);
     void syncAvailability(QAction* showNodeEditorAction, ActionRegistry* actionRegistry);

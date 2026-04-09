@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <vector>
 
 #include <QList>
 #include <QPointF>
@@ -50,9 +51,20 @@ public:
     void toggleSelectedTrackAutoPan();
     [[nodiscard]] bool canPasteNodeClip() const;
     [[nodiscard]] bool copySelectedNodeClip(const QString& laneId, const QString& clipId);
+    [[nodiscard]] bool copyNodeTimelineSelection(
+        int startLaneIndex,
+        int endLaneIndex,
+        int startMs,
+        int endMs);
     [[nodiscard]] bool cutSelectedNodeClip(
         const QString& laneId,
         const QString& clipId,
+        QString* selectedLaneId = nullptr);
+    [[nodiscard]] bool cutNodeTimelineSelection(
+        int startLaneIndex,
+        int endLaneIndex,
+        int startMs,
+        int endMs,
         QString* selectedLaneId = nullptr);
     [[nodiscard]] bool pasteSelectedNodeClip(
         const QString& targetLaneId,
@@ -73,6 +85,12 @@ public:
         const QString& laneHeaderId,
         const QString& clipId,
         bool allowDeletePopulatedLane,
+        QString* nextSelectedLaneId = nullptr);
+    [[nodiscard]] bool deleteNodeTimelineSelection(
+        int startLaneIndex,
+        int endLaneIndex,
+        int startMs,
+        int endMs,
         QString* nextSelectedLaneId = nullptr);
     [[nodiscard]] bool setNodeLaneMuted(const QString& laneId, bool muted);
     [[nodiscard]] bool setNodeLaneSoloed(const QString& laneId, bool soloed);
@@ -115,6 +133,18 @@ public:
         QString* errorMessage = nullptr);
 
 private:
+    struct NodeSelectionClipboardSegment
+    {
+        dawg::node::AudioClipData clip;
+        int laneIndexOffset = 0;
+    };
+
+    struct NodeSelectionClipboard
+    {
+        int durationMs = 0;
+        std::vector<NodeSelectionClipboardSegment> segments;
+    };
+
     [[nodiscard]] bool loadSelectedNodeDocument(
         QString* nodeDocumentPath,
         dawg::node::Document* nodeDocument,
@@ -126,4 +156,5 @@ private:
 
     PlayerController& m_controller;
     std::optional<dawg::node::AudioClipData> m_nodeEditorClipClipboard;
+    std::optional<NodeSelectionClipboard> m_nodeEditorSelectionClipboard;
 };

@@ -101,9 +101,20 @@ public:
     void toggleSelectedTrackAutoPan();
     [[nodiscard]] bool canPasteNodeClip() const;
     [[nodiscard]] bool copySelectedNodeClip(const QString& laneId, const QString& clipId);
+    [[nodiscard]] bool copyNodeTimelineSelection(
+        int startLaneIndex,
+        int endLaneIndex,
+        int startMs,
+        int endMs);
     [[nodiscard]] bool cutSelectedNodeClip(
         const QString& laneId,
         const QString& clipId,
+        QString* selectedLaneId = nullptr);
+    [[nodiscard]] bool cutNodeTimelineSelection(
+        int startLaneIndex,
+        int endLaneIndex,
+        int startMs,
+        int endMs,
         QString* selectedLaneId = nullptr);
     [[nodiscard]] bool pasteSelectedNodeClip(
         const QString& targetLaneId,
@@ -124,6 +135,12 @@ public:
         const QString& laneHeaderId,
         const QString& clipId,
         bool allowDeletePopulatedLane,
+        QString* nextSelectedLaneId = nullptr);
+    [[nodiscard]] bool deleteNodeTimelineSelection(
+        int startLaneIndex,
+        int endLaneIndex,
+        int startMs,
+        int endMs,
         QString* nextSelectedLaneId = nullptr);
     [[nodiscard]] bool setNodeLaneMuted(const QString& laneId, bool muted);
     [[nodiscard]] bool setNodeLaneSoloed(const QString& laneId, bool soloed);

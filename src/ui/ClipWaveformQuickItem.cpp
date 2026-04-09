@@ -318,6 +318,44 @@ void ClipWaveformQuickItem::setInvertedColors(const bool inverted)
     emit invertedColorsChanged();
 }
 
+qreal ClipWaveformQuickItem::invertedSegmentStartRatio() const
+{
+    return m_invertedSegmentStartRatio;
+}
+
+void ClipWaveformQuickItem::setInvertedSegmentStartRatio(const qreal ratio)
+{
+    const auto nextRatio = std::clamp(ratio, 0.0, 1.0);
+    if (qFuzzyCompare(m_invertedSegmentStartRatio + 1.0, nextRatio + 1.0))
+    {
+        return;
+    }
+
+    m_invertedSegmentStartRatio = nextRatio;
+    invalidateWaveformCache();
+    update();
+    emit invertedSegmentChanged();
+}
+
+qreal ClipWaveformQuickItem::invertedSegmentEndRatio() const
+{
+    return m_invertedSegmentEndRatio;
+}
+
+void ClipWaveformQuickItem::setInvertedSegmentEndRatio(const qreal ratio)
+{
+    const auto nextRatio = std::clamp(ratio, 0.0, 1.0);
+    if (qFuzzyCompare(m_invertedSegmentEndRatio + 1.0, nextRatio + 1.0))
+    {
+        return;
+    }
+
+    m_invertedSegmentEndRatio = nextRatio;
+    invalidateWaveformCache();
+    update();
+    emit invertedSegmentChanged();
+}
+
 bool ClipWaveformQuickItem::scrollVisible() const
 {
     return m_scrollVisible;
@@ -945,6 +983,9 @@ void ClipWaveformQuickItem::rebuildWaveformCache()
     const QColor activeWaveColor = m_invertedColors ? QColor{22, 31, 41} : QColor{202, 216, 234};
     const QColor inactiveWaveColor = m_invertedColors ? QColor{98, 109, 121} : QColor{92, 102, 114};
     const QColor emptyTextColor = m_invertedColors ? QColor{68, 78, 89} : QColor{126, 136, 148};
+    const QColor invertedClipFill{236, 242, 248};
+    const QColor invertedWaveColor{22, 31, 41};
+    const QColor invertedInactiveWaveColor{98, 109, 121};
 
     m_waveformCache.fill(cacheBackground.rgba());
 
@@ -973,6 +1014,21 @@ void ClipWaveformQuickItem::rebuildWaveformCache()
     const auto clipRect = m_clipRangeOnly ? bounds : selectionRect(bounds);
     painter.fillRect(bounds, boundsFill);
     painter.fillRect(clipRect, clipFill);
+    const auto usePartialInversion = !m_invertedColors
+        && m_invertedSegmentEndRatio > m_invertedSegmentStartRatio + 0.0001;
+    QRectF invertedSegmentRect;
+    if (usePartialInversion)
+    {
+        const auto segmentLeft = bounds.left() + bounds.width() * m_invertedSegmentStartRatio;
+        const auto segmentRight = bounds.left() + bounds.width() * m_invertedSegmentEndRatio;
+        invertedSegmentRect = QRectF{
+            QPointF{std::min(segmentLeft, segmentRight), bounds.top()},
+            QPointF{std::max(segmentLeft, segmentRight), bounds.bottom()}}.intersected(bounds);
+        if (invertedSegmentRect.isValid() && !invertedSegmentRect.isEmpty())
+        {
+            painter.fillRect(invertedSegmentRect, invertedClipFill);
+        }
+    }
 
     const auto displayedChannelCount = std::clamp(m_waveformChannelCount, 1, 2);
     const auto channelRowHeight = bounds.height() / static_cast<double>(displayedChannelCount);
@@ -1027,7 +1083,12 @@ void ClipWaveformQuickItem::rebuildWaveformCache()
                 const auto topY = rowCenterY - (totalHeight > 0.001 ? positiveHeight : 1.0);
                 const auto drawHeight = totalHeight > 0.001 ? totalHeight + 1.0 : 2.0;
                 const auto active = clipRect.contains(QPointF{static_cast<double>(pixelX), rowCenterY});
-                painter.setBrush(active ? activeWaveColor : inactiveWaveColor);
+                const auto partialInverted = usePartialInversion
+                    && invertedSegmentRect.contains(QPointF{static_cast<double>(pixelX), rowCenterY});
+                painter.setBrush(
+                    partialInverted
+                        ? (active ? invertedWaveColor : invertedInactiveWaveColor)
+                        : (active ? activeWaveColor : inactiveWaveColor));
                 painter.drawRect(
                     QRectF{
                         QPointF{static_cast<double>(pixelX), topY},

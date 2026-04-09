@@ -171,6 +171,36 @@ void NodeEditorQuickController::setState(
     m_selectedClipId = nextSelectedClipId;
     m_playheadMs = std::clamp(m_playheadMs, 0, nodeDurationMs());
     m_insertionMarkerMs = std::clamp(m_insertionMarkerMs, 0, nodeDurationMs());
+    const auto hadTimelineSelection = m_hasTimelineSelection;
+    const auto maxLaneIndex = m_nodeTracks.isEmpty() ? -1 : (static_cast<int>(m_nodeTracks.size()) - 1);
+    const auto maxDurationMs = std::max(0, nodeDurationMs());
+    const auto selectionStillValid = m_hasTimelineSelection
+        && maxLaneIndex >= 0
+        && m_timelineSelectionStartLaneIndex >= 0
+        && m_timelineSelectionEndLaneIndex >= 0;
+    if (!selectionStillValid)
+    {
+        m_hasTimelineSelection = false;
+        m_timelineSelectionStartMs = 0;
+        m_timelineSelectionEndMs = 0;
+        m_timelineSelectionStartLaneIndex = -1;
+        m_timelineSelectionEndLaneIndex = -1;
+    }
+    else
+    {
+        m_timelineSelectionStartLaneIndex = std::clamp(m_timelineSelectionStartLaneIndex, 0, maxLaneIndex);
+        m_timelineSelectionEndLaneIndex = std::clamp(m_timelineSelectionEndLaneIndex, 0, maxLaneIndex);
+        m_timelineSelectionStartMs = std::clamp(m_timelineSelectionStartMs, 0, maxDurationMs);
+        m_timelineSelectionEndMs = std::clamp(m_timelineSelectionEndMs, 0, maxDurationMs);
+        if (m_timelineSelectionEndMs <= m_timelineSelectionStartMs)
+        {
+            m_hasTimelineSelection = false;
+            m_timelineSelectionStartMs = 0;
+            m_timelineSelectionEndMs = 0;
+            m_timelineSelectionStartLaneIndex = -1;
+            m_timelineSelectionEndLaneIndex = -1;
+        }
+    }
     const auto meterTopologyChanged = syncLaneMeterTopology(m_nodeTracks);
     if (meterTopologyChanged)
     {
@@ -178,6 +208,11 @@ void NodeEditorQuickController::setState(
         ++m_meterResetToken;
         emit laneMeterLevelsChanged();
         emit meterResetTokenChanged();
+    }
+    if (hadTimelineSelection && !m_hasTimelineSelection)
+    {
+        emit timelineSelectionChanged();
+        emit timelineSelectionCleared();
     }
     emit playheadPositionChanged();
     emit stateChanged();
@@ -253,6 +288,61 @@ QString NodeEditorQuickController::selectedLaneHeaderId() const
 QString NodeEditorQuickController::selectedClipId() const
 {
     return m_selectedClipId;
+}
+
+bool NodeEditorQuickController::hasTimelineSelection() const
+{
+    return m_hasTimelineSelection;
+}
+
+int NodeEditorQuickController::timelineSelectionStartMs() const
+{
+    return m_timelineSelectionStartMs;
+}
+
+int NodeEditorQuickController::timelineSelectionEndMs() const
+{
+    return m_timelineSelectionEndMs;
+}
+
+int NodeEditorQuickController::timelineSelectionStartLaneIndex() const
+{
+    return m_timelineSelectionStartLaneIndex;
+}
+
+int NodeEditorQuickController::timelineSelectionEndLaneIndex() const
+{
+    return m_timelineSelectionEndLaneIndex;
+}
+
+int NodeEditorQuickController::selectedClipLaneOffsetMs() const
+{
+    if (m_selectedLaneId.isEmpty() || m_selectedClipId.isEmpty())
+    {
+        return -1;
+    }
+
+    for (const auto& laneValue : m_nodeTracks)
+    {
+        const auto laneMap = laneValue.toMap();
+        if (laneMap.value(QStringLiteral("laneId")).toString() != m_selectedLaneId)
+        {
+            continue;
+        }
+
+        const auto clipItems = laneMap.value(QStringLiteral("clips")).toList();
+        for (const auto& clipValue : clipItems)
+        {
+            const auto clipMap = clipValue.toMap();
+            if (clipMap.value(QStringLiteral("clipId")).toString() == m_selectedClipId)
+            {
+                const auto laneOffsetValue = clipMap.value(QStringLiteral("laneOffsetMs"));
+                return laneOffsetValue.isValid() ? laneOffsetValue.toInt() : -1;
+            }
+        }
+    }
+
+    return -1;
 }
 
 bool NodeEditorQuickController::canPasteClip() const
@@ -613,6 +703,91 @@ void NodeEditorQuickController::setLaneSoloed(const QString& laneId, const bool 
     }
 
     emit laneSoloRequested(laneId, soloed);
+}
+
+void NodeEditorQuickController::setTimelineSelectionState(
+    const bool visible,
+    const qreal startRatio,
+    const qreal endRatio,
+    const int startLaneIndex,
+    const int endLaneIndex)
+{
+    if (!visible)
+    {
+        clearTimelineSelectionState();
+        return;
+    }
+
+    const auto durationMs = nodeDurationMs();
+    if (durationMs <= 0 || m_nodeTracks.isEmpty())
+    {
+        clearTimelineSelectionState();
+        return;
+    }
+
+    const auto maxLaneIndex = static_cast<int>(m_nodeTracks.size()) - 1;
+    const auto normalizedStartLaneIndex = std::clamp(startLaneIndex, 0, maxLaneIndex);
+    const auto normalizedEndLaneIndex = std::clamp(endLaneIndex, 0, maxLaneIndex);
+    const auto normalizedStartRatio = std::clamp(startRatio, 0.0, 1.0);
+    const auto normalizedEndRatio = std::clamp(endRatio, 0.0, 1.0);
+    auto nextStartMs = std::clamp(
+        static_cast<int>(std::lround(std::min(normalizedStartRatio, normalizedEndRatio) * static_cast<qreal>(durationMs))),
+        0,
+        durationMs);
+    auto nextEndMs = std::clamp(
+        static_cast<int>(std::lround(std::max(normalizedStartRatio, normalizedEndRatio) * static_cast<qreal>(durationMs))),
+        0,
+        durationMs);
+    const auto ratiosDiffer =
+        !qFuzzyCompare(normalizedStartRatio + 1.0, normalizedEndRatio + 1.0);
+    if (ratiosDiffer && nextEndMs <= nextStartMs)
+    {
+        if (nextStartMs < durationMs)
+        {
+            nextEndMs = std::min(durationMs, nextStartMs + 1);
+        }
+        else
+        {
+            nextStartMs = std::max(0, durationMs - 1);
+            nextEndMs = durationMs;
+        }
+    }
+    const auto nextHasTimelineSelection = nextEndMs > nextStartMs;
+    if (m_hasTimelineSelection == nextHasTimelineSelection
+        && m_timelineSelectionStartMs == nextStartMs
+        && m_timelineSelectionEndMs == nextEndMs
+        && m_timelineSelectionStartLaneIndex == normalizedStartLaneIndex
+        && m_timelineSelectionEndLaneIndex == normalizedEndLaneIndex)
+    {
+        return;
+    }
+
+    m_hasTimelineSelection = nextHasTimelineSelection;
+    m_timelineSelectionStartMs = nextStartMs;
+    m_timelineSelectionEndMs = nextEndMs;
+    m_timelineSelectionStartLaneIndex = normalizedStartLaneIndex;
+    m_timelineSelectionEndLaneIndex = normalizedEndLaneIndex;
+    emit timelineSelectionChanged();
+}
+
+void NodeEditorQuickController::clearTimelineSelectionState()
+{
+    if (!m_hasTimelineSelection
+        && m_timelineSelectionStartMs == 0
+        && m_timelineSelectionEndMs == 0
+        && m_timelineSelectionStartLaneIndex < 0
+        && m_timelineSelectionEndLaneIndex < 0)
+    {
+        return;
+    }
+
+    m_hasTimelineSelection = false;
+    m_timelineSelectionStartMs = 0;
+    m_timelineSelectionEndMs = 0;
+    m_timelineSelectionStartLaneIndex = -1;
+    m_timelineSelectionEndLaneIndex = -1;
+    emit timelineSelectionChanged();
+    emit timelineSelectionCleared();
 }
 
 qreal NodeEditorQuickController::laneMeterLevel(const QString& laneId) const

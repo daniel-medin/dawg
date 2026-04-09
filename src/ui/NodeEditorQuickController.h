@@ -26,6 +26,11 @@ class NodeEditorQuickController final : public QObject
     Q_PROPERTY(QString selectedLaneId READ selectedLaneId NOTIFY stateChanged)
     Q_PROPERTY(QString selectedLaneHeaderId READ selectedLaneHeaderId NOTIFY stateChanged)
     Q_PROPERTY(QString selectedClipId READ selectedClipId NOTIFY stateChanged)
+    Q_PROPERTY(bool hasTimelineSelection READ hasTimelineSelection NOTIFY timelineSelectionChanged)
+    Q_PROPERTY(int timelineSelectionStartMs READ timelineSelectionStartMs NOTIFY timelineSelectionChanged)
+    Q_PROPERTY(int timelineSelectionEndMs READ timelineSelectionEndMs NOTIFY timelineSelectionChanged)
+    Q_PROPERTY(int timelineSelectionStartLaneIndex READ timelineSelectionStartLaneIndex NOTIFY timelineSelectionChanged)
+    Q_PROPERTY(int timelineSelectionEndLaneIndex READ timelineSelectionEndLaneIndex NOTIFY timelineSelectionChanged)
     Q_PROPERTY(bool canPasteClip READ canPasteClip NOTIFY stateChanged)
     Q_PROPERTY(QString audioSummaryText READ audioSummaryText NOTIFY stateChanged)
     Q_PROPERTY(QString emptyBodyText READ emptyBodyText NOTIFY stateChanged)
@@ -72,6 +77,12 @@ public:
     [[nodiscard]] QString selectedLaneId() const;
     [[nodiscard]] QString selectedLaneHeaderId() const;
     [[nodiscard]] QString selectedClipId() const;
+    [[nodiscard]] bool hasTimelineSelection() const;
+    [[nodiscard]] int timelineSelectionStartMs() const;
+    [[nodiscard]] int timelineSelectionEndMs() const;
+    [[nodiscard]] int timelineSelectionStartLaneIndex() const;
+    [[nodiscard]] int timelineSelectionEndLaneIndex() const;
+    [[nodiscard]] int selectedClipLaneOffsetMs() const;
     [[nodiscard]] bool canPasteClip() const;
     [[nodiscard]] QString audioSummaryText() const;
     [[nodiscard]] QString emptyBodyText() const;
@@ -110,6 +121,13 @@ public:
     Q_INVOKABLE void trimClipToRatio(const QString& laneId, const QString& clipId, bool trimStart, qreal targetRatio);
     Q_INVOKABLE void setLaneMuted(const QString& laneId, bool muted);
     Q_INVOKABLE void setLaneSoloed(const QString& laneId, bool soloed);
+    Q_INVOKABLE void setTimelineSelectionState(
+        bool visible,
+        qreal startRatio,
+        qreal endRatio,
+        int startLaneIndex,
+        int endLaneIndex);
+    Q_INVOKABLE void clearTimelineSelectionState();
     Q_INVOKABLE qreal laneMeterLevel(const QString& laneId) const;
     Q_INVOKABLE qreal laneMeterLeftLevel(const QString& laneId) const;
     Q_INVOKABLE qreal laneMeterRightLevel(const QString& laneId) const;
@@ -126,6 +144,8 @@ signals:
     void stateChanged();
     void playheadPositionChanged();
     void playbackStateChanged();
+    void timelineSelectionChanged();
+    void timelineSelectionCleared();
     void laneMeterLevelsChanged();
     void meterResetTokenChanged();
     void playheadChanged(int playheadMs);
@@ -165,6 +185,11 @@ private:
     QString m_selectedLaneId;
     QString m_selectedLaneHeaderId;
     QString m_selectedClipId;
+    bool m_hasTimelineSelection = false;
+    int m_timelineSelectionStartMs = 0;
+    int m_timelineSelectionEndMs = 0;
+    int m_timelineSelectionStartLaneIndex = -1;
+    int m_timelineSelectionEndLaneIndex = -1;
     int m_playheadMs = 0;
     int m_insertionMarkerMs = 0;
     bool m_insertionFollowsPlayback = false;

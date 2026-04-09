@@ -16,6 +16,7 @@ public:
         bool refreshMix = false;
         bool forcePreviewSync = false;
         bool updatePasteAvailability = false;
+        bool clearTimelineSelection = false;
         QString selectedLaneId;
         QString selectedClipId;
     };
@@ -28,6 +29,7 @@ public:
     [[nodiscard]] Outcome deleteSelection(const std::function<bool(int clipCount)>& confirmDeletePopulatedLane);
     [[nodiscard]] Outcome splitSelectedClipAtPlayhead();
     [[nodiscard]] Outcome trimSelectedClipToPlayhead(bool trimStart);
+    [[nodiscard]] Outcome nudgeSelectedClipFrames(int frameDelta);
     [[nodiscard]] Outcome setLaneMuted(const QString& laneId, bool muted);
     [[nodiscard]] Outcome setLaneSoloed(const QString& laneId, bool soloed);
     [[nodiscard]] Outcome moveClip(const QString& laneId, const QString& clipId, int laneOffsetMs);

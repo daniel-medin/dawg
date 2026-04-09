@@ -472,6 +472,56 @@ void NodeEditorWorkspaceSession::trimSelectedClipToPlayhead(const bool trimStart
     applyEditOutcome(m_editSession->trimSelectedClipToPlayhead(trimStart), hasOpenProject);
 }
 
+void NodeEditorWorkspaceSession::nudgeSelectionOrSelectedClipFrames(const int frameDelta, const bool hasOpenProject)
+{
+    if (frameDelta == 0)
+    {
+        return;
+    }
+
+    if (m_nodeEditorQuickController.hasTimelineSelection())
+    {
+        const auto fps = std::max(0.0001, m_controller.fps());
+        const auto msPerFrame = 1000.0 / fps;
+        const auto nodeDurationMs = std::max(1, m_nodeEditorQuickController.nodeDurationMs());
+        const auto totalFrameCount = std::max(1, static_cast<int>(std::lround((nodeDurationMs / 1000.0) * fps)));
+        const auto selectionStartFrame = std::clamp(
+            static_cast<int>(std::lround(m_nodeEditorQuickController.timelineSelectionStartMs() / msPerFrame)),
+            0,
+            totalFrameCount);
+        const auto selectionEndFrame = std::clamp(
+            static_cast<int>(std::lround(m_nodeEditorQuickController.timelineSelectionEndMs() / msPerFrame)),
+            0,
+            totalFrameCount);
+        const auto selectionFrameWidth = std::max(1, selectionEndFrame - selectionStartFrame);
+        const auto nextStartFrame = std::clamp(
+            selectionStartFrame + frameDelta,
+            0,
+            std::max(0, totalFrameCount - selectionFrameWidth));
+        const auto nextEndFrame = std::clamp(nextStartFrame + selectionFrameWidth, 0, totalFrameCount);
+        const auto nextStartRatio = std::clamp(
+            (nextStartFrame * msPerFrame) / static_cast<double>(nodeDurationMs),
+            0.0,
+            1.0);
+        const auto nextEndRatio = std::clamp(
+            (nextEndFrame * msPerFrame) / static_cast<double>(nodeDurationMs),
+            0.0,
+            1.0);
+        m_nodeEditorQuickController.setTimelineSelectionState(
+            true,
+            nextStartRatio,
+            nextEndRatio,
+            m_nodeEditorQuickController.timelineSelectionStartLaneIndex(),
+            m_nodeEditorQuickController.timelineSelectionEndLaneIndex());
+        return;
+    }
+
+    if (!m_nodeEditorQuickController.selectedClipId().isEmpty())
+    {
+        applyEditOutcome(m_editSession->nudgeSelectedClipFrames(frameDelta), hasOpenProject);
+    }
+}
+
 void NodeEditorWorkspaceSession::resetPlayheadToStart()
 {
     m_previewSession.resetPlayheadToStart();
@@ -639,6 +689,10 @@ void NodeEditorWorkspaceSession::applyEditOutcome(
     const NodeEditorEditSession::Outcome& outcome,
     const bool hasOpenProject)
 {
+    if (outcome.clearTimelineSelection)
+    {
+        m_nodeEditorQuickController.clearTimelineSelectionState();
+    }
     if (outcome.documentChanged && m_projectDirtyCallback)
     {
         m_projectDirtyCallback();

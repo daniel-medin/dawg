@@ -177,6 +177,10 @@ private:
     void updateOverlayPositions();
     void showCanvasTipsOverlay();
     void hideCanvasTipsOverlay();
+    void stepBackwardFromFocusedContext();
+    void stepForwardFromFocusedContext();
+    void stepFastBackwardFromFocusedContext();
+    void stepFastForwardFromFocusedContext();
     void nudgeSelectedNode(const QPointF& delta);
     void beginHeldNodeNudge(int key);
     void endHeldNodeNudge(int key);

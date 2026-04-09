@@ -861,10 +861,10 @@ MainWindow::MainWindow(QWindow* parent)
     });
     connect(m_goToStartAction, &QAction::triggered, m_controller, &PlayerController::goToStart);
     connect(m_playAction, &QAction::triggered, this, &MainWindow::playFromPreferredContext);
-    connect(m_stepForwardAction, &QAction::triggered, m_controller, &PlayerController::stepForward);
-    connect(m_stepBackAction, &QAction::triggered, m_controller, &PlayerController::stepBackward);
-    connect(m_stepFastForwardAction, &QAction::triggered, m_controller, &PlayerController::stepFastForward);
-    connect(m_stepFastBackAction, &QAction::triggered, m_controller, &PlayerController::stepFastBackward);
+    connect(m_stepForwardAction, &QAction::triggered, this, &MainWindow::stepForwardFromFocusedContext);
+    connect(m_stepBackAction, &QAction::triggered, this, &MainWindow::stepBackwardFromFocusedContext);
+    connect(m_stepFastForwardAction, &QAction::triggered, this, &MainWindow::stepFastForwardFromFocusedContext);
+    connect(m_stepFastBackAction, &QAction::triggered, this, &MainWindow::stepFastBackwardFromFocusedContext);
     connect(m_copyAction, &QAction::triggered, this, [this]()
     {
         if (nodeEditorHasFocus())
@@ -1069,10 +1069,10 @@ MainWindow::MainWindow(QWindow* parent)
         }
         m_controller->goToStart();
     });
-    connect(m_stepBackShortcut, &QShortcut::activated, m_controller, &PlayerController::stepBackward);
-    connect(m_stepForwardShortcut, &QShortcut::activated, m_controller, &PlayerController::stepForward);
-    connect(m_stepFastForwardShortcut, &QShortcut::activated, m_controller, &PlayerController::stepFastForward);
-    connect(m_stepFastBackShortcut, &QShortcut::activated, m_controller, &PlayerController::stepFastBackward);
+    connect(m_stepBackShortcut, &QShortcut::activated, this, &MainWindow::stepBackwardFromFocusedContext);
+    connect(m_stepForwardShortcut, &QShortcut::activated, this, &MainWindow::stepForwardFromFocusedContext);
+    connect(m_stepFastForwardShortcut, &QShortcut::activated, this, &MainWindow::stepFastForwardFromFocusedContext);
+    connect(m_stepFastBackShortcut, &QShortcut::activated, this, &MainWindow::stepFastBackwardFromFocusedContext);
     connect(m_copyShortcut, &QShortcut::activated, this, [this]()
     {
         if (nodeEditorHasFocus())
@@ -2334,6 +2334,42 @@ void MainWindow::selectNextVisibleNode()
 void MainWindow::moveSelectedNodeUp()
 {
     nudgeSelectedNode(QPointF{0.0, -8.0});
+}
+
+void MainWindow::stepBackwardFromFocusedContext()
+{
+    if (nodeEditorHasFocus() && m_nodeEditorWorkspaceSession)
+    {
+        m_nodeEditorWorkspaceSession->nudgeSelectionOrSelectedClipFrames(-1, hasOpenProject());
+    }
+    m_controller->stepBackward();
+}
+
+void MainWindow::stepForwardFromFocusedContext()
+{
+    if (nodeEditorHasFocus() && m_nodeEditorWorkspaceSession)
+    {
+        m_nodeEditorWorkspaceSession->nudgeSelectionOrSelectedClipFrames(1, hasOpenProject());
+    }
+    m_controller->stepForward();
+}
+
+void MainWindow::stepFastBackwardFromFocusedContext()
+{
+    if (nodeEditorHasFocus() && m_nodeEditorWorkspaceSession)
+    {
+        m_nodeEditorWorkspaceSession->nudgeSelectionOrSelectedClipFrames(-5, hasOpenProject());
+    }
+    m_controller->stepFastBackward();
+}
+
+void MainWindow::stepFastForwardFromFocusedContext()
+{
+    if (nodeEditorHasFocus() && m_nodeEditorWorkspaceSession)
+    {
+        m_nodeEditorWorkspaceSession->nudgeSelectionOrSelectedClipFrames(5, hasOpenProject());
+    }
+    m_controller->stepFastForward();
 }
 
 void MainWindow::moveSelectedNodeDown()

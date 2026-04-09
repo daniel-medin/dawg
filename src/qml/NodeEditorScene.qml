@@ -39,6 +39,10 @@ Rectangle {
     property real timelineSelectionEndRatio: 0.0
     property int timelineSelectionStartLaneIndex: -1
     property int timelineSelectionEndLaneIndex: -1
+    property int timelineSelectionAutoScrollDirection: 0
+    property real timelineSelectionDragX: 0.0
+    property real timelineSelectionDragViewportWidth: 1.0
+    property real timelineSelectionDragRootY: 0.0
     readonly property real meterFloorDb: -72.0
     readonly property real meterZeroNormalized: 2.0 / 3.0
     readonly property real meterReleaseDbPerSecond: Math.abs(meterFloorDb)
@@ -183,13 +187,36 @@ Rectangle {
         clipPreviewEndRatio = 0.0
     }
 
-    function clearTimelineSelection() {
+    function clearTimelineSelection(updateController) {
         timelineSelectionVisible = false
         timelineSelectionDragActive = false
         timelineSelectionStartRatio = 0.0
         timelineSelectionEndRatio = 0.0
         timelineSelectionStartLaneIndex = -1
         timelineSelectionEndLaneIndex = -1
+        stopTimelineSelectionAutoScroll()
+        if (updateController === undefined || updateController)
+            nodeEditorController.clearTimelineSelectionState()
+    }
+
+    function syncTimelineSelectionFromController() {
+        var keepDragActive = timelineSelectionDragActive
+        if (!nodeEditorController.hasTimelineSelection) {
+            if (keepDragActive && timelineSelectionVisible)
+                return
+            clearTimelineSelection(false)
+            return
+        }
+
+        var durationMs = Math.max(1, nodeEditorController.nodeDurationMs)
+        timelineSelectionVisible = true
+        timelineSelectionDragActive = keepDragActive
+        timelineSelectionStartRatio = clamp(nodeEditorController.timelineSelectionStartMs / durationMs, 0.0, 1.0)
+        timelineSelectionEndRatio = clamp(nodeEditorController.timelineSelectionEndMs / durationMs, 0.0, 1.0)
+        timelineSelectionStartLaneIndex = nodeEditorController.timelineSelectionStartLaneIndex
+        timelineSelectionEndLaneIndex = nodeEditorController.timelineSelectionEndLaneIndex
+        if (!keepDragActive)
+            stopTimelineSelectionAutoScroll()
     }
 
     function beginTimelineSelection(startRatio, startLaneIndex) {
@@ -210,12 +237,21 @@ Rectangle {
         var tracks = nodeEditorController.nodeTracks || []
         if (!timelineSelectionDragActive || tracks.length <= 0)
             return
-        timelineSelectionEndRatio = clamp(endRatio, 0.0, 1.0)
+        var normalizedEndRatio = clamp(endRatio, 0.0, 1.0)
+        timelineSelectionEndRatio = normalizedEndRatio
         timelineSelectionEndLaneIndex = clamp(endLaneIndex, 0, tracks.length - 1)
+        nodeEditorController.setTimelineSelectionState(
+            true,
+            timelineSelectionStartRatio,
+            timelineSelectionEndRatio,
+            timelineSelectionStartLaneIndex,
+            timelineSelectionEndLaneIndex)
+        nodeEditorController.setPlayheadFromRatio(normalizedEndRatio)
     }
 
     function finishTimelineSelection() {
         timelineSelectionDragActive = false
+        stopTimelineSelectionAutoScroll()
     }
 
     function timelineSelectionMinRatio() {
@@ -240,6 +276,49 @@ Rectangle {
         var selectionStartRatio = timelineSelectionMinRatio()
         var selectionEndRatio = timelineSelectionMaxRatio()
         return clipEndRatio > selectionStartRatio && clipStartRatio < selectionEndRatio
+    }
+
+    function timelineSelectionClipLocalStartRatio(laneIndex, clipStartRatio, clipEndRatio) {
+        if (!timelineSelectionIntersectsClip(laneIndex, clipStartRatio, clipEndRatio))
+            return 0.0
+        var overlapStartRatio = Math.max(timelineSelectionMinRatio(), clipStartRatio)
+        return clamp(
+            (overlapStartRatio - clipStartRatio) / Math.max(0.0001, clipEndRatio - clipStartRatio),
+            0.0,
+            1.0)
+    }
+
+    function timelineSelectionClipLocalEndRatio(laneIndex, clipStartRatio, clipEndRatio) {
+        if (!timelineSelectionIntersectsClip(laneIndex, clipStartRatio, clipEndRatio))
+            return 0.0
+        var overlapEndRatio = Math.min(timelineSelectionMaxRatio(), clipEndRatio)
+        return clamp(
+            (overlapEndRatio - clipStartRatio) / Math.max(0.0001, clipEndRatio - clipStartRatio),
+            0.0,
+            1.0)
+    }
+
+    function updateTimelineSelectionAutoScroll(localX, viewportWidth, rootY) {
+        timelineSelectionDragX = localX
+        timelineSelectionDragViewportWidth = Math.max(1, viewportWidth)
+        timelineSelectionDragRootY = rootY
+        var maxStart = Math.max(0.0, 1.0 - timelineVisibleRatio)
+        var edgeMargin = 28
+        if (!timelineSelectionDragActive || maxStart <= 0.0) {
+            timelineSelectionAutoScrollDirection = 0
+            return
+        }
+        if (localX <= edgeMargin && timelineStartRatio > 0.0001) {
+            timelineSelectionAutoScrollDirection = -1
+        } else if (localX >= viewportWidth - edgeMargin && timelineStartRatio < maxStart - 0.0001) {
+            timelineSelectionAutoScrollDirection = 1
+        } else {
+            timelineSelectionAutoScrollDirection = 0
+        }
+    }
+
+    function stopTimelineSelectionAutoScroll() {
+        timelineSelectionAutoScrollDirection = 0
     }
 
     function setClipPreview(laneId, clipId, startRatio, endRatio) {
@@ -385,6 +464,33 @@ Rectangle {
         onTriggered: root.meterDecayActive = false
     }
 
+    Timer {
+        id: timelineSelectionAutoScrollTimer
+
+        interval: 16
+        repeat: true
+        running: root.timelineSelectionDragActive && root.timelineSelectionAutoScrollDirection !== 0
+        onTriggered: {
+            var maxStart = Math.max(0.0, 1.0 - root.timelineVisibleRatio)
+            if (maxStart <= 0.0) {
+                root.stopTimelineSelectionAutoScroll()
+                return
+            }
+            var nextStart = root.clamp(
+                root.timelineStartRatio + root.timelineSelectionAutoScrollDirection * root.timelineVisibleRatio * 0.03,
+                0.0,
+                maxStart)
+            if (Math.abs(nextStart - root.timelineStartRatio) < 0.0001) {
+                root.stopTimelineSelectionAutoScroll()
+                return
+            }
+            root.timelineStartRatio = nextStart
+            root.updateTimelineSelection(
+                root.timelineRatioForX(root.timelineSelectionDragX, root.timelineSelectionDragViewportWidth),
+                root.laneIndexForRootY(root.timelineSelectionDragRootY))
+        }
+    }
+
     Connections {
         target: nodeEditorController
 
@@ -397,6 +503,14 @@ Rectangle {
 
             root.meterDecayActive = true
             meterDecayStopTimer.restart()
+        }
+
+        function onTimelineSelectionChanged() {
+            root.syncTimelineSelectionFromController()
+        }
+
+        function onTimelineSelectionCleared() {
+            root.clearTimelineSelection(false)
         }
     }
 
@@ -467,6 +581,8 @@ Rectangle {
             return nodeEditorController.canExportNode
         case "copyClip":
         case "cutClip":
+            return nodeEditorController.selectedClipId !== ""
+                || nodeEditorController.hasTimelineSelection
         case "splitClip":
             return nodeEditorController.selectedClipId !== ""
         case "pasteClip":
@@ -722,6 +838,10 @@ Rectangle {
                                 root.updateTimelineSelection(
                                     root.timelineRatioForX(mouse.x, width),
                                     Math.max(0, (nodeEditorController.nodeTracks || []).length - 1))
+                                root.updateTimelineSelectionAutoScroll(
+                                    mouse.x,
+                                    width,
+                                    mapToItem(root, mouse.x, mouse.y).y)
                                 mouse.accepted = true
                             }
                             onReleased: function(mouse) {
@@ -730,6 +850,7 @@ Rectangle {
                                         root.timelineRatioForX(mouse.x, width),
                                         Math.max(0, (nodeEditorController.nodeTracks || []).length - 1))
                                     root.finishTimelineSelection()
+                                    root.stopTimelineSelectionAutoScroll()
                                     mouse.accepted = true
                                     return
                                 }
@@ -740,6 +861,7 @@ Rectangle {
                             }
                             onCanceled: {
                                 selectionStarted = false
+                                root.stopTimelineSelectionAutoScroll()
                                 if (root.timelineSelectionDragActive)
                                     root.finishTimelineSelection()
                             }
@@ -1140,10 +1262,14 @@ Rectangle {
                                                         playheadVisible: false
                                                         contentMargin: 0
                                                         invertedColors: clipDelegate.clipSelected
-                                                            || root.timelineSelectionIntersectsClip(
-                                                                laneDelegate.laneIndex,
-                                                                visualStartRatio,
-                                                                visualEndRatio)
+                                                        invertedSegmentStartRatio: root.timelineSelectionClipLocalStartRatio(
+                                                            laneDelegate.laneIndex,
+                                                            visualStartRatio,
+                                                            visualEndRatio)
+                                                        invertedSegmentEndRatio: root.timelineSelectionClipLocalEndRatio(
+                                                            laneDelegate.laneIndex,
+                                                            visualStartRatio,
+                                                            visualEndRatio)
                                                         textureSize: Qt.size(Math.max(1, width), Math.max(1, height))
                                                         visible: modelData.hasWaveform && width > 1 && height > 1
                                                         waveformState: modelData.waveformState
@@ -1267,19 +1393,23 @@ Rectangle {
                                                                         && Math.abs(selectionPointer.x - clipDelegate.timelineSelectionPressX) < 3
                                                                         && Math.abs(selectionRootPoint.y - clipDelegate.timelineSelectionPressRootY) < 3)
                                                                         return
-                                                                    if (!clipDelegate.timelineSelectionStarted) {
-                                                                        root.beginTimelineSelection(
-                                                                            root.timelineRatioForX(clipDelegate.timelineSelectionPressX, laneTimeline.width),
-                                                                            root.laneIndexForRootY(clipDelegate.timelineSelectionPressRootY))
-                                                                        nodeEditorController.selectLane(laneDelegate.modelData.laneId)
-                                                                        clipDelegate.timelineSelectionStarted = true
-                                                                    }
-                                                                    root.updateTimelineSelection(
-                                                                        root.timelineRatioForX(selectionPointer.x, laneTimeline.width),
-                                                                        root.laneIndexForRootY(selectionRootPoint.y))
-                                                                    mouse.accepted = true
-                                                                    return
+                                                                if (!clipDelegate.timelineSelectionStarted) {
+                                                                    root.beginTimelineSelection(
+                                                                        root.timelineRatioForX(clipDelegate.timelineSelectionPressX, laneTimeline.width),
+                                                                        root.laneIndexForRootY(clipDelegate.timelineSelectionPressRootY))
+                                                                    nodeEditorController.selectLane(laneDelegate.modelData.laneId)
+                                                                    clipDelegate.timelineSelectionStarted = true
                                                                 }
+                                                                root.updateTimelineSelection(
+                                                                    root.timelineRatioForX(selectionPointer.x, laneTimeline.width),
+                                                                    root.laneIndexForRootY(selectionRootPoint.y))
+                                                                root.updateTimelineSelectionAutoScroll(
+                                                                    selectionPointer.x,
+                                                                    laneTimeline.width,
+                                                                    selectionRootPoint.y)
+                                                                mouse.accepted = true
+                                                                return
+                                                            }
                                                                 if (!clipDelegate.editArmed)
                                                                     return
 
@@ -1371,6 +1501,7 @@ Rectangle {
                                                                             root.timelineRatioForX(selectionReleasePointer.x, laneTimeline.width),
                                                                             root.laneIndexForRootY(selectionReleasePoint.y))
                                                                         root.finishTimelineSelection()
+                                                                        root.stopTimelineSelectionAutoScroll()
                                                                         clipDelegate.ignoreNextClick = true
                                                                         clearClipClickGuardTimer.restart()
                                                                     }
@@ -1400,17 +1531,17 @@ Rectangle {
                                                                     var targetLaneId = root.laneIdForRootY(
                                                                         releasePoint.y,
                                                                         laneDelegate.modelData.laneId)
-                                                                    clipDelegate.dragPreviewActive = false
-                                                                    clipDelegate.copyDragPreviewActive = false
-                                                                    clipDelegate.trimPreviewActive = false
-                                                                    root.clearClipPreview()
-                                                                    root.hideClipDragGhost()
                                                                     nodeEditorController.dropClipToRatio(
                                                                         laneDelegate.modelData.laneId,
                                                                         clipDelegate.modelData.clipId,
                                                                         targetLaneId,
                                                                         nextRatio,
                                                                         (mouse.modifiers & Qt.ControlModifier) !== 0)
+                                                                    clipDelegate.dragPreviewActive = false
+                                                                    clipDelegate.copyDragPreviewActive = false
+                                                                    clipDelegate.trimPreviewActive = false
+                                                                    root.clearClipPreview()
+                                                                    root.hideClipDragGhost()
                                                                     clipDelegate.ignoreNextClick = true
                                                                     clearClipClickGuardTimer.restart()
                                                                 } else {
@@ -1429,6 +1560,7 @@ Rectangle {
                                                                 clipDelegate.timelineSelectionStarted = false
                                                                 clipDelegate.editArmed = false
                                                                 clipDelegate.trimDragMode = 0
+                                                                root.stopTimelineSelectionAutoScroll()
                                                                 if (root.timelineSelectionDragActive)
                                                                     root.finishTimelineSelection()
                                                                 root.clearClipPreview()
@@ -1544,6 +1676,7 @@ Rectangle {
                                                         root.updateTimelineSelection(
                                                             root.timelineRatioForX(mouse.x, width),
                                                             root.laneIndexForRootY(rootPoint.y))
+                                                        root.updateTimelineSelectionAutoScroll(mouse.x, width, rootPoint.y)
                                                         mouse.accepted = true
                                                     }
                                                     onReleased: function(mouse) {
@@ -1553,6 +1686,7 @@ Rectangle {
                                                                 root.timelineRatioForX(mouse.x, width),
                                                                 root.laneIndexForRootY(releasePoint.y))
                                                             root.finishTimelineSelection()
+                                                            root.stopTimelineSelectionAutoScroll()
                                                             mouse.accepted = true
                                                             return
                                                         }
@@ -1564,6 +1698,7 @@ Rectangle {
                                                     }
                                                     onCanceled: {
                                                         selectionStarted = false
+                                                        root.stopTimelineSelectionAutoScroll()
                                                         if (root.timelineSelectionDragActive)
                                                             root.finishTimelineSelection()
                                                     }
