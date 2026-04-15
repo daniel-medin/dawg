@@ -139,6 +139,58 @@ bool pathsMatch(const QString& left, const QString& right)
     return QString::compare(normalizedAbsolutePath(left), normalizedAbsolutePath(right), pathCaseSensitivity()) == 0;
 }
 
+constexpr QSize kPreferredMainWindowSize{1400, 900};
+constexpr QSize kMinimumMainWindowSize{1180, 760};
+constexpr QSize kFallbackMainWindowFloor{800, 520};
+constexpr int kWindowScreenMargin = 16;
+
+QRect availableWindowBoundsForScreen(QScreen* screen)
+{
+    const QRect availableGeometry = screen
+        ? screen->availableGeometry()
+        : QRect{0, 0, 1600, 900};
+    const QRect paddedBounds = availableGeometry.adjusted(
+        kWindowScreenMargin,
+        kWindowScreenMargin,
+        -kWindowScreenMargin,
+        -kWindowScreenMargin);
+    return paddedBounds.isValid() ? paddedBounds : availableGeometry;
+}
+
+QSize boundedWindowSize(const QSize& desiredSize, const QRect& bounds, const QSize& fallbackFloor)
+{
+    const QSize maxSize = bounds.size();
+    return {
+        std::max(std::min(desiredSize.width(), maxSize.width()), std::min(fallbackFloor.width(), maxSize.width())),
+        std::max(std::min(desiredSize.height(), maxSize.height()), std::min(fallbackFloor.height(), maxSize.height()))
+    };
+}
+
+QRect clampWindowGeometryToBounds(QRect geometry, const QRect& bounds, const QSize& minimumSize)
+{
+    geometry.setSize(geometry.size().boundedTo(bounds.size()).expandedTo(minimumSize));
+
+    if (geometry.width() >= bounds.width())
+    {
+        geometry.moveLeft(bounds.left());
+    }
+    else
+    {
+        geometry.moveLeft(std::clamp(geometry.left(), bounds.left(), bounds.right() - geometry.width() + 1));
+    }
+
+    if (geometry.height() >= bounds.height())
+    {
+        geometry.moveTop(bounds.top());
+    }
+    else
+    {
+        geometry.moveTop(std::clamp(geometry.top(), bounds.top(), bounds.bottom() - geometry.height() + 1));
+    }
+
+    return geometry;
+}
+
 #ifdef Q_OS_WIN
 void enableD3D11MultithreadProtection(ID3D11Device* device)
 {
@@ -1537,6 +1589,10 @@ bool MainWindow::restoreGeometry(const QByteArray& geometryState)
         return false;
     }
 
+    const QRect bounds = availableWindowBoundsForScreen(screen() ? screen() : QGuiApplication::primaryScreen());
+    const QSize minimumWindowSize = boundedWindowSize(kMinimumMainWindowSize, bounds, kFallbackMainWindowFloor);
+    setMinimumSize(minimumWindowSize);
+    restoredGeometry = clampWindowGeometryToBounds(restoredGeometry, bounds, minimumWindowSize);
     setGeometry(restoredGeometry);
     return true;
 }
@@ -4049,8 +4105,11 @@ void MainWindow::buildMenus()
 void MainWindow::buildUi()
 {
     setWindowTitle(QStringLiteral("dawg"));
-    resize(1400, 900);
-    setMinimumSize(QSize(1180, 760));
+    const QRect bounds = availableWindowBoundsForScreen(screen() ? screen() : QGuiApplication::primaryScreen());
+    const QSize minimumWindowSize = boundedWindowSize(kMinimumMainWindowSize, bounds, kFallbackMainWindowFloor);
+    const QSize initialWindowSize = boundedWindowSize(kPreferredMainWindowSize, bounds, minimumWindowSize);
+    resize(initialWindowSize);
+    setMinimumSize(minimumWindowSize);
     setFlags(flags() | Qt::FramelessWindowHint);
     setColor(QColor(QStringLiteral("#0a0c10")));
     setResizeMode(QQuickView::SizeRootObjectToView);

@@ -7,6 +7,20 @@ Item {
     visible: filePickerController.visible
     implicitWidth: 840
     implicitHeight: 580
+    clip: true
+
+    readonly property real overlayMargin: 16
+    readonly property real availableWidth: parent
+        ? Math.max(420, parent.width - overlayMargin * 2)
+        : implicitWidth
+    readonly property real availableHeight: parent
+        ? Math.max(320, parent.height - overlayMargin * 2)
+        : implicitHeight
+
+    width: Math.min(implicitWidth, availableWidth)
+    height: Math.min(implicitHeight, availableHeight)
+    x: parent ? Math.round((parent.width - width) / 2) : 0
+    y: overlayMargin
 
     AppTheme {
         id: theme
@@ -128,11 +142,14 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.minimumHeight: 0
+                Layout.preferredHeight: 0
                 spacing: 12
 
                 Rectangle {
                     Layout.preferredWidth: 140
                     Layout.fillHeight: true
+                    Layout.minimumHeight: 0
                     radius: 10
                     color: "#10151c"
                     border.width: 1
@@ -174,6 +191,7 @@ Item {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.minimumHeight: 0
                     radius: 10
                     color: "#10151c"
                     border.width: 1
@@ -247,6 +265,7 @@ Item {
 
             RowLayout {
                 Layout.fillWidth: true
+                Layout.alignment: Qt.AlignBottom
                 spacing: 8
 
                 Label {

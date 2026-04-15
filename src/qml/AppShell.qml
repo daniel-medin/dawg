@@ -206,7 +206,7 @@ Item {
             FilePickerOverlay {
                 id: filePickerOverlay
                 objectName: "filePickerOverlay"
-                anchors.centerIn: parent
+                anchors.top: parent.top
             }
         }
     }

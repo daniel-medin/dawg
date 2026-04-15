@@ -1,12 +1,15 @@
 .vs/
 .dev/
 .tools/vcpkg/
+.tools/Qt/
 b/
 build/
 rel/
 rel2/
 out/
 dist/
+vcpkg_installed/
+aqtinstall.log
 .watch-*.log
 .aiexclude
 *.user

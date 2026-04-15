@@ -55,6 +55,11 @@ void ThumbnailStripQuickController::setProjectRootPath(const QString& projectRoo
     const auto cleanedPath = QDir::cleanPath(QDir::fromNativeSeparators(projectRootPath));
     if (m_projectRootPath == cleanedPath)
     {
+        if (!m_thumbnailManifest.has_value())
+        {
+            reloadThumbnailManifest();
+            refreshVisuals();
+        }
         return;
     }
 
@@ -67,6 +72,11 @@ void ThumbnailStripQuickController::setVideoPath(const QString& videoPath)
 {
     if (m_videoPath == videoPath)
     {
+        if (!m_thumbnailManifest.has_value())
+        {
+            reloadThumbnailManifest();
+            refreshVisuals();
+        }
         return;
     }
 

@@ -3,8 +3,30 @@
   "version-string": "0.1.0",
   "builtin-baseline": "efa4634bd526b87559684607d2cbbdeeec0f07d8",
   "dependencies": [
-    "qtbase",
-    "qtdeclarative",
+    {
+      "name": "qtbase",
+      "default-features": false,
+      "features": [
+        "doubleconversion",
+        "freetype",
+        "gui",
+        "harfbuzz",
+        "icu",
+        "jpeg",
+        "network",
+        "opengl",
+        "pcre2",
+        "png",
+        "testlib",
+        "thread",
+        "widgets"
+      ]
+    },
+    {
+      "name": "qtdeclarative",
+      "default-features": false
+    },
+    "qtquickcontrols2",
     "ffmpeg",
     "juce",
     {

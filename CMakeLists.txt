@@ -186,7 +186,7 @@ if(WIN32)
             POST_BUILD
             COMMAND
                 "${CMAKE_COMMAND}" -E copy_directory
-                "$<TARGET_FILE_DIR:Qt6::Core>/../Qt6/plugins/${_qt_plugin_dir}"
+                "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_PLUGINS}/${_qt_plugin_dir}"
                 "$<TARGET_FILE_DIR:dawg>/${_qt_plugin_dir}"
             COMMENT "Copying Qt ${_qt_plugin_dir} plugins"
             VERBATIM
