@@ -13,6 +13,23 @@ constexpr int kMinimumCanvasHeight = 200;
 constexpr int kThumbnailStripHeight = 60;
 constexpr int kMinimumNodeEditorHeight = 148;
 constexpr int kMinimumMixHeight = 132;
+
+void resizeAdjacentPanels(
+    const int deltaY,
+    const int upperStartHeight,
+    const int upperMinimumHeight,
+    const int lowerStartHeight,
+    const int lowerMinimumHeight,
+    int& upperTargetHeight,
+    int& lowerTargetHeight)
+{
+    const auto clampedDelta = std::clamp(
+        deltaY,
+        upperMinimumHeight - upperStartHeight,
+        lowerStartHeight - lowerMinimumHeight);
+    upperTargetHeight = upperStartHeight + clampedDelta;
+    lowerTargetHeight = lowerStartHeight - clampedDelta;
+}
 }
 
 ShellLayoutController::ShellLayoutController(QObject* parent)
@@ -292,6 +309,7 @@ void ShellLayoutController::updateResize(const double x, const double y)
     const auto previousMixHeight = m_mixPreferredHeight;
     const auto currentX = static_cast<int>(std::lround(x));
     const auto currentY = static_cast<int>(std::lround(y));
+    const auto deltaY = currentY - m_resizeAnchorY;
 
     switch (m_activeHandle)
     {
@@ -303,17 +321,56 @@ void ShellLayoutController::updateResize(const double x, const double y)
     case ActiveHandle::Timeline:
         m_timelinePreferredHeight = std::max(
             m_timelineMinimumHeight,
-            m_resizeStartTimelineHeight + (m_resizeAnchorY - currentY));
+            m_resizeStartTimelineHeight - deltaY);
         break;
     case ActiveHandle::NodeEditor:
-        m_nodeEditorPreferredHeight = std::max(
-            kMinimumNodeEditorHeight,
-            m_resizeStartNodeEditorHeight + (m_resizeAnchorY - currentY));
+        if (m_timelineVisible)
+        {
+            resizeAdjacentPanels(
+                deltaY,
+                m_resizeStartTimelineHeight,
+                m_timelineMinimumHeight,
+                m_resizeStartNodeEditorHeight,
+                kMinimumNodeEditorHeight,
+                m_timelinePreferredHeight,
+                m_nodeEditorPreferredHeight);
+        }
+        else
+        {
+            m_nodeEditorPreferredHeight = std::max(
+                kMinimumNodeEditorHeight,
+                m_resizeStartNodeEditorHeight - deltaY);
+        }
         break;
     case ActiveHandle::Mix:
-        m_mixPreferredHeight = std::max(
-            kMinimumMixHeight,
-            m_resizeStartMixHeight + (m_resizeAnchorY - currentY));
+        if (m_nodeEditorVisible)
+        {
+            resizeAdjacentPanels(
+                deltaY,
+                m_resizeStartNodeEditorHeight,
+                kMinimumNodeEditorHeight,
+                m_resizeStartMixHeight,
+                kMinimumMixHeight,
+                m_nodeEditorPreferredHeight,
+                m_mixPreferredHeight);
+        }
+        else if (m_timelineVisible)
+        {
+            resizeAdjacentPanels(
+                deltaY,
+                m_resizeStartTimelineHeight,
+                m_timelineMinimumHeight,
+                m_resizeStartMixHeight,
+                kMinimumMixHeight,
+                m_timelinePreferredHeight,
+                m_mixPreferredHeight);
+        }
+        else
+        {
+            m_mixPreferredHeight = std::max(
+                kMinimumMixHeight,
+                m_resizeStartMixHeight - deltaY);
+        }
         break;
     case ActiveHandle::None:
         break;

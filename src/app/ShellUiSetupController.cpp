@@ -36,6 +36,7 @@
 #include "app/MainWindow.h"
 #include "app/NodeEditorPreviewSession.h"
 #include "app/NodeEditorWorkspaceSession.h"
+#include "app/PanelLayoutController.h"
 #include "app/PlayerController.h"
 #include "app/ShellLayoutController.h"
 #include "app/ShellOverlayController.h"
@@ -702,6 +703,21 @@ void ShellUiSetupController::bindShellItems() const
     installWindowEventFilter(m_window.m_timelineQuickWidget);
     installWindowEventFilter(m_window.m_thumbnailStripQuickWidget);
     installWindowEventFilter(m_window.m_nodeEditorQuickWidget);
+
+    if (m_window.m_nodeEditorQuickWidget)
+    {
+        QObject::connect(
+            m_window.m_nodeEditorQuickWidget,
+            &QQuickItem::implicitHeightChanged,
+            &m_window,
+            [&window = m_window]()
+            {
+                if (window.m_panelLayoutController)
+                {
+                    window.m_panelLayoutController->fitNodeEditorToContent();
+                }
+            });
+    }
 
     if (m_window.m_titleBarItem)
     {

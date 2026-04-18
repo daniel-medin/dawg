@@ -26,6 +26,7 @@ public:
     void updateDetachedVideoUiState();
     void updateDetachedPanelUiState();
     void syncMainVerticalPanelSizes();
+    void fitNodeEditorToContent();
 
 private:
     [[nodiscard]] bool shouldUseNativeVideoPresentation() const;

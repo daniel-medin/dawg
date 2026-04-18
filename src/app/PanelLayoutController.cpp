@@ -401,6 +401,10 @@ void PanelLayoutController::updateMixVisibility(const bool visible)
     {
         attachMix();
     }
+    if (!visible)
+    {
+        fitNodeEditorToContent();
+    }
 }
 
 void PanelLayoutController::updateNodeEditorVisibility(const bool visible)
@@ -418,6 +422,7 @@ void PanelLayoutController::updateNodeEditorVisibility(const bool visible)
     if (visible)
     {
         m_window.refreshNodeEditor();
+        fitNodeEditorToContent();
     }
 
     if (m_window.m_shellLayoutController)
@@ -437,6 +442,37 @@ void PanelLayoutController::updateNodeEditorVisibility(const bool visible)
         m_window.m_showNodeEditorAction->setChecked(visible);
     }
     updatePanelActionText(m_window.m_showNodeEditorAction, visible, QStringLiteral("Node Editor"));
+}
+
+void PanelLayoutController::fitNodeEditorToContent()
+{
+    if (!m_window.m_nodeEditorQuickWidget || !m_window.m_nodeEditorQuickWidget->isVisible())
+    {
+        return;
+    }
+    if (m_window.m_mixQuickWidget && m_window.m_mixQuickWidget->isVisible())
+    {
+        return;
+    }
+
+    const auto idealHeight = std::max(
+        148,
+        static_cast<int>(std::lround(m_window.m_nodeEditorQuickWidget->implicitHeight())));
+    if (idealHeight <= 0 || m_window.m_nodeEditorPreferredHeight == idealHeight)
+    {
+        return;
+    }
+
+    m_window.m_nodeEditorPreferredHeight = idealHeight;
+    if (m_window.m_shellLayoutController)
+    {
+        m_window.m_shellLayoutController->setPreferredSizes(
+            m_window.m_audioPoolPreferredWidth,
+            m_window.m_timelinePreferredHeight,
+            m_window.m_nodeEditorPreferredHeight,
+            m_window.m_mixPreferredHeight);
+    }
+    m_window.syncShellPanelGeometry();
 }
 
 void PanelLayoutController::detachVideo()

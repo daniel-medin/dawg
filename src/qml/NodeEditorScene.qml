@@ -920,7 +920,7 @@ Rectangle {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.minimumHeight: 120
+                Layout.minimumHeight: 0
                 color: "#0b1016"
 
                 ColumnLayout {
@@ -2152,6 +2152,8 @@ Rectangle {
             }
         }
     }
+
+    implicitHeight: 40 + 24 + 28 + Math.max(0, lanesColumn.implicitHeight)
 
     Popup {
         id: menuPopup
