@@ -3,6 +3,7 @@
 .tools/vcpkg/
 b/
 build/
+vcpkg_installed/
 rel/
 rel2/
 out/
