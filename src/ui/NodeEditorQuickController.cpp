@@ -95,7 +95,6 @@ void NodeEditorQuickController::setState(
 
     const auto nextSelectedLaneId = [this, &nodeTracks]()
     {
-        QString firstLaneId;
         for (const auto& laneValue : nodeTracks)
         {
             const auto laneMap = laneValue.toMap();
@@ -104,16 +103,12 @@ void NodeEditorQuickController::setState(
             {
                 continue;
             }
-            if (firstLaneId.isEmpty())
-            {
-                firstLaneId = laneId;
-            }
             if (laneId == m_selectedLaneId)
             {
                 return m_selectedLaneId;
             }
         }
-        return firstLaneId;
+        return QString{};
     }();
     const auto nextSelectedClipId = [this, &nodeTracks, &nextSelectedLaneId]()
     {

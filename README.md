@@ -45,6 +45,8 @@ This is not intended to feel like a traditional DAW with lots of horizontal audi
 - drag node starts, ends, and full spans in the timeline
 - attach audio to nodes and trim a node to the sound length
 - edit node-local lanes in the Node Editor, where imported audio becomes audio clips on lanes instead of renaming the node container
+- drag and copy node-local clips with an inverted drag ghost, preserved source placement, and immediate placed-preview feedback
+- drag-select time ranges across one or more node-local lanes in the Node Editor with live lane and clip highlighting
 - preview Node Editor lane audio from the node-local playhead when the Node Editor is focused
 - save portable `.node` files with embedded node audio for reuse in other projects
 - auto-pan nodes from left to right screen position
@@ -97,6 +99,8 @@ Startup no longer depends on a debug-only local `.dev` bootstrap path. Project o
 Nodes are containers. A node can contain node-local lanes, and each lane can hold multiple audio clips. Importing audio into the Node Editor creates an audio clip on a lane and keeps the node name unchanged.
 
 The Node Editor timeline uses node-local time based on the selected node span. When the Node Editor has focus, playback previews the node lane contents from the node-local playhead without switching the normal project timeline transport model.
+
+Current Node Editor interaction polish includes clip drag ghosts, inline source-position feedback during drags, immediate drop previews, and box selection across multiple lanes.
 
 ## Build
 

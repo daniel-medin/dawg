@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <QApplication>
 #include <QColor>
 #include <QCoreApplication>
@@ -12,6 +14,7 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QRect>
+#include <QScreen>
 #include <QSettings>
 #include <QSize>
 #include <QStyleFactory>
@@ -27,6 +30,56 @@
 
 namespace
 {
+constexpr QSize kMinimumMainWindowFloor{800, 520};
+constexpr int kWindowScreenMargin = 16;
+
+QRect availableWindowBounds(QScreen* screen)
+{
+    const QRect availableGeometry = screen
+        ? screen->availableGeometry()
+        : QRect{0, 0, 1600, 900};
+    const QRect paddedBounds = availableGeometry.adjusted(
+        kWindowScreenMargin,
+        kWindowScreenMargin,
+        -kWindowScreenMargin,
+        -kWindowScreenMargin);
+    return paddedBounds.isValid() ? paddedBounds : availableGeometry;
+}
+
+QSize boundedWindowSize(const QSize& desiredSize, const QRect& bounds, const QSize& floorSize)
+{
+    const QSize maxSize = bounds.size();
+    return {
+        std::max(std::min(desiredSize.width(), maxSize.width()), std::min(floorSize.width(), maxSize.width())),
+        std::max(std::min(desiredSize.height(), maxSize.height()), std::min(floorSize.height(), maxSize.height()))
+    };
+}
+
+QRect clampWindowGeometryToBounds(QRect geometry, const QRect& bounds, const QSize& minimumSize)
+{
+    geometry.setSize(geometry.size().boundedTo(bounds.size()).expandedTo(minimumSize));
+
+    if (geometry.width() >= bounds.width())
+    {
+        geometry.moveLeft(bounds.left());
+    }
+    else
+    {
+        geometry.moveLeft(std::clamp(geometry.left(), bounds.left(), bounds.right() - geometry.width() + 1));
+    }
+
+    if (geometry.height() >= bounds.height())
+    {
+        geometry.moveTop(bounds.top());
+    }
+    else
+    {
+        geometry.moveTop(std::clamp(geometry.top(), bounds.top(), bounds.bottom() - geometry.height() + 1));
+    }
+
+    return geometry;
+}
+
 QString& runtimeLogPath()
 {
     static QString path;
@@ -230,21 +283,19 @@ int main(int argc, char* argv[])
         << "visible=" << window.isVisible()
         << "geometry=" << window.geometry()
         << "visibility=" << window.visibility();
-    if (!window.isMaximized()
-        && (window.width() < std::max(1000, window.minimumWidth())
-            || window.height() < std::max(700, window.minimumHeight())))
+    if (!window.isMaximized())
     {
-        const QSize targetSize{
-            std::max(1400, window.minimumWidth()),
-            std::max(900, window.minimumHeight())
-        };
-        window.resize(targetSize);
-        const QRect availableGeometry = window.screen()
-            ? window.screen()->availableGeometry()
-            : QRect{0, 0, 1600, 900};
-        QRect nextGeometry(window.position(), targetSize);
-        nextGeometry.moveCenter(availableGeometry.center());
-        window.setGeometry(nextGeometry);
+        const QRect bounds = availableWindowBounds(window.screen());
+        const QSize minimumWindowSize = boundedWindowSize(window.minimumSize(), bounds, kMinimumMainWindowFloor);
+        const QSize targetSize = (window.width() < std::max(1000, window.minimumWidth())
+                || window.height() < std::max(700, window.minimumHeight()))
+            ? boundedWindowSize(
+                QSize{std::max(1400, minimumWindowSize.width()), std::max(900, minimumWindowSize.height())},
+                bounds,
+                minimumWindowSize)
+            : boundedWindowSize(window.size(), bounds, minimumWindowSize);
+        window.setMinimumSize(minimumWindowSize);
+        window.setGeometry(clampWindowGeometryToBounds(QRect(window.position(), targetSize), bounds, minimumWindowSize));
     }
     window.requestActivate();
     qInfo().noquote()

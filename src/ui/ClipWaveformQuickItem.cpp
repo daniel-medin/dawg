@@ -4,7 +4,11 @@
 #include <cmath>
 #include <memory>
 
+#include <QDateTime>
+#include <QDir>
 #include <QCursor>
+#include <QFileInfo>
+#include <QHash>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QWheelEvent>
@@ -73,6 +77,15 @@ AudioClipPreviewState audioClipPreviewStateFromMap(const QVariantMap& map)
     state.hasAttachedAudio = map.value(QStringLiteral("hasAttachedAudio"), !state.assetPath.isEmpty()).toBool();
     state.loopEnabled = map.value(QStringLiteral("loopEnabled"), false).toBool();
     return state;
+}
+
+QString normalizedWaveformCacheKey(const QString& filePath)
+{
+    auto normalizedPath = QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(filePath).absoluteFilePath()));
+#if defined(Q_OS_WIN)
+    normalizedPath = normalizedPath.toLower();
+#endif
+    return normalizedPath;
 }
 }
 
@@ -564,10 +577,40 @@ void ClipWaveformQuickItem::loadWaveform(const QString& filePath)
     m_peaks.clear();
     m_waveformChannelCount = 0;
 
+    struct CachedWaveformData
+    {
+        QDateTime lastModifiedUtc;
+        qint64 size = -1;
+        std::vector<WaveformPeak> peaks;
+        int waveformChannelCount = 0;
+    };
+    static QHash<QString, CachedWaveformData> s_waveformCache;
+
+    const QFileInfo fileInfo(filePath);
+    const auto cacheKey = normalizedWaveformCacheKey(filePath);
+    const auto fileLastModifiedUtc = fileInfo.lastModified().toUTC();
+    const auto fileSize = fileInfo.exists() ? fileInfo.size() : -1;
+    if (const auto cachedIt = s_waveformCache.constFind(cacheKey);
+        cachedIt != s_waveformCache.cend()
+        && cachedIt->lastModifiedUtc == fileLastModifiedUtc
+        && cachedIt->size == fileSize)
+    {
+        m_peaks = cachedIt->peaks;
+        m_waveformChannelCount = cachedIt->waveformChannelCount;
+        return;
+    }
+
     auto reader = std::unique_ptr<juce::AudioFormatReader>(
         waveformFormatManager().createReaderFor(toJuceFile(filePath)));
     if (!reader || reader->lengthInSamples <= 0 || reader->numChannels <= 0)
     {
+        s_waveformCache.insert(
+            cacheKey,
+            CachedWaveformData{
+                .lastModifiedUtc = fileLastModifiedUtc,
+                .size = fileSize,
+                .peaks = {},
+                .waveformChannelCount = 0});
         return;
     }
 
@@ -617,6 +660,14 @@ void ClipWaveformQuickItem::loadWaveform(const QString& filePath)
             }
         }
     }
+
+    s_waveformCache.insert(
+        cacheKey,
+        CachedWaveformData{
+            .lastModifiedUtc = fileLastModifiedUtc,
+            .size = fileSize,
+            .peaks = m_peaks,
+            .waveformChannelCount = m_waveformChannelCount});
 }
 
 QRectF ClipWaveformQuickItem::waveformBounds() const

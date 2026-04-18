@@ -7,6 +7,18 @@ Item {
     visible: dialogController.visible
     implicitWidth: 480
     implicitHeight: contentColumn.implicitHeight + 28
+    clip: true
+
+    readonly property real overlayMargin: 16
+    readonly property real availableWidth: parent
+        ? Math.max(280, parent.width - overlayMargin * 2)
+        : implicitWidth
+    readonly property real availableHeight: parent
+        ? Math.max(180, parent.height - overlayMargin * 2)
+        : implicitHeight
+
+    width: Math.min(implicitWidth, availableWidth)
+    height: Math.min(implicitHeight, availableHeight)
 
     AppTheme {
         id: theme
@@ -50,51 +62,71 @@ Item {
                 wrapMode: Text.WordWrap
             }
 
-            Label {
+            ScrollView {
                 Layout.fillWidth: true
-                visible: !dialogController.inputMode && dialogController.message.length > 0
-                text: dialogController.message
-                color: "#dbe3ec"
-                font.pixelSize: 13
-                wrapMode: Text.WordWrap
-            }
+                Layout.fillHeight: true
+                Layout.minimumHeight: dialogController.inputMode ? 72 : 0
+                Layout.preferredHeight: bodyColumn.implicitHeight
+                clip: true
 
-            Label {
-                Layout.fillWidth: true
-                visible: !dialogController.inputMode && dialogController.informativeText.length > 0
-                text: dialogController.informativeText
-                color: theme.subtitleText
-                font.pixelSize: 12
-                wrapMode: Text.WordWrap
-            }
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-            Label {
-                Layout.fillWidth: true
-                visible: dialogController.inputMode
-                text: dialogController.inputLabel
-                color: "#dbe3ec"
-                font.pixelSize: 13
-            }
+                contentWidth: availableWidth
 
-                TextField {
-                    id: inputField
+                Column {
+                    id: bodyColumn
+                    width: root.width - 28
+                    spacing: 10
 
-                    Layout.fillWidth: true
-                    visible: dialogController.inputMode
-                text: dialogController.inputText
-                selectByMouse: true
-                onTextChanged: dialogController.inputText = text
-                onVisibleChanged: {
-                    if (visible) {
-                        forceActiveFocus()
-                        selectAll()
+                    Label {
+                        width: parent.width
+                        visible: !dialogController.inputMode && dialogController.message.length > 0
+                        text: dialogController.message
+                        color: "#dbe3ec"
+                        font.pixelSize: 13
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label {
+                        width: parent.width
+                        visible: !dialogController.inputMode && dialogController.informativeText.length > 0
+                        text: dialogController.informativeText
+                        color: theme.subtitleText
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label {
+                        width: parent.width
+                        visible: dialogController.inputMode
+                        text: dialogController.inputLabel
+                        color: "#dbe3ec"
+                        font.pixelSize: 13
+                        wrapMode: Text.WordWrap
+                    }
+
+                    TextField {
+                        id: inputField
+
+                        width: parent.width
+                        visible: dialogController.inputMode
+                        text: dialogController.inputText
+                        selectByMouse: true
+                        onTextChanged: dialogController.inputText = text
+                        onVisibleChanged: {
+                            if (visible) {
+                                forceActiveFocus()
+                                selectAll()
+                            }
+                        }
+                        onAccepted: dialogController.respond("ok", text)
                     }
                 }
-                onAccepted: dialogController.respond("ok", text)
             }
 
             RowLayout {
                 Layout.fillWidth: true
+                Layout.alignment: Qt.AlignBottom
                 spacing: 8
 
                 Item {

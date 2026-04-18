@@ -59,6 +59,21 @@
 - Be careful changing the main attached playback path; preserve visible playback first.
 - For current playback/debug checks, use the in-app debug overlay and `FPS Output`, not just source `Video FPS`.
 
+## Current Node Editor Focus
+
+- Recent Node Editor interaction work is centered in:
+  - `src/qml/NodeEditorScene.qml`
+  - `src/app/NodeDocument.cpp`
+  - `src/ui/ClipWaveformQuickItem.cpp`
+  - `src/ui/NodeEditorQuickController.cpp`
+- Preserve the current clip-drag affordances unless intentionally replacing them:
+  - inverted moving ghost
+  - visible source placement while dragging
+  - immediate placed preview on drop
+  - drag-follow playhead/video sync
+- Track highlight during timeline box selection should reflect the live lanes under the drag box. Do not reintroduce an always-on first-lane highlight or full-lane highlight clamping when the pointer leaves the lane stack.
+- Cross-lane clip drops still need deeper timing/instrumentation work. Prefer measuring the real post-drop hot path before adding more visual masking or extra state transitions.
+
 ## Documentation
 
 - If architecture or workflow changes materially, update `README.md`.

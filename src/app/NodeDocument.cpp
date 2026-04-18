@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include <QDir>
+#include <QHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -18,6 +19,175 @@ using dawg::node::Document;
 using dawg::node::AudioClipData;
 using dawg::node::LaneData;
 using dawg::node::NodeData;
+
+struct CachedNodeDocument
+{
+    QDateTime lastModifiedUtc;
+    qint64 fileSize = -1;
+    Document document;
+};
+
+QHash<QString, CachedNodeDocument>& nodeDocumentCache()
+{
+    static QHash<QString, CachedNodeDocument> cache;
+    return cache;
+}
+
+Qt::CaseSensitivity nodeDocumentPathCaseSensitivity()
+{
+#ifdef Q_OS_WIN
+    return Qt::CaseInsensitive;
+#else
+    return Qt::CaseSensitive;
+#endif
+}
+
+QString normalizedNodeDocumentCacheKey(const QString& nodeFilePath)
+{
+    const auto normalizedPath = QDir::cleanPath(QFileInfo(nodeFilePath).absoluteFilePath());
+    if (normalizedPath.isEmpty())
+    {
+        return {};
+    }
+
+    return nodeDocumentPathCaseSensitivity() == Qt::CaseInsensitive
+        ? normalizedPath.toCaseFolded()
+        : normalizedPath;
+}
+
+bool cachedNodeDocumentMatchesFile(const CachedNodeDocument& cachedDocument, const QFileInfo& fileInfo)
+{
+    return fileInfo.exists()
+        && cachedDocument.fileSize == fileInfo.size()
+        && cachedDocument.lastModifiedUtc == fileInfo.lastModified().toUTC();
+}
+
+void cacheNodeDocument(const QString& nodeFilePath, const QFileInfo& fileInfo, const Document& document)
+{
+    const auto cacheKey = normalizedNodeDocumentCacheKey(nodeFilePath);
+    if (cacheKey.isEmpty() || !fileInfo.exists())
+    {
+        return;
+    }
+
+    nodeDocumentCache().insert(
+        cacheKey,
+        CachedNodeDocument{
+            .lastModifiedUtc = fileInfo.lastModified().toUTC(),
+            .fileSize = fileInfo.size(),
+            .document = document});
+}
+
+bool pathIsInsideDirectory(const QString& candidatePath, const QString& directoryPath)
+{
+    const auto cleanCandidatePath = QDir::cleanPath(QFileInfo(candidatePath).absoluteFilePath());
+    auto cleanDirectoryPath = QDir::cleanPath(QFileInfo(directoryPath).absoluteFilePath());
+    if (cleanCandidatePath.isEmpty() || cleanDirectoryPath.isEmpty())
+    {
+        return false;
+    }
+
+    if (cleanCandidatePath.compare(cleanDirectoryPath, nodeDocumentPathCaseSensitivity()) == 0)
+    {
+        return true;
+    }
+
+    if (!cleanDirectoryPath.endsWith(QDir::separator()))
+    {
+        cleanDirectoryPath += QDir::separator();
+    }
+    return cleanCandidatePath.startsWith(cleanDirectoryPath, nodeDocumentPathCaseSensitivity());
+}
+
+std::optional<QString> relativeAssetPathForNodeDocument(const QString& nodeFilePath, const QString& assetPath)
+{
+    if (nodeFilePath.isEmpty() || assetPath.isEmpty())
+    {
+        return std::nullopt;
+    }
+
+    const QFileInfo nodeFileInfo(nodeFilePath);
+    const auto nodeDirectoryPath = nodeFileInfo.absolutePath();
+    if (nodeDirectoryPath.isEmpty())
+    {
+        return std::nullopt;
+    }
+
+    const auto cleanAssetPath = QDir::cleanPath(QFileInfo(assetPath).absoluteFilePath());
+    if (cleanAssetPath.isEmpty())
+    {
+        return std::nullopt;
+    }
+
+    const QDir nodeDirectory(nodeDirectoryPath);
+    if (pathIsInsideDirectory(cleanAssetPath, nodeDirectory.absolutePath()))
+    {
+        return QDir::cleanPath(nodeDirectory.relativeFilePath(cleanAssetPath));
+    }
+
+    if (nodeDirectory.dirName().compare(QStringLiteral("nodes"), nodeDocumentPathCaseSensitivity()) != 0)
+    {
+        return std::nullopt;
+    }
+
+    QDir projectRoot(nodeDirectory.absolutePath());
+    if (!projectRoot.cdUp())
+    {
+        return std::nullopt;
+    }
+
+    const auto projectAudioPath = projectRoot.filePath(QStringLiteral("audio"));
+    if (!pathIsInsideDirectory(cleanAssetPath, projectAudioPath))
+    {
+        return std::nullopt;
+    }
+
+    return QDir::cleanPath(nodeDirectory.relativeFilePath(cleanAssetPath));
+}
+
+QString resolvedNodeDocumentAssetPath(const QString& nodeFilePath, const QString& assetPath)
+{
+    if (assetPath.isEmpty())
+    {
+        return {};
+    }
+
+    if (QDir::isAbsolutePath(assetPath))
+    {
+        return QDir::cleanPath(assetPath);
+    }
+
+    const QFileInfo nodeFileInfo(nodeFilePath);
+    if (nodeFileInfo.absolutePath().isEmpty())
+    {
+        return QDir::cleanPath(assetPath);
+    }
+
+    return QDir::cleanPath(nodeFileInfo.absoluteDir().absoluteFilePath(assetPath));
+}
+
+void resolveDocumentAssetPaths(Document* document, const QString& nodeFilePath)
+{
+    if (!document)
+    {
+        return;
+    }
+
+    for (auto& lane : document->node.lanes)
+    {
+        for (auto& clip : lane.audioClips)
+        {
+            if (!clip.attachedAudio.has_value())
+            {
+                continue;
+            }
+
+            clip.attachedAudio->assetPath = resolvedNodeDocumentAssetPath(
+                nodeFilePath,
+                clip.attachedAudio->assetPath);
+        }
+    }
+}
 
 QJsonObject audioAttachmentToJson(
     const AudioAttachment& attachment,
@@ -247,9 +417,28 @@ QString nodeFileNameForName(const QString& nodeName)
 
 std::optional<Document> loadDocument(const QString& nodeFilePath, QString* errorMessage)
 {
+    const QFileInfo fileInfo(nodeFilePath);
+    const auto cacheKey = normalizedNodeDocumentCacheKey(nodeFilePath);
+    if (!cacheKey.isEmpty())
+    {
+        const auto cachedIt = nodeDocumentCache().constFind(cacheKey);
+        if (cachedIt != nodeDocumentCache().cend() && cachedNodeDocumentMatchesFile(cachedIt.value(), fileInfo))
+        {
+            if (errorMessage)
+            {
+                errorMessage->clear();
+            }
+            return cachedIt.value().document;
+        }
+    }
+
     QFile file(nodeFilePath);
     if (!file.open(QIODevice::ReadOnly))
     {
+        if (!cacheKey.isEmpty())
+        {
+            nodeDocumentCache().remove(cacheKey);
+        }
         if (errorMessage)
         {
             *errorMessage = QStringLiteral("Failed to open node file:\n%1").arg(nodeFilePath);
@@ -261,6 +450,10 @@ std::optional<Document> loadDocument(const QString& nodeFilePath, QString* error
     const auto document = QJsonDocument::fromJson(file.readAll(), &parseError);
     if (document.isNull() || !document.isObject())
     {
+        if (!cacheKey.isEmpty())
+        {
+            nodeDocumentCache().remove(cacheKey);
+        }
         if (errorMessage)
         {
             *errorMessage = QStringLiteral("Failed to parse node file:\n%1").arg(parseError.errorString());
@@ -270,44 +463,57 @@ std::optional<Document> loadDocument(const QString& nodeFilePath, QString* error
 
     const auto root = document.object();
     const auto schemaVersion = root.value(QStringLiteral("schemaVersion")).toInt(-1);
+    std::optional<Document> loadedDocument;
     if (schemaVersion == 1)
     {
-        return loadLegacyDocumentV1(root);
+        loadedDocument = loadLegacyDocumentV1(root);
     }
-    if (schemaVersion == 2)
+    else if (schemaVersion == 2)
     {
-        return loadLegacyDocumentV2(root);
+        loadedDocument = loadLegacyDocumentV2(root);
     }
-    if (schemaVersion != kSchemaVersion)
+    else
     {
-        if (errorMessage)
+        if (schemaVersion != kSchemaVersion)
         {
-            *errorMessage = QStringLiteral("Unsupported node file version.");
+            if (errorMessage)
+            {
+                *errorMessage = QStringLiteral("Unsupported node file version.");
+            }
+            return std::nullopt;
         }
+
+        const auto nodeObject = root.value(QStringLiteral("node")).toObject();
+        NodeData node;
+        node.label = nodeObject.value(QStringLiteral("label")).toString();
+        node.autoPanEnabled = nodeObject.value(QStringLiteral("autoPanEnabled")).toBool(true);
+        node.timelineFrameCount = nodeObject.value(QStringLiteral("timelineFrameCount")).toInt(0);
+        node.timelineFps = nodeObject.value(QStringLiteral("timelineFps")).toDouble(0.0);
+        const auto lanesArray = nodeObject.value(QStringLiteral("lanes")).toArray();
+        node.lanes.reserve(static_cast<std::size_t>(lanesArray.size()));
+        for (const auto& laneValue : lanesArray)
+        {
+            if (!laneValue.isObject())
+            {
+                continue;
+            }
+            node.lanes.push_back(laneFromJson(laneValue.toObject()));
+        }
+
+        loadedDocument = Document{
+            .name = root.value(QStringLiteral("name")).toString(),
+            .node = node
+        };
+    }
+
+    if (!loadedDocument.has_value())
+    {
         return std::nullopt;
     }
 
-    const auto nodeObject = root.value(QStringLiteral("node")).toObject();
-    NodeData node;
-    node.label = nodeObject.value(QStringLiteral("label")).toString();
-    node.autoPanEnabled = nodeObject.value(QStringLiteral("autoPanEnabled")).toBool(true);
-    node.timelineFrameCount = nodeObject.value(QStringLiteral("timelineFrameCount")).toInt(0);
-    node.timelineFps = nodeObject.value(QStringLiteral("timelineFps")).toDouble(0.0);
-    const auto lanesArray = nodeObject.value(QStringLiteral("lanes")).toArray();
-    node.lanes.reserve(static_cast<std::size_t>(lanesArray.size()));
-    for (const auto& laneValue : lanesArray)
-    {
-        if (!laneValue.isObject())
-        {
-            continue;
-        }
-        node.lanes.push_back(laneFromJson(laneValue.toObject()));
-    }
-
-    return Document{
-        .name = root.value(QStringLiteral("name")).toString(),
-        .node = node
-    };
+    resolveDocumentAssetPaths(&*loadedDocument, nodeFilePath);
+    cacheNodeDocument(nodeFilePath, fileInfo, *loadedDocument);
+    return loadedDocument;
 }
 
 bool saveDocument(const QString& nodeFilePath, const Document& document, QString* errorMessage)
@@ -326,12 +532,33 @@ bool saveDocument(const QString& nodeFilePath, const Document& document, QString
     QJsonArray lanesArray;
     for (const auto& lane : document.node.lanes)
     {
-        LaneData savedLane = lane;
-        for (auto& savedClip : savedLane.audioClips)
+        QJsonArray clipsArray;
+        for (const auto& clip : lane.audioClips)
         {
-            if (savedClip.attachedAudio.has_value() && savedClip.embeddedAudioData.isEmpty())
+            QJsonObject clipObject{
+                {QStringLiteral("id"), clip.id},
+                {QStringLiteral("label"), clip.label},
+                {QStringLiteral("laneOffsetMs"), clip.laneOffsetMs}
+            };
+            if (!clip.attachedAudio.has_value())
             {
-                const auto assetPath = savedClip.attachedAudio->assetPath;
+                clipsArray.append(clipObject);
+                continue;
+            }
+
+            auto savedAttachment = *clip.attachedAudio;
+            QString embeddedAudioFileName = clip.embeddedAudioFileName;
+            QByteArray embeddedAudioData = clip.embeddedAudioData;
+            const auto assetPath = savedAttachment.assetPath;
+            if (const auto relativeAssetPath = relativeAssetPathForNodeDocument(nodeFilePath, assetPath);
+                relativeAssetPath.has_value())
+            {
+                savedAttachment.assetPath = *relativeAssetPath;
+                embeddedAudioData.clear();
+                embeddedAudioFileName.clear();
+            }
+            else if (embeddedAudioData.isEmpty())
+            {
                 if (!assetPath.isEmpty())
                 {
                     QFile audioFile(assetPath);
@@ -343,12 +570,23 @@ bool saveDocument(const QString& nodeFilePath, const Document& document, QString
                         }
                         return false;
                     }
-                    savedClip.embeddedAudioData = audioFile.readAll();
-                    savedClip.embeddedAudioFileName = QFileInfo(assetPath).fileName();
+                    embeddedAudioData = audioFile.readAll();
+                    embeddedAudioFileName = QFileInfo(assetPath).fileName();
                 }
             }
+            clipObject.insert(
+                QStringLiteral("attachedAudio"),
+                audioAttachmentToJson(savedAttachment, embeddedAudioFileName, embeddedAudioData));
+            clipsArray.append(clipObject);
         }
-        lanesArray.append(laneToJson(savedLane));
+
+        lanesArray.append(QJsonObject{
+            {QStringLiteral("id"), lane.id},
+            {QStringLiteral("label"), lane.label},
+            {QStringLiteral("muted"), lane.muted},
+            {QStringLiteral("soloed"), lane.soloed},
+            {QStringLiteral("audioClips"), clipsArray}
+        });
     }
 
     QJsonObject nodeObject{
@@ -385,6 +623,9 @@ bool saveDocument(const QString& nodeFilePath, const Document& document, QString
         return false;
     }
 
+    auto resolvedSavedDocument = document;
+    resolveDocumentAssetPaths(&resolvedSavedDocument, nodeFilePath);
+    cacheNodeDocument(nodeFilePath, QFileInfo(nodeFilePath), resolvedSavedDocument);
     return true;
 }
 }
