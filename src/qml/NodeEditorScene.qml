@@ -118,6 +118,67 @@ Rectangle {
             Math.max(0.0, 1.0 - nextVisibleRatio))
     }
 
+    function wheelScrollPixels(wheel) {
+        if (wheel.pixelDelta.y !== 0)
+            return wheel.pixelDelta.y
+        if (wheel.angleDelta.y !== 0)
+            return (wheel.angleDelta.y / 120.0) * 40.0
+        if (wheel.pixelDelta.x !== 0)
+            return wheel.pixelDelta.x
+        if (wheel.angleDelta.x !== 0)
+            return (wheel.angleDelta.x / 120.0) * 40.0
+        return 0.0
+    }
+
+    function scrollTimelineHorizontally(scrollPixels, viewportWidth) {
+        if (!nodeEditorController.showTimeline || Math.abs(scrollPixels) < 0.001)
+            return false
+
+        var maxStart = Math.max(0.0, 1.0 - timelineVisibleRatio)
+        if (maxStart <= 0.0)
+            return false
+
+        timelineStartRatio = clamp(
+            timelineStartRatio - (scrollPixels / Math.max(1, viewportWidth)) * timelineVisibleRatio,
+            0.0,
+            maxStart)
+        return true
+    }
+
+    function scrollLanesVertically(scrollPixels) {
+        if (!lanesScroll || Math.abs(scrollPixels) < 0.001)
+            return false
+
+        var maxContentY = Math.max(0, lanesScroll.contentHeight - lanesScroll.height)
+        if (maxContentY <= 0)
+            return false
+
+        lanesScroll.contentY = clamp(lanesScroll.contentY - scrollPixels, 0, maxContentY)
+        return true
+    }
+
+    function handleTimelineWheel(wheel, viewportWidth) {
+        root.forceActiveFocus()
+
+        var zoomRequested = (wheel.modifiers & Qt.ControlModifier) !== 0
+        var horizontalRequested = (wheel.modifiers & Qt.ShiftModifier) !== 0
+        var angleDelta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
+        var scrollPixels = wheelScrollPixels(wheel)
+
+        if (zoomRequested) {
+            root.zoomTimelineAt(wheel.x, viewportWidth, angleDelta)
+            wheel.accepted = true
+            return
+        }
+
+        if (horizontalRequested && root.scrollTimelineHorizontally(scrollPixels, viewportWidth)) {
+            wheel.accepted = true
+            return
+        }
+
+        wheel.accepted = root.scrollLanesVertically(scrollPixels)
+    }
+
     function clipTrimEdgeAt(localX, clipWidth) {
         if (clipWidth <= 0)
             return 0
@@ -1038,23 +1099,31 @@ Rectangle {
                                 }
                             }
                             onWheel: function(wheel) {
-                                root.forceActiveFocus()
-                                var delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
-                                root.zoomTimelineAt(wheel.x, width, delta)
-                                wheel.accepted = true
+                                root.handleTimelineWheel(wheel, width)
                             }
                         }
                     }
 
-                    ScrollView {
+                    Flickable {
                         id: lanesScroll
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
                         contentWidth: root.timelineContentWidth(width)
                         contentHeight: lanesContent.height
-                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                        boundsMovement: Flickable.StopAtBounds
+                        boundsBehavior: Flickable.StopAtBounds
+                        flickableDirection: Flickable.VerticalFlick
+
+                        ScrollBar.horizontal: ScrollBar {
+                            policy: ScrollBar.AlwaysOff
+                        }
+
+                        ScrollBar.vertical: ScrollBar {
+                            policy: lanesScroll.contentHeight > lanesScroll.height + 0.5
+                                ? ScrollBar.AlwaysOn
+                                : ScrollBar.AlwaysOff
+                        }
 
                         Item {
                             id: lanesContent
@@ -1949,10 +2018,7 @@ Rectangle {
                                                         }
                                                     }
                                                     onWheel: function(wheel) {
-                                                        root.forceActiveFocus()
-                                                        var delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
-                                                        root.zoomTimelineAt(wheel.x, width, delta)
-                                                        wheel.accepted = true
+                                                        root.handleTimelineWheel(wheel, width)
                                                     }
                                                 }
 
